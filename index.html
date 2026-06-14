@@ -48,7 +48,7 @@ self.addEventListener('fetch',e=>{
 });`;
     try{
       const blob=new Blob([sw],{type:'application/javascript'});
-      navigator.serviceWorker.register(URL.createObjectURL(blob),{scope:'./'})
+      navigator.serviceWorker.register(URL.createObjectURL(blob),{scope:'/Forge-gym-app/'})
         .then(()=>console.log('FORGE: Service worker registered'))
         .catch(e=>console.warn('FORGE: SW not supported from local file -',e.message));
     }catch(e){console.warn('SW blob failed:',e);}
