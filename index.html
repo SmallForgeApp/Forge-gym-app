@@ -3,12 +3,59 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="theme-color" content="#0a0a0f">
+<meta name="theme-color" content="#0F1117">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FORGE">
+<meta name="mobile-web-app-capable" content="yes">
 <title>FORGE — Home Gym Tracker</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+function generateAppIcon(size){
+  const c=document.createElement('canvas');c.width=size;c.height=size;
+  const ctx=c.getContext('2d');
+  const r=size*0.2;
+  ctx.fillStyle='#0F1117';
+  ctx.beginPath();ctx.moveTo(r,0);ctx.lineTo(size-r,0);ctx.quadraticCurveTo(size,0,size,r);
+  ctx.lineTo(size,size-r);ctx.quadraticCurveTo(size,size,size-r,size);
+  ctx.lineTo(r,size);ctx.quadraticCurveTo(0,size,0,size-r);
+  ctx.lineTo(0,r);ctx.quadraticCurveTo(0,0,r,0);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#D7FF2F';
+  ctx.font='bold '+Math.round(size*0.52)+'px Arial Black,Arial,sans-serif';
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('F',size*0.5,size*0.44);
+  ctx.strokeStyle='#D7FF2F';ctx.lineWidth=size*0.06;ctx.lineCap='round';
+  const cy=size*0.78,bx1=size*0.2,bx2=size*0.8;
+  ctx.beginPath();ctx.moveTo(bx1,cy);ctx.lineTo(bx2,cy);ctx.stroke();
+  const plates=[[bx1,cy,size*0.05,size*0.14],[bx2,cy,size*0.05,size*0.14],
+    [bx1+size*0.08,cy,size*0.03,size*0.1],[bx2-size*0.08,cy,size*0.03,size*0.1]];
+  plates.forEach(([x,y,w,h])=>{ctx.fillRect(x-w/2,y-h/2,w,h);});
+  return c.toDataURL('image/png');
+}
+function setupPWA(){
+  if('serviceWorker' in navigator){
+    const sw=`const CACHE='forge-sw-v1';
+self.addEventListener('install',e=>{e.waitUntil(self.skipWaiting());});
+self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});
+self.addEventListener('fetch',e=>{
+  if(e.request.url.includes('fonts.goog')||e.request.url.includes('gstatic')){
+    e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(r=>r||(fetch(e.request).then(resp=>{c.put(e.request,resp.clone());return resp;})))));
+  }
+});`;
+    try{
+      const blob=new Blob([sw],{type:'application/javascript'});
+      navigator.serviceWorker.register(URL.createObjectURL(blob),{scope:'./'})
+        .then(()=>console.log('FORGE: Service worker registered'))
+        .catch(e=>console.warn('FORGE: SW not supported from local file -',e.message));
+    }catch(e){console.warn('SW blob failed:',e);}
+  }
+}
+document.addEventListener('DOMContentLoaded',setupPWA);
+</script>
 
 <style>
 :root{
