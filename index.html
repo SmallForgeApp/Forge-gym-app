@@ -1164,13 +1164,31 @@ function uiIcon(name, size, color){
   return map[name]||'';
 }
 
+// Superset colour palette
+const SS_COLORS=[
+  {bg:'#ff8c0022',border:'#ff8c0055',text:'#ff8c00'},
+  {bg:'#47c8ff22',border:'#47c8ff55',text:'#47c8ff'},
+  {bg:'#cc44ff22',border:'#cc44ff55',text:'#cc44ff'},
+  {bg:'#2ed57322',border:'#2ed57355',text:'#2ed573'},
+  {bg:'#ff475722',border:'#ff475755',text:'#ff4757'},
+];
+const ssColorMap={};
+function getSupersetColor(gid){
+  if(!ssColorMap[gid]){const used=Object.keys(ssColorMap).length;ssColorMap[gid]=SS_COLORS[used%SS_COLORS.length];}
+  return ssColorMap[gid];
+}
+let editingRoutineIdx=null;
+let editingRoutineExIds=[];
+const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.appdata';
+const DRIVE_FILENAME='forge-backup.json';
+let gAccessToken=null;
+let gTokenClient=null;
+let gDriveFileId=null;
 load();initNavs();buildTimerPresets();buildEquipGrid();buildWarmupList();buildPlateInventoryUI();
 document.getElementById('barbell-weight-input').value=state.barbellWeight||20;
 document.getElementById('theme-btn').textContent=state.lightMode?'☀️':'🌙';
 
 // ── ROUTINE EDITOR ──
-let editingRoutineIdx=null;
-let editingRoutineExIds=[];
 
 function openEditRoutineModal(){
   if(viewingRoutineIdx===null)return;
@@ -1529,29 +1547,32 @@ function handleCardClick(e,i){if(e.target.closest('[onclick*="toggleDropdown"]')
 
 function toggleDropdown(e,i){
   e.stopPropagation();
-  const wasOpen=document.getElementById('rdrop-'+i).classList.contains('open');
+  const drop=document.getElementById('rdrop-'+i);
+  const wasOpen=drop.classList.contains('open');
   closeAllDropdowns();
   if(wasOpen)return;
   const btn=e.currentTarget;
   const rect=btn.getBoundingClientRect();
-  const drop=document.getElementById('rdrop-'+i);
-  drop.style.display='block';
-  // Position below the button, aligned right
   const dropW=200;
   let left=rect.right-dropW;
   if(left<8)left=8;
-  let top=rect.bottom+6;
-  // If it would go off bottom, show above
-  const dropH=drop.offsetHeight||220;
-  if(top+dropH>window.innerHeight-10)top=rect.top-dropH-6;
   drop.style.left=left+'px';
-  drop.style.top=top+'px';
+  drop.style.top=(rect.bottom+6)+'px';
   drop.style.width=dropW+'px';
   drop.classList.add('open');
-  // Close on outside tap
-  setTimeout(()=>document.addEventListener('click',closeAllDropdowns,{once:true}),10);
+  requestAnimationFrame(()=>{
+    const dh=drop.offsetHeight;
+    const top=parseFloat(drop.style.top);
+    if(top+dh>window.innerHeight-10)drop.style.top=(rect.top-dh-6)+'px';
+  });
+  const outsideClose=(ev)=>{
+    if(!drop.contains(ev.target)){
+      closeAllDropdowns();
+      document.removeEventListener('click',outsideClose,true);
+    }
+  };
+  setTimeout(()=>document.addEventListener('click',outsideClose,true),50);
 }
-
 function closeAllDropdowns(){document.querySelectorAll('.r-dropdown.open').forEach(d=>d.classList.remove('open'));}
 
 // ── DRAG TO REORDER ROUTINES ──
@@ -1682,29 +1703,22 @@ function startRoutineWorkout(i){
 }
 function startEmptyWorkout(){beginWorkout('Workout',[],null,[]);}
 function beginWorkout(name,exercises,srcId,origIds){
-  activeWorkout={name,startTime:Date.now(),exercises,sourceRoutineId:srcId||null,originalExerciseIds:origIds||[],notes:''};
-  document.getElementById('active-workout-name').value=name;
-  document.getElementById('workout-notes').value='';
-  renderActiveWorkout();
-  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
-  document.getElementById('screen-workout').classList.add('active');
-  startWorkoutClock();
+  try{
+    activeWorkout={name,startTime:Date.now(),exercises,sourceRoutineId:srcId||null,originalExerciseIds:origIds||[],notes:''};
+    document.getElementById('active-workout-name').value=name;
+    document.getElementById('workout-notes').value='';
+    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+    document.getElementById('screen-workout').classList.add('active');
+    try{renderActiveWorkout();}catch(err){
+      document.getElementById('exercises-container').innerHTML='<div style="padding:20px;color:#ff4757;font-size:14px;background:#1a1d24;border-radius:10px;margin:16px">⚠️ Render error: '+err.message+'<br><pre style="font-size:11px;margin-top:8px;white-space:pre-wrap">'+err.stack+'</pre></div>';
+    }
+    startWorkoutClock();
+  }catch(err){
+    alert('FORGE error starting workout:\n'+err.message+'\n\nLine: '+(err.stack||'').split('\n')[1]);
+  }
 }
 
 // ── ACTIVE WORKOUT RENDER ──
-// Superset colour palette
-const SS_COLORS=[
-  {bg:'#ff8c0022',border:'#ff8c0055',text:'#ff8c00'},
-  {bg:'#47c8ff22',border:'#47c8ff55',text:'#47c8ff'},
-  {bg:'#cc44ff22',border:'#cc44ff55',text:'#cc44ff'},
-  {bg:'#2ed57322',border:'#2ed57355',text:'#2ed573'},
-  {bg:'#ff475722',border:'#ff475755',text:'#ff4757'},
-];
-const ssColorMap={};
-function getSupersetColor(gid){
-  if(!ssColorMap[gid]){const used=Object.keys(ssColorMap).length;ssColorMap[gid]=SS_COLORS[used%SS_COLORS.length];}
-  return ssColorMap[gid];
-}
 function renderActiveWorkout(){
   const c=document.getElementById('exercises-container');c.innerHTML='<div style="height:8px"></div>';
   // Reset colour map each render
@@ -2532,11 +2546,7 @@ function importBackup(file){
 // ============================================================
 // GOOGLE DRIVE SYNC
 // ============================================================
-const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.appdata';
-const DRIVE_FILENAME='forge-backup.json';
-let gAccessToken=null;
-let gTokenClient=null;
-let gDriveFileId=null;
+
 
 function getGoogleClientId(){return localStorage.getItem('forge_google_client_id')||'';}
 function saveGoogleClientId(){
