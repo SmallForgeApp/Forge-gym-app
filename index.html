@@ -36,19 +36,20 @@ function generateAppIcon(size){
   plates.forEach(([x,y,w,h])=>{ctx.fillRect(x-w/2,y-h/2,w,h);});
   return c.toDataURL('image/png');
 }
-// NOTE: Service worker intentionally removed.
-// A blob-based SW with an incomplete fetch handler was intercepting
-// in-app navigations/requests inside the installed PWA shell and
-// causing a black screen on screen transitions (e.g. starting a workout).
-// Unregister any previously-installed SW from earlier versions of this app.
+// Minimal service worker — required by Chrome's installability criteria.
+// IMPORTANT: this SW does NOT listen to 'fetch' at all, so it cannot
+// intercept or break any in-app navigation/requests (this was the root
+// cause of the earlier black-screen bug). It exists purely so Chrome
+// shows the "Install App" prompt.
 function setupPWA(){
   if('serviceWorker' in navigator){
-    navigator.serviceWorker.getRegistrations().then(regs=>{
-      regs.forEach(reg=>{
-        console.log('FORGE: unregistering stale service worker',reg.scope);
-        reg.unregister();
-      });
-    }).catch(()=>{});
+    const sw="self.addEventListener('install',e=>{self.skipWaiting();});self.addEventListener('activate',e=>{self.clients.claim();});";
+    try{
+      const blob=new Blob([sw],{type:'application/javascript'});
+      navigator.serviceWorker.register(URL.createObjectURL(blob),{scope:'/Forge-gym-app/'})
+        .then(()=>console.log('FORGE: minimal SW registered (no fetch handler)'))
+        .catch(()=>{});
+    }catch(e){}
   }
 }
 document.addEventListener('DOMContentLoaded',setupPWA);
