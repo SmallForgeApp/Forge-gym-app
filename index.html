@@ -36,22 +36,19 @@ function generateAppIcon(size){
   plates.forEach(([x,y,w,h])=>{ctx.fillRect(x-w/2,y-h/2,w,h);});
   return c.toDataURL('image/png');
 }
+// NOTE: Service worker intentionally removed.
+// A blob-based SW with an incomplete fetch handler was intercepting
+// in-app navigations/requests inside the installed PWA shell and
+// causing a black screen on screen transitions (e.g. starting a workout).
+// Unregister any previously-installed SW from earlier versions of this app.
 function setupPWA(){
-  if('serviceWorker' in navigator && location.protocol==='https:'){
-    const sw=`const CACHE='forge-sw-v1';
-self.addEventListener('install',e=>{e.waitUntil(self.skipWaiting());});
-self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});
-self.addEventListener('fetch',e=>{
-  if(e.request.url.includes('fonts.goog')||e.request.url.includes('gstatic')){
-    e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(r=>r||(fetch(e.request).then(resp=>{c.put(e.request,resp.clone());return resp;})))));
-  }
-});`;
-    try{
-      const blob=new Blob([sw],{type:'application/javascript'});
-      navigator.serviceWorker.register(URL.createObjectURL(blob),{scope:'/Forge-gym-app/'})
-        .then(()=>console.log('FORGE: Service worker registered'))
-        .catch(()=>{});
-    }catch(e){}
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.getRegistrations().then(regs=>{
+      regs.forEach(reg=>{
+        console.log('FORGE: unregistering stale service worker',reg.scope);
+        reg.unregister();
+      });
+    }).catch(()=>{});
   }
 }
 document.addEventListener('DOMContentLoaded',setupPWA);
