@@ -992,13 +992,22 @@ function initNavs(){
 }
 function updateNavActive(tab){document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.getAttribute('data-tab')===tab));}
 function switchTab(tab){
-  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
-  document.getElementById('screen-'+tab).classList.add('active');
-  updateNavActive(tab);
-  if(tab==='exercises')renderExerciseDB();
-  if(tab==='history')renderHistory();
-  if(tab==='review')renderReview();
-  if(tab==='settings'){updateSettingsEquipSummary();buildPlateInventoryUI();initGoogleSync();}
+  try{
+    const target=document.getElementById('screen-'+tab);
+    if(!target){
+      document.body.insertAdjacentHTML('afterbegin','<div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:red;color:#fff;padding:20px;font-size:14px">switchTab ERROR: no element with id screen-'+tab+'</div>');
+      return;
+    }
+    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+    target.classList.add('active');
+    updateNavActive(tab);
+    if(tab==='exercises')renderExerciseDB();
+    if(tab==='history')renderHistory();
+    if(tab==='review')renderReview();
+    if(tab==='settings'){updateSettingsEquipSummary();buildPlateInventoryUI();initGoogleSync();}
+  }catch(err){
+    document.body.insertAdjacentHTML('afterbegin','<div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:red;color:#fff;padding:20px;font-size:13px;white-space:pre-wrap;max-height:80vh;overflow:auto">switchTab CRASH: '+err.message+'\n\n'+(err.stack||'')+'</div>');
+  }
 }
 function toggleTheme(){
   state.lightMode=!state.lightMode;save();
