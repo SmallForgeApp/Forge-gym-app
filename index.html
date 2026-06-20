@@ -3,57 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="theme-color" content="#0F1117">
+<meta name="theme-color" content="#0a0a0f">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="FORGE">
-<meta name="mobile-web-app-capable" content="yes">
 <title>FORGE — Home Gym Tracker</title>
-<link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script>
-function generateAppIcon(size){
-  const c=document.createElement('canvas');c.width=size;c.height=size;
-  const ctx=c.getContext('2d');
-  const r=size*0.2;
-  ctx.fillStyle='#0F1117';
-  ctx.beginPath();ctx.moveTo(r,0);ctx.lineTo(size-r,0);ctx.quadraticCurveTo(size,0,size,r);
-  ctx.lineTo(size,size-r);ctx.quadraticCurveTo(size,size,size-r,size);
-  ctx.lineTo(r,size);ctx.quadraticCurveTo(0,size,0,size-r);
-  ctx.lineTo(0,r);ctx.quadraticCurveTo(0,0,r,0);ctx.closePath();ctx.fill();
-  ctx.fillStyle='#D7FF2F';
-  ctx.font='bold '+Math.round(size*0.52)+'px Arial Black,Arial,sans-serif';
-  ctx.textAlign='center';ctx.textBaseline='middle';
-  ctx.fillText('F',size*0.5,size*0.44);
-  ctx.strokeStyle='#D7FF2F';ctx.lineWidth=size*0.06;ctx.lineCap='round';
-  const cy=size*0.78,bx1=size*0.2,bx2=size*0.8;
-  ctx.beginPath();ctx.moveTo(bx1,cy);ctx.lineTo(bx2,cy);ctx.stroke();
-  const plates=[[bx1,cy,size*0.05,size*0.14],[bx2,cy,size*0.05,size*0.14],
-    [bx1+size*0.08,cy,size*0.03,size*0.1],[bx2-size*0.08,cy,size*0.03,size*0.1]];
-  plates.forEach(([x,y,w,h])=>{ctx.fillRect(x-w/2,y-h/2,w,h);});
-  return c.toDataURL('image/png');
-}
-// Minimal service worker — required by Chrome's installability criteria.
-// IMPORTANT: this SW does NOT listen to 'fetch' at all, so it cannot
-// intercept or break any in-app navigation/requests (this was the root
-// cause of the earlier black-screen bug). It exists purely so Chrome
-// shows the "Install App" prompt.
-function setupPWA(){
-  if('serviceWorker' in navigator){
-    const sw="self.addEventListener('install',e=>{self.skipWaiting();});self.addEventListener('activate',e=>{self.clients.claim();});";
-    try{
-      const blob=new Blob([sw],{type:'application/javascript'});
-      navigator.serviceWorker.register(URL.createObjectURL(blob),{scope:'/Forge-gym-app/'})
-        .then(()=>console.log('FORGE: minimal SW registered (no fetch handler)'))
-        .catch(()=>{});
-    }catch(e){}
-  }
-}
-document.addEventListener('DOMContentLoaded',setupPWA);
-</script>
 
 <style>
 :root{
@@ -121,10 +76,27 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .r-dropdown-item{padding:13px 16px;font-size:14px;font-weight:500;cursor:pointer;transition:background 0.1s;display:flex;align-items:center;gap:10px;}
 .r-dropdown-item:active{background:var(--bg4);}
 .r-dropdown-item.danger{color:var(--red);}
-.drag-handle{opacity:0.4;user-select:none;}
-.drag-handle:active{opacity:0.9;cursor:grabbing;}
-.routine-dragging{opacity:0.4;transform:scale(0.98);}
-.routine-drag-over{border-top:2px solid var(--accent)!important;}
+/* TIGHT ROUTINE LIST */
+.tight-row{display:flex;align-items:center;gap:0;background:var(--bg2);border-bottom:1px solid var(--border);position:relative;min-height:52px;}
+.tight-row:last-child{border-bottom:none;}
+.tight-row:active{background:var(--bg3);}
+.tight-row.next-up{background:linear-gradient(90deg,var(--accent)14,transparent 60%);}
+.tight-accent{width:4px;align-self:stretch;flex-shrink:0;}
+.tight-num{width:24px;text-align:center;font-size:11px;color:var(--text3);font-weight:700;flex-shrink:0;}
+.tight-icon{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin:0 8px;}
+.tight-name{font-weight:600;font-size:14px;color:var(--text);line-height:1.2;}
+.tight-meta{font-size:11px;color:var(--text3);margin-top:1px;}
+.tight-badge{font-size:9px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;background:var(--accent);color:#0F1117;padding:2px 7px;border-radius:6px;margin-left:6px;}
+.tight-drag{padding:6px 4px;cursor:grab;color:var(--text3);font-size:16px;line-height:1;touch-action:none;flex-shrink:0;}
+.tight-dots{width:30px;height:30px;border-radius:8px;border:none;background:transparent;color:var(--text2);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-right:4px;}
+/* MESOCYCLE CARDS */
+.meso-card{background:var(--bg2);border-radius:var(--radius);margin:0 16px 12px;padding:16px;border:1px solid var(--border);box-shadow:var(--shadow);cursor:pointer;}
+.meso-card:active{background:var(--bg3);}
+.meso-title{font-weight:700;font-size:16px;color:var(--text);}
+.meso-sub{font-size:12px;color:var(--text2);margin-top:2px;}
+.meso-progress-track{height:6px;background:var(--bg4);border-radius:3px;overflow:hidden;margin-top:10px;}
+.meso-progress-fill{height:100%;background:var(--accent);border-radius:3px;}
+.meso-next-row{display:flex;align-items:center;gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);}
 /* TODAY CARD */
 .today-card{background:var(--bg2);border-radius:var(--radius);margin:0 16px 16px;padding:20px;box-shadow:0 0 0 1px var(--accent)44,0 8px 32px rgba(215,255,47,0.12);position:relative;overflow:hidden;}
 .today-label{font-size:11px;font-weight:700;letter-spacing:1.5px;color:var(--accent);text-transform:uppercase;margin-bottom:10px;}
@@ -307,7 +279,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div style="display:flex;align-items:flex-start;justify-content:space-between;">
       <div>
         <div style="font-family:'Bebas Neue',sans-serif;font-size:36px;letter-spacing:3px;color:var(--accent);line-height:1;">FORGE</div>
-        <div style="font-size:13px;color:var(--text2);margin-top:4px;" id="home-subtitle">Build Consistently. Get Stronger.</div>
+        <div style="font-size:13px;color:var(--text2);margin-top:4px;" id="home-subtitle">All Routines</div>
       </div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
         <button class="icon-btn" onclick="openWarmupModal()">🔥</button>
@@ -317,15 +289,11 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     </div>
   </div>
   <div class="scroll pb">
-    <div class="stats-strip" id="home-stats"></div>
-    <div id="today-recommended"></div>
-    <div style="padding:0 16px 10px;">
+    <div id="active-meso-hero"></div>
+    <div style="padding:12px 16px 8px;">
       <button class="btn btn-ghost btn-full" onclick="startEmptyWorkout()" style="border-style:dashed;font-size:13px;border-radius:var(--radius);">⚡ Start Empty Workout</button>
     </div>
-    <div class="sec-hdr">
-      <span class="sec-hdr-title">All Routines</span>
-      <span class="sec-hdr-sub">Tap to view</span>
-    </div>
+    <div class="sec-hdr"><span class="sec-hdr-title">All Routines</span></div>
     <div id="routines-list"></div>
     <div class="sec-hdr"><span class="sec-hdr-title">Quick Access</span></div>
     <div class="qs-grid">
@@ -334,7 +302,18 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <div class="qs-card" onclick="switchTab('settings')"><div class="qs-icon">⚙️</div><div class="qs-label">Settings</div></div>
     </div>
   </div>
-  <div class="bottom-nav" id="nav-routines"><div class="nav-item" data-tab="routines" onclick="switchTab('routines')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Routines</div><div class="nav-item" data-tab="history" onclick="switchTab('history')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>History</div><div class="nav-item" data-tab="exercises" onclick="switchTab('exercises')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 5v14M18 5v14M2 9h4M18 9h4M2 15h4M18 15h4"/></svg>Exercises</div><div class="nav-item" data-tab="review" onclick="switchTab('review')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 4-8"/></svg>Review</div><div class="nav-item" data-tab="settings" onclick="switchTab('settings')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>Settings</div></div>
+  <div class="bottom-nav" id="nav-routines"></div>
+</div>
+
+<!-- MESOCYCLES -->
+<div class="screen" id="screen-mesocycles">
+  <div class="topbar">
+    <div><div class="topbar-title">Mesocycles</div><div class="topbar-sub">Your training sequences</div></div>
+    <button class="fab" style="width:44px;height:44px;font-size:22px" onclick="openNewMesocycleModal()">＋</button>
+  </div>
+  <div class="scroll pb" id="mesocycles-list"></div>
+  <div class="bottom-nav" id="nav-mesocycles"></div>
+</div>
 
 
 <!-- ACTIVE WORKOUT -->
@@ -375,11 +354,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <button class="icon-btn" onclick="exportHistory()" title="Export CSV">📤</button>
   </div>
   <div class="scroll pb" id="history-list"></div>
-  <div class="bottom-nav"><div class="nav-item" data-tab="routines" onclick="switchTab('routines')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Routines</div>
-<div class="nav-item" data-tab="history" onclick="switchTab('history')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>History</div>
-<div class="nav-item" data-tab="exercises" onclick="switchTab('exercises')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 5v14M18 5v14M2 9h4M18 9h4M2 15h4M18 15h4"/></svg>Exercises</div>
-<div class="nav-item" data-tab="review" onclick="switchTab('review')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 4-8"/></svg>Review</div>
-<div class="nav-item" data-tab="settings" onclick="switchTab('settings')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>Settings</div></div>
+  <div class="bottom-nav" id="nav-history"></div>
 </div>
 
 <!-- EXERCISES -->
@@ -406,22 +381,14 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <span style="font-size:12px;color:var(--accent);font-weight:600">🏠 My equipment only</span>
   </div>
   <div class="scroll pb" id="exercise-db-list"></div>
-  <div class="bottom-nav"><div class="nav-item" data-tab="routines" onclick="switchTab('routines')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Routines</div>
-<div class="nav-item" data-tab="history" onclick="switchTab('history')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>History</div>
-<div class="nav-item" data-tab="exercises" onclick="switchTab('exercises')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 5v14M18 5v14M2 9h4M18 9h4M2 15h4M18 15h4"/></svg>Exercises</div>
-<div class="nav-item" data-tab="review" onclick="switchTab('review')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 4-8"/></svg>Review</div>
-<div class="nav-item" data-tab="settings" onclick="switchTab('settings')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>Settings</div></div>
+  <div class="bottom-nav" id="nav-exercises"></div>
 </div>
 
 <!-- REVIEW -->
 <div class="screen" id="screen-review">
   <div class="topbar"><div><div class="topbar-title">Review</div><div class="topbar-sub">Muscle balance &amp; insights</div></div></div>
   <div class="scroll pb" id="review-content"></div>
-  <div class="bottom-nav"><div class="nav-item" data-tab="routines" onclick="switchTab('routines')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Routines</div>
-<div class="nav-item" data-tab="history" onclick="switchTab('history')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>History</div>
-<div class="nav-item" data-tab="exercises" onclick="switchTab('exercises')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 5v14M18 5v14M2 9h4M18 9h4M2 15h4M18 15h4"/></svg>Exercises</div>
-<div class="nav-item" data-tab="review" onclick="switchTab('review')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 4-8"/></svg>Review</div>
-<div class="nav-item" data-tab="settings" onclick="switchTab('settings')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>Settings</div></div>
+  <div class="bottom-nav" id="nav-review"></div>
 </div>
 
 <!-- SETTINGS -->
@@ -502,11 +469,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-danger flex-1" onclick="resetAllData()">⚠️ Reset All</button>
     </div>
   </div>
-  <div class="bottom-nav"><div class="nav-item" data-tab="routines" onclick="switchTab('routines')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Routines</div>
-<div class="nav-item" data-tab="history" onclick="switchTab('history')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>History</div>
-<div class="nav-item" data-tab="exercises" onclick="switchTab('exercises')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 5v14M18 5v14M2 9h4M18 9h4M2 15h4M18 15h4"/></svg>Exercises</div>
-<div class="nav-item" data-tab="review" onclick="switchTab('review')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 4-8"/></svg>Review</div>
-<div class="nav-item" data-tab="settings" onclick="switchTab('settings')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>Settings</div></div>
+  <div class="bottom-nav" id="nav-settings"></div>
 </div>
 
 <!-- MODALS -->
@@ -742,31 +705,69 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
   </div>
 </div>
 
-<script>
-// ── GLOBAL ERROR CATCHER — shows ANY uncaught error visibly ──
-window.addEventListener('error', function(e){
-  console.error('GLOBAL ERROR:', e.message, e.filename, e.lineno, e.colno, e.error);
-  let box = document.getElementById('forge-global-error-box');
-  if(!box){
-    box = document.createElement('div');
-    box.id = 'forge-global-error-box';
-    box.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#1a1d24;border-bottom:3px solid #ff4757;padding:16px;color:#ff4757;font-family:monospace;font-size:12px;max-height:60vh;overflow-y:auto;white-space:pre-wrap;';
-    document.body.appendChild(box);
-  }
-  box.innerHTML += '<div style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #444">⚠️ ' + e.message + '<br>Line: ' + e.lineno + ' Col: ' + e.colno + '<br>' + (e.error && e.error.stack ? e.error.stack : '') + '</div>';
-});
-window.addEventListener('unhandledrejection', function(e){
-  console.error('UNHANDLED PROMISE REJECTION:', e.reason);
-  let box = document.getElementById('forge-global-error-box');
-  if(!box){
-    box = document.createElement('div');
-    box.id = 'forge-global-error-box';
-    box.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#1a1d24;border-bottom:3px solid #ff4757;padding:16px;color:#ff4757;font-family:monospace;font-size:12px;max-height:60vh;overflow-y:auto;white-space:pre-wrap;';
-    document.body.appendChild(box);
-  }
-  box.innerHTML += '<div style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #444">⚠️ Promise rejection: ' + (e.reason && e.reason.message ? e.reason.message : e.reason) + '</div>';
-});
+<!-- Generic Confirm Modal (replaces native confirm() which can be blocked in installed PWAs) -->
+<div class="modal-overlay" id="modal-confirm">
+  <div class="modal"><div class="modal-handle"></div>
+    <div class="modal-title" id="confirm-title">Are you sure?</div>
+    <div class="modal-body"><div id="confirm-message" class="small text2" style="line-height:1.6"></div></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost flex-1" id="confirm-cancel-btn">Cancel</button>
+      <button class="btn btn-danger flex-1" id="confirm-ok-btn">Confirm</button>
+    </div>
+  </div>
+</div>
 
+<!-- New Mesocycle -->
+<div class="modal-overlay" id="modal-new-mesocycle">
+  <div class="modal"><div class="modal-handle"></div><div class="modal-title">New Mesocycle</div>
+    <div class="modal-body">
+      <div class="input-label">Name</div>
+      <input id="new-meso-name" placeholder="e.g. Push Pull Legs"/>
+      <div class="small text2 mt12" style="line-height:1.6">You'll add routines to it next, in the order you want to work through them.</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost flex-1" onclick="closeModal('modal-new-mesocycle')">Cancel</button>
+      <button class="btn btn-primary flex-1" onclick="saveNewMesocycle()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Mesocycle Detail -->
+<div class="modal-overlay" id="modal-mesocycle-detail">
+  <div class="modal"><div class="modal-handle"></div>
+    <div class="modal-title" id="meso-detail-title">Mesocycle</div>
+    <div class="modal-body">
+      <div id="meso-detail-body"></div>
+      <button class="btn btn-ghost btn-full mt12" onclick="openAddRoutineToActiveMeso()">＋ Add Routine to This Mesocycle</button>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost flex-1" onclick="closeModal('modal-mesocycle-detail')">Close</button>
+      <button class="btn btn-primary flex-1" id="meso-start-btn">▶ Start Next</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Routine to Mesocycle -->
+<div class="modal-overlay" id="modal-add-routine-meso">
+  <div class="modal"><div class="modal-handle"></div><div class="modal-title">Add to Mesocycle</div>
+    <div class="modal-body" id="add-routine-meso-list"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-full" onclick="closeModal('modal-add-routine-meso')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Pick a routine to add to the currently-open mesocycle -->
+<div class="modal-overlay" id="modal-pick-routine-for-meso">
+  <div class="modal"><div class="modal-handle"></div><div class="modal-title">Add Routine</div>
+    <div class="modal-body" id="pick-routine-for-meso-list"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-full" onclick="closeModal('modal-pick-routine-for-meso')">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
 // ============================================================
 // CONSTANTS
 // ============================================================
@@ -914,8 +915,9 @@ const DEFAULT_ROUTINES=[
 ];
 
 // ── STATE ──
-let state={exercises:[],routines:[],history:[],equipment:null,barbellWeight:20,plates:{},warmupDone:{},bodyWeights:[],exDbSort:'muscle',addExSort:'muscle',filterByEquip:true,addExFilterEquip:true,lightMode:false};
+let state={exercises:[],routines:[],history:[],mesocycles:[],equipment:null,barbellWeight:20,plates:{},warmupDone:{},bodyWeights:[],exDbSort:'muscle',addExSort:'muscle',filterByEquip:true,addExFilterEquip:true,lightMode:false};
 let activeWorkout=null,workoutTimer=null,restTimer=null,restRemaining=0;
+let activeMesoContext=null;
 let editingNoteExId=null,editingSetTypeInfo=null,pendingSetType=null,fromWorkout=false,editingExId=null,viewingRoutineIdx=null;
 let progressExId=null,chartMetric='weight';
 
@@ -929,6 +931,7 @@ function load(){
   if(!state.routines||!state.routines.length)state.routines=DEFAULT_ROUTINES.map(r=>({...r}));
   if(!state.plates||!Object.keys(state.plates).length){const p={};DEFAULT_PLATES.forEach(kg=>{p[kg]=4;});state.plates=p;}
   if(!state.bodyWeights)state.bodyWeights=[];
+  if(!state.mesocycles)state.mesocycles=[];
   if(state.lightMode)document.body.classList.add('light-mode');
 }
 
@@ -983,32 +986,23 @@ function showPRToast(name){
 }
 
 // ── NAV ──
-const NAV_HTML='<div class="nav-item" data-tab="routines" onclick="switchTab(\'routines\')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Routines</div><div class="nav-item" data-tab="history" onclick="switchTab(\'history\')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>History</div><div class="nav-item" data-tab="exercises" onclick="switchTab(\'exercises\')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 5v14M18 5v14M2 9h4M18 9h4M2 15h4M18 15h4"/></svg>Exercises</div><div class="nav-item" data-tab="review" onclick="switchTab(\'review\')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 4-8"/></svg>Review</div><div class="nav-item" data-tab="settings" onclick="switchTab(\'settings\')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>Settings</div>';
-function initNavs(){
-  ['routines','history','exercises','review','settings'].forEach(tab=>{
-    const el=document.getElementById('nav-'+tab);
-    if(el)el.innerHTML=NAV_HTML;
-  });
-  updateNavActive('routines');
-}
+const NAV_HTML='<div class="nav-item" data-tab="routines" onclick="switchTab(\'routines\')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Routines</div>'
++'<div class="nav-item" data-tab="mesocycles" onclick="switchTab(\'mesocycles\')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 3v6h6"/><path d="M12 7v5l3 3"/></svg>Cycles</div>'
++'<div class="nav-item" data-tab="history" onclick="switchTab(\'history\')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>History</div>'
++'<div class="nav-item" data-tab="exercises" onclick="switchTab(\'exercises\')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 5v14M18 5v14M2 9h4M18 9h4M2 15h4M18 15h4"/></svg>Exercises</div>'
++'<div class="nav-item" data-tab="review" onclick="switchTab(\'review\')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 4-8"/></svg>Review</div>'
++'<div class="nav-item" data-tab="settings" onclick="switchTab(\'settings\')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>Settings</div>';
+function initNavs(){['routines','mesocycles','history','exercises','review','settings'].forEach(tab=>{const el=document.getElementById('nav-'+tab);if(el)el.innerHTML=NAV_HTML;});updateNavActive('routines');}
 function updateNavActive(tab){document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.getAttribute('data-tab')===tab));}
 function switchTab(tab){
-  try{
-    const target=document.getElementById('screen-'+tab);
-    if(!target){
-      document.body.insertAdjacentHTML('afterbegin','<div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:red;color:#fff;padding:20px;font-size:14px">switchTab ERROR: no element with id screen-'+tab+'</div>');
-      return;
-    }
-    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
-    target.classList.add('active');
-    updateNavActive(tab);
-    if(tab==='exercises')renderExerciseDB();
-    if(tab==='history')renderHistory();
-    if(tab==='review')renderReview();
-    if(tab==='settings'){updateSettingsEquipSummary();buildPlateInventoryUI();initGoogleSync();}
-  }catch(err){
-    document.body.insertAdjacentHTML('afterbegin','<div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:red;color:#fff;padding:20px;font-size:13px;white-space:pre-wrap;max-height:80vh;overflow:auto">switchTab CRASH: '+err.message+'\n\n'+(err.stack||'')+'</div>');
-  }
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById('screen-'+tab).classList.add('active');
+  updateNavActive(tab);
+  if(tab==='exercises')renderExerciseDB();
+  if(tab==='history')renderHistory();
+  if(tab==='review')renderReview();
+  if(tab==='mesocycles')renderMesocycles();
+  if(tab==='settings'){updateSettingsEquipSummary();buildPlateInventoryUI();initGoogleSync();}
 }
 function toggleTheme(){
   state.lightMode=!state.lightMode;save();
@@ -1195,7 +1189,11 @@ function uiIcon(name, size, color){
   return map[name]||'';
 }
 
-// Superset colour palette
+let editingRoutineIdx=null;
+let editingRoutineExIds=[];
+let viewingMesoIdx=null;
+let addingMesoForRoutineIdx=null;
+let activeDropdownBtn=null;
 const SS_COLORS=[
   {bg:'#ff8c0022',border:'#ff8c0055',text:'#ff8c00'},
   {bg:'#47c8ff22',border:'#47c8ff55',text:'#47c8ff'},
@@ -1204,12 +1202,6 @@ const SS_COLORS=[
   {bg:'#ff475722',border:'#ff475755',text:'#ff4757'},
 ];
 const ssColorMap={};
-function getSupersetColor(gid){
-  if(!ssColorMap[gid]){const used=Object.keys(ssColorMap).length;ssColorMap[gid]=SS_COLORS[used%SS_COLORS.length];}
-  return ssColorMap[gid];
-}
-let editingRoutineIdx=null;
-let editingRoutineExIds=[];
 const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.appdata';
 const DRIVE_FILENAME='forge-backup.json';
 let gAccessToken=null;
@@ -1220,6 +1212,7 @@ document.getElementById('barbell-weight-input').value=state.barbellWeight||20;
 document.getElementById('theme-btn').textContent=state.lightMode?'☀️':'🌙';
 
 // ── ROUTINE EDITOR ──
+
 
 function openEditRoutineModal(){
   if(viewingRoutineIdx===null)return;
@@ -1469,120 +1462,401 @@ function getSuggestedRoutine(){
   return oldestIdx;
 }
 
-function renderHomeStats(){
-  const el=document.getElementById('home-stats');if(!el)return;
-  const today=new Date().toDateString();
-  const completedToday=state.history.filter(w=>new Date(w.date).toDateString()===today).length;
-  const weekAgo=new Date(Date.now()-7*864e5);
-  let weekMins=0;state.history.filter(w=>new Date(w.date)>=weekAgo).forEach(w=>weekMins+=Math.round(w.duration/60));
-  const weekStr=weekMins>=60?Math.floor(weekMins/60)+'h '+(weekMins%60?weekMins%60+'m':''):weekMins?weekMins+'m':'—';
-  el.innerHTML='<div class="stat-card"><div class="stat-val">'+completedToday+'</div><div class="stat-lbl">Completed Today</div></div>'
-    +'<div class="stat-card"><div class="stat-val">'+state.routines.length+'</div><div class="stat-lbl">Routines Total</div></div>'
-    +'<div class="stat-card"><div class="stat-val" style="font-size:'+(weekMins>=100?'18':weekMins>=60?'20':'22')+'px">'+weekStr+'</div><div class="stat-lbl">Weekly Time</div></div>';
-}
+// Shows the active mesocycle's full routine sequence directly on the home
+// screen, with the next-up routine made visually prominent, so the person
+// can see and follow their whole training cycle without leaving the front page.
+function renderActiveMesoHero(){
+  const el=document.getElementById('active-meso-hero');
+  if(!el)return;
+  if(!state.mesocycles||!state.mesocycles.length){el.innerHTML='';return;}
+  const withRoutines=state.mesocycles.filter(m=>m.routineIds&&m.routineIds.length);
+  if(!withRoutines.length){el.innerHTML='';return;}
+  // Prefer the mesocycle with the most recent progress; fall back to the first with routines.
+  const started=withRoutines.filter(m=>m.lastCompletedPos!=null);
+  const meso=started.length?started[started.length-1]:withRoutines[0];
+  const mesoIdx=state.mesocycles.indexOf(meso);
+  const nextIdx=getNextMesoRoutineIndex(meso);
 
-function renderTodayRecommended(){
-  const el=document.getElementById('today-recommended');if(!el)return;
-  const idx=getSuggestedRoutine();
-  if(idx===null||!state.routines[idx]){el.innerHTML='';return;}
-  const match=state.routines[idx];
-  const n=(match.exerciseIds||[]).length;
-  const est=estimateRoutineTime(match.exerciseIds||[])||'—';
-  const lastW=state.history.filter(w=>{const ids=w.exercises.map(e=>e.exId);return(match.exerciseIds||[]).every(id=>ids.includes(id));}).sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
-  const col=getRoutineColor(match);
-  const muscat=getRoutineMuscleCategory(match);
-  const lastStr=lastW?daysAgo(lastW.date):'Never';
-  const days=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-  const todayName=days[new Date().getDay()];
-  const fi=getFolderIcon(muscat);
-  el.innerHTML='<div class="today-card-wrap">'
-    +'<div class="today-card-inner">'
-    +'<div class="today-pill">'+uiIcon('star',11,'currentColor')+''+todayName+'\'s Workout</div>'
-    +'<div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:16px">'
-    +'<div style="width:56px;height:56px;border-radius:14px;background:'+col+'18;border:1px solid '+col+'33;display:flex;align-items:center;justify-content:center;flex-shrink:0">'
-    +getCategoryIconSVG(muscat,26,col)
+  const rowsHtml=meso.routineIds.map((rid,idx)=>{
+    const r=state.routines.find(x=>x.id===rid);
+    if(!r)return'';
+    const col=getRoutineColor(r);
+    const muscat=getRoutineMuscleCategory(r);
+    const n=(r.exerciseIds||[]).length;
+    const isNext=idx===nextIdx;
+    if(isNext){
+      const est=estimateRoutineTime(r.exerciseIds||[])||'\u2014';
+      return '<div style="display:flex;align-items:center;gap:12px;background:linear-gradient(90deg,var(--accent)18,var(--accent)05);border:1px solid var(--accent)44;border-radius:14px;padding:14px;margin:8px 0">'
+        +'<div style="width:34px;height:34px;border-radius:10px;background:var(--accent);color:#0F1117;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;flex-shrink:0">'+(idx+1)+'</div>'
+        +'<div style="width:44px;height:44px;border-radius:12px;background:'+col+'20;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+getCategoryIconSVG(muscat,22,col)+'</div>'
+        +'<div style="flex:1;min-width:0">'
+        +'<div style="font-size:10px;font-weight:800;letter-spacing:1px;color:var(--accent);text-transform:uppercase;margin-bottom:2px">Up Next</div>'
+        +'<div class="bold" style="font-size:16px;line-height:1.2">'+escHtml(r.name)+'</div>'
+        +'<div class="small text2" style="margin-top:2px">'+n+' exercise'+(n!==1?'s':'')+' &middot; '+est+'</div>'
+        +'</div>'
+        +'<button class="btn btn-primary btn-sm" onclick="startMesoRoutine('+mesoIdx+')" style="flex-shrink:0;font-weight:800">\u25B6 Start</button>'
+        +'</div>';
+    }
+    return '<div class="tight-row" style="border-radius:10px;margin:2px 0" onclick="startRoutineWorkout('+state.routines.indexOf(r)+')">'
+      +'<div class="tight-accent" style="background:'+col+'"></div>'
+      +'<div style="width:24px;text-align:center;font-size:11px;color:var(--text3);font-weight:700;flex-shrink:0;margin-left:8px">'+(idx+1)+'</div>'
+      +'<div class="tight-icon" style="background:'+col+'18">'+getCategoryIconSVG(muscat,16,col)+'</div>'
+      +'<div style="flex:1;min-width:0;padding:6px 0">'
+      +'<div class="tight-name">'+escHtml(r.name)+'</div>'
+      +'<div class="tight-meta">'+n+' exercise'+(n!==1?'s':'')+'</div>'
+      +'</div>'
+      +'</div>';
+  }).join('');
+
+  el.innerHTML='<div style="padding:12px 16px 4px">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
+    +'<div style="font-size:11px;font-weight:700;letter-spacing:1.2px;color:var(--accent);text-transform:uppercase">'+escHtml(meso.name)+'</div>'
+    +'<div style="font-size:11px;color:var(--text3);cursor:pointer" onclick="openMesocycleDetail('+mesoIdx+')">Manage \u203A</div>'
     +'</div>'
-    +'<div style="flex:1;min-width:0">'
-    +'<div style="font-weight:800;font-size:20px;color:var(--text);line-height:1.1;margin-bottom:4px">'+escHtml(match.name)+'</div>'
-    +'<div style="font-size:13px;color:var(--text2)">'+escHtml(match.desc||'')+'</div>'
-    +'</div></div>'
-    +'<div style="display:flex;gap:8px;margin-bottom:14px">'
-    +'<span class="r-chip">'+uiIcon('grid',12,'currentColor')+''+n+' Exercise'+(n!==1?'s':'')+'</span>'
-    +'<span class="r-chip">'+uiIcon('clock',12,'currentColor')+''+est+'</span>'
-    +'<span class="r-chip" style="color:var(--text3)">'+uiIcon('calendar',12,'currentColor')+'Last: '+lastStr+'</span>'
-    +'</div>'
-    +'<button class="btn btn-primary btn-full" onclick="startRoutineWorkout('+idx+')" style="border-radius:12px;font-size:15px;padding:14px;font-weight:800;letter-spacing:0.5px;">'
-    +''+uiIcon('play',16,'#0F1117')+'Start Workout</button>'
+    +'<div style="background:var(--bg2);border-radius:var(--radius);padding:10px 12px;border:1px solid var(--border);box-shadow:var(--shadow)">'
+    +rowsHtml
     +'</div></div>';
 }
 
 function renderRoutinesList(){
-  renderHomeStats();renderTodayRecommended();
+  renderActiveMesoHero();
   const list=document.getElementById('routines-list');
   if(!state.routines.length){
-    list.innerHTML='<div style="padding:8px 16px"><div class="empty-state"><div class="empty-icon"></div><div class="empty-title">No Routines Yet</div><div class="empty-sub">Tap + to create one</div><button class="btn btn-ghost" style="margin-top:14px" onclick="loadExampleRoutines()">📋 Load Example Routines</button></div></div>';
+    list.innerHTML='<div style="padding:8px 16px"><div class="empty-state"><div class="empty-icon"></div><div class="empty-title">No Routines Yet</div><div class="empty-sub">Tap + to create one</div><button class="btn btn-ghost" style="margin-top:14px" onclick="loadExampleRoutines()">Load Example Routines</button></div></div>';
     return;
   }
   list.innerHTML='';
   state.routines.forEach((r,i)=>{
     const n=(r.exerciseIds||[]).length;
-    const est=estimateRoutineTime(r.exerciseIds||[]);
     const rcol=getRoutineColor(r);
     const rmuscat=getRoutineMuscleCategory(r);
-    const lastW=state.history.filter(w=>{const ids=w.exercises.map(e=>e.exId);return(r.exerciseIds||[]).length>0&&(r.exerciseIds||[]).every(id=>ids.includes(id));}).sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
-    const lastStr=lastW?'Last: <span style="color:var(--accent)">'+daysAgo(lastW.date)+'</span>':'Never performed';
-
-    const wrap=document.createElement('div');
-    wrap.style.cssText='position:relative;margin:0 16px 10px;';
-    wrap.setAttribute('data-routine-idx',i);
-    wrap.innerHTML=
-      '<div onclick="handleCardClick(event,'+i+')" style="display:flex;align-items:center;gap:0;padding:0;background:var(--bg2);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);cursor:pointer;overflow:hidden;transition:background 0.15s;">'
-      // colour bar
-      +'<div style="width:4px;background:'+rcol+';align-self:stretch;flex-shrink:0;border-radius:var(--radius) 0 0 var(--radius)"></div>'
-      // icon
-      +'<div style="width:42px;height:42px;border-radius:10px;background:'+rcol+'18;border:1px solid '+rcol+'30;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin:14px 10px">'
-      +getCategoryIconSVG(rmuscat,20,rcol)
+    const row=document.createElement('div');
+    row.className='tight-row';
+    row.setAttribute('data-routine-idx',i);
+    row.innerHTML=
+      '<div class="tight-accent" style="background:'+rcol+'"></div>'
+      +'<div class="tight-drag" data-idx="'+i+'">&#10070;</div>'
+      +'<div class="tight-icon" style="background:'+rcol+'18">'
+      +getCategoryIconSVG(rmuscat,16,rcol)
       +'</div>'
-      // text
-      +'<div style="flex:1;min-width:0;padding:13px 0;">'
-      +'<div style="font-weight:700;font-size:15px;color:var(--text)">'+escHtml(r.name)+'</div>'
-      +(r.desc?'<div style="font-size:12px;color:var(--text2);margin-top:2px">'+escHtml(r.desc)+'</div>':'')
-      +'<div style="display:flex;gap:7px;margin-top:8px;flex-wrap:wrap">'
-      +'<span class="r-chip">'+uiIcon('grid',11,'currentColor')+' '+n+' Exercise'+(n!==1?'s':'')+'</span>'
-      +(est?'<span class="r-chip">'+uiIcon('clock',11,'currentColor')+' '+est+'</span>':'')
+      +'<div style="flex:1;min-width:0;padding:6px 0;cursor:pointer" onclick="handleCardClick(event,'+i+')">'
+      +'<div class="tight-name">'+escHtml(r.name)+'</div>'
+      +'<div class="tight-meta">'+n+' exercise'+(n!==1?'s':'')+(r.desc?' &middot; '+escHtml(r.desc):'')+'</div>'
       +'</div>'
-      +'<div style="font-size:11px;color:var(--text3);margin-top:6px">'+lastStr+'</div>'
-      +'</div>'
-      // drag handle + overflow
-      +'<div style="display:flex;flex-direction:column;align-items:center;gap:2px;margin-right:6px;flex-shrink:0;">'
-      +'<div class="drag-handle" data-idx="'+i+'" style="padding:6px 6px;cursor:grab;color:var(--text3);font-size:18px;line-height:1;touch-action:none;">⠿</div>'
-      +'<button onclick="toggleDropdown(event,'+i+')" style="width:32px;height:32px;border-radius:8px;border:none;background:transparent;color:var(--text2);cursor:pointer;display:flex;align-items:center;justify-content:center;">'
-      +uiIcon('dots',16,'currentColor')
-      +'</button>'
-      +'</div>'
-      +'</div>'
-      // dropdown — position:fixed so it's always on top
+      +'<button class="tight-dots" onclick="toggleDropdown(event,'+i+')">'+uiIcon('dots',16,'currentColor')+'</button>'
       +'<div class="r-dropdown" id="rdrop-'+i+'">'
       +'<div class="r-dropdown-item" onclick="openRoutineDetail('+i+');closeAllDropdowns()">'+uiIcon('eye',15,'currentColor')+' View</div>'
       +'<div class="r-dropdown-item" onclick="startRoutineWorkout('+i+');closeAllDropdowns()">'+uiIcon('play',15,'currentColor')+' Start Workout</div>'
       +'<div class="r-dropdown-item" onclick="openEditRoutineModal_fromList('+i+');closeAllDropdowns()">'+uiIcon('pencil',15,'currentColor')+' Edit</div>'
       +'<div class="r-dropdown-item" onclick="duplicateRoutine('+i+');closeAllDropdowns()">'+uiIcon('copy',15,'currentColor')+' Duplicate</div>'
+      +'<div class="r-dropdown-item" onclick="openAddRoutineToMesoModal('+i+');closeAllDropdowns()">'+uiIcon('grid',15,'currentColor')+' Add to Mesocycle</div>'
       +'<div class="r-dropdown-item danger" onclick="deleteRoutine('+i+');closeAllDropdowns()">'+uiIcon('trash',15,'currentColor')+' Delete</div>'
       +'</div>';
-    list.appendChild(wrap);
+    list.appendChild(row);
   });
-  initDragSort();
+  initRoutineDragSort();
 }
-function toggleFolder(id){}// kept for compat, no-op
-function handleCardClick(e,i){if(e.target.closest('[onclick*="toggleDropdown"]')||e.target.closest('.r-dropdown')||e.target.closest('.drag-handle'))return;closeAllDropdowns();openRoutineDetail(i);}
+
+function initRoutineDragSort(){
+  const list=document.getElementById('routines-list');
+  let dragIdx=null,dragEl=null;
+  list.querySelectorAll('.tight-drag').forEach(handle=>{
+    handle.addEventListener('touchstart',e=>{
+      dragIdx=parseInt(handle.getAttribute('data-idx'));
+      dragEl=handle.closest('[data-routine-idx]');
+      dragEl.style.opacity='0.4';
+      e.preventDefault();
+    },{passive:false});
+  });
+  list.addEventListener('touchmove',e=>{
+    if(dragIdx===null)return;
+    e.preventDefault();
+    const touch=e.touches[0];
+    const els=[...list.querySelectorAll('[data-routine-idx]')];
+    els.forEach(el=>{
+      el.style.borderTop='';
+      const r=el.getBoundingClientRect();
+      if(touch.clientY>=r.top&&touch.clientY<=r.bottom&&el!==dragEl)el.style.borderTop='2px solid var(--accent)';
+    });
+  },{passive:false});
+  list.addEventListener('touchend',e=>{
+    if(dragIdx===null)return;
+    const touch=e.changedTouches[0];
+    const els=[...list.querySelectorAll('[data-routine-idx]')];
+    let targetIdx=dragIdx;
+    els.forEach(el=>{
+      el.style.borderTop='';el.style.opacity='';
+      const r=el.getBoundingClientRect();
+      if(touch.clientY>=r.top&&touch.clientY<=r.bottom)targetIdx=parseInt(el.getAttribute('data-routine-idx'));
+    });
+    if(targetIdx!==dragIdx){
+      const moved=state.routines.splice(dragIdx,1)[0];
+      state.routines.splice(targetIdx,0,moved);
+      save();renderRoutinesList();
+    }
+    dragIdx=null;dragEl=null;
+  });
+}
+
+// ============================================================
+// MESOCYCLES
+// ============================================================
+function renderMesocycles(){
+  const list=document.getElementById('mesocycles-list');
+  if(!state.mesocycles.length){
+    list.innerHTML='<div class="empty-state"><div class="empty-icon">'+uiIcon('calendar',40,'var(--text3)')+'</div><div class="empty-title">No Mesocycles Yet</div><div class="empty-sub">Group routines into a sequence you work through in order &mdash; tap + to create one</div></div>';
+    return;
+  }
+  list.innerHTML='';
+  state.mesocycles.forEach((m,mi)=>{
+    const routineIds=m.routineIds||[];
+    const nextIdx=getNextMesoRoutineIndex(m);
+    const card=document.createElement('div');
+    card.className='meso-card';
+    card.onclick=()=>openMesocycleDetail(mi);
+    const totalInCycle=routineIds.length;
+    const completedCount=m.lastCompletedPos==null?0:(m.lastCompletedPos+1);
+    const pct=totalInCycle?Math.round(((completedCount%totalInCycle)||(completedCount&&totalInCycle))/totalInCycle*100):0;
+    let nextHtml='';
+    if(routineIds.length&&nextIdx!=null){
+      const nextRoutine=state.routines.find(r=>r.id===routineIds[nextIdx]);
+      if(nextRoutine){
+        const col=getRoutineColor(nextRoutine);
+        const muscat=getRoutineMuscleCategory(nextRoutine);
+        nextHtml='<div class="meso-next-row">'
+          +'<div style="width:34px;height:34px;border-radius:9px;background:'+col+'18;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+getCategoryIconSVG(muscat,16,col)+'</div>'
+          +'<div style="flex:1;min-width:0"><div style="font-size:10px;color:var(--accent);font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Up Next</div>'
+          +'<div style="font-weight:600;font-size:13px">'+escHtml(nextRoutine.name)+'</div></div>'
+          +'<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();startMesoRoutine('+mi+')">Start</button>'
+          +'</div>';
+      }
+    }
+    card.innerHTML='<div style="display:flex;align-items:flex-start;justify-content:space-between">'
+      +'<div><div class="meso-title">'+escHtml(m.name)+'</div><div class="meso-sub">'+routineIds.length+' routine'+(routineIds.length!==1?'s':'')+' in sequence</div></div>'
+      +'<button class="tight-dots" onclick="event.stopPropagation();toggleMesoDropdown(event,'+mi+')">'+uiIcon('dots',16,'currentColor')+'</button>'
+      +'</div>'
+      +'<div class="meso-progress-track"><div class="meso-progress-fill" style="width:'+pct+'%"></div></div>'
+      +nextHtml
+      +'<div class="r-dropdown" id="mdrop-'+mi+'">'
+      +'<div class="r-dropdown-item" onclick="event.stopPropagation();openMesocycleDetail('+mi+');closeAllMesoDropdowns()">'+uiIcon('eye',15,'currentColor')+' View / Edit</div>'
+      +'<div class="r-dropdown-item danger" onclick="event.stopPropagation();deleteMesocycle('+mi+');closeAllMesoDropdowns()">'+uiIcon('trash',15,'currentColor')+' Delete</div>'
+      +'</div>';
+    list.appendChild(card);
+  });
+}
+
+function getNextMesoRoutineIndex(m){
+  const ids=m.routineIds||[];
+  if(!ids.length)return null;
+  const lastPos=m.lastCompletedPos==null?-1:m.lastCompletedPos;
+  return (lastPos+1)%ids.length;
+}
+
+function toggleMesoDropdown(e,mi){
+  e.stopPropagation();
+  const drop=document.getElementById('mdrop-'+mi);
+  const wasOpen=drop.classList.contains('open');
+  closeAllMesoDropdowns();
+  if(wasOpen)return;
+  drop.style.position='absolute';drop.style.right='16px';drop.style.top='44px';drop.style.left='auto';drop.style.width='180px';
+  drop.classList.add('open');
+}
+function closeAllMesoDropdowns(){document.querySelectorAll('#mesocycles-list .r-dropdown.open').forEach(d=>d.classList.remove('open'));}
+
+function openNewMesocycleModal(){
+  document.getElementById('new-meso-name').value='';
+  openModal('modal-new-mesocycle');
+}
+function saveNewMesocycle(){
+  const name=document.getElementById('new-meso-name').value.trim();if(!name)return;
+  state.mesocycles.push({id:uid(),name,routineIds:[],lastCompletedPos:null});
+  save();renderMesocycles();closeModal('modal-new-mesocycle');
+}
+
+
+function openMesocycleDetail(mi){
+  viewingMesoIdx=mi;
+  const m=state.mesocycles[mi];
+  document.getElementById('meso-detail-title').textContent=m.name;
+  const nextIdx=getNextMesoRoutineIndex(m);
+  const body=document.getElementById('meso-detail-body');
+  if(!m.routineIds.length){
+    body.innerHTML='<div class="small text2" style="text-align:center;padding:16px 0">No routines added yet.</div>';
+  }else{
+    body.innerHTML=m.routineIds.map((rid,idx)=>{
+      const r=state.routines.find(x=>x.id===rid);
+      if(!r)return'';
+      const col=getRoutineColor(r);
+      const muscat=getRoutineMuscleCategory(r);
+      const isNext=idx===nextIdx;
+      const n=(r.exerciseIds||[]).length;
+      if(isNext){
+        return '<div data-meso-pos="'+idx+'" style="display:flex;align-items:center;gap:10px;background:linear-gradient(90deg,var(--accent)16,var(--accent)05);border:1px solid var(--accent)44;border-radius:14px;padding:14px;margin:6px 0">'
+          +'<div class="tight-drag" data-meso-drag="'+idx+'" style="color:var(--accent)">&#10070;</div>'
+          +'<div style="width:32px;height:32px;border-radius:10px;background:var(--accent);color:#0F1117;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;flex-shrink:0">'+(idx+1)+'</div>'
+          +'<div style="width:38px;height:38px;border-radius:11px;background:'+col+'20;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+getCategoryIconSVG(muscat,18,col)+'</div>'
+          +'<div style="flex:1;min-width:0">'
+          +'<div style="font-size:10px;font-weight:800;letter-spacing:1px;color:var(--accent);text-transform:uppercase;margin-bottom:2px">Up Next</div>'
+          +'<div class="bold" style="font-size:15px;line-height:1.2">'+escHtml(r.name)+'</div>'
+          +'<div class="small text2" style="margin-top:2px">'+n+' exercise'+(n!==1?'s':'')+'</div>'
+          +'</div>'
+          +'<button class="btn btn-danger btn-sm" onclick="removeRoutineFromMeso('+idx+')" style="padding:6px 10px;flex-shrink:0">&#10005;</button>'
+          +'</div>';
+      }
+      return '<div class="edit-ex-row" data-meso-pos="'+idx+'">'
+        +'<div class="tight-drag" data-meso-drag="'+idx+'">&#10070;</div>'
+        +'<div style="width:24px;height:24px;border-radius:6px;background:var(--bg4);color:var(--text2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">'+(idx+1)+'</div>'
+        +'<div style="width:28px;height:28px;border-radius:8px;background:'+col+'18;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+getCategoryIconSVG(muscat,14,col)+'</div>'
+        +'<div style="flex:1"><div class="bold" style="font-size:13px">'+escHtml(r.name)+'</div><div class="small text2">'+n+' exercise'+(n!==1?'s':'')+'</div></div>'
+        +'<button class="btn btn-danger btn-sm" onclick="removeRoutineFromMeso('+idx+')" style="padding:4px 8px">&#10005;</button>'
+        +'</div>';
+    }).join('');
+    initMesoDragSort();
+  }
+  document.getElementById('meso-start-btn').onclick=()=>{closeModal('modal-mesocycle-detail');startMesoRoutine(mi);};
+  openModal('modal-mesocycle-detail');
+}
+
+function initMesoDragSort(){
+  const body=document.getElementById('meso-detail-body');
+  let dragPos=null,dragEl=null;
+  body.querySelectorAll('[data-meso-drag]').forEach(handle=>{
+    handle.addEventListener('touchstart',e=>{
+      dragPos=parseInt(handle.getAttribute('data-meso-drag'));
+      dragEl=handle.closest('[data-meso-pos]');
+      dragEl.style.opacity='0.4';
+      e.preventDefault();
+    },{passive:false});
+  });
+  body.addEventListener('touchmove',e=>{
+    if(dragPos===null)return;
+    e.preventDefault();
+    const touch=e.touches[0];
+    const els=[...body.querySelectorAll('[data-meso-pos]')];
+    els.forEach(el=>{
+      el.style.borderTop='';
+      const r=el.getBoundingClientRect();
+      if(touch.clientY>=r.top&&touch.clientY<=r.bottom&&el!==dragEl)el.style.borderTop='2px solid var(--accent)';
+    });
+  },{passive:false});
+  body.addEventListener('touchend',e=>{
+    if(dragPos===null)return;
+    const touch=e.changedTouches[0];
+    const els=[...body.querySelectorAll('[data-meso-pos]')];
+    let targetPos=dragPos;
+    els.forEach(el=>{
+      el.style.borderTop='';el.style.opacity='';
+      const r=el.getBoundingClientRect();
+      if(touch.clientY>=r.top&&touch.clientY<=r.bottom)targetPos=parseInt(el.getAttribute('data-meso-pos'));
+    });
+    if(targetPos!==dragPos&&viewingMesoIdx!==null){
+      const m=state.mesocycles[viewingMesoIdx];
+      const moved=m.routineIds.splice(dragPos,1)[0];
+      m.routineIds.splice(targetPos,0,moved);
+      save();
+      openMesocycleDetail(viewingMesoIdx);
+      renderMesocycles();
+      renderRoutinesList();
+    }
+    dragPos=null;dragEl=null;
+  });
+}
+function removeRoutineFromMeso(idx){
+  if(viewingMesoIdx===null)return;
+  state.mesocycles[viewingMesoIdx].routineIds.splice(idx,1);
+  save();openMesocycleDetail(viewingMesoIdx);renderMesocycles();
+}
+function openAddRoutineToActiveMeso(){
+  if(viewingMesoIdx===null)return;
+  const m=state.mesocycles[viewingMesoIdx];
+  const list=document.getElementById('pick-routine-for-meso-list');
+  if(!state.routines.length){
+    list.innerHTML='<div class="small text2" style="text-align:center;padding:14px 0">You don\'t have any routines yet.</div>';
+  }else{
+    list.innerHTML=state.routines.map((r,idx)=>{
+      const col=getRoutineColor(r);
+      const muscat=getRoutineMuscleCategory(r);
+      const n=(r.exerciseIds||[]).length;
+      const timesInMeso=m.routineIds.filter(id=>id===r.id).length;
+      return '<div class="ex-item" onclick="addRoutineToActiveMeso('+idx+')" style="cursor:pointer">'
+        +'<div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0">'
+        +'<div style="width:28px;height:28px;border-radius:8px;background:'+col+'18;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+getCategoryIconSVG(muscat,14,col)+'</div>'
+        +'<div><div class="bold">'+escHtml(r.name)+(timesInMeso?' <span class="tight-badge" style="background:var(--bg4);color:var(--text2)">x'+timesInMeso+' in cycle</span>':'')+'</div><div class="small text2">'+n+' exercise'+(n!==1?'s':'')+'</div></div>'
+        +'</div>'
+        +'<span style="color:var(--accent);font-size:18px">＋</span>'
+        +'</div>';
+    }).join('');
+  }
+  openModal('modal-pick-routine-for-meso');
+}
+function addRoutineToActiveMeso(routineIdx){
+  if(viewingMesoIdx===null)return;
+  const routine=state.routines[routineIdx];
+  const m=state.mesocycles[viewingMesoIdx];
+  // Mesocycles are sequences, so the same routine can appear more than once
+  // (e.g. Push, Pull, Legs, Push) — always add rather than de-duplicating.
+  m.routineIds.push(routine.id);
+  save();
+  openAddRoutineToActiveMeso(); // refresh the "x in cycle" counts and keep picker open
+  openMesocycleDetail(viewingMesoIdx);
+  renderMesocycles();
+}
+function deleteMesocycle(mi){
+  if(confirm('Delete "'+state.mesocycles[mi].name+'"? Routines themselves are not affected.')){
+    state.mesocycles.splice(mi,1);save();renderMesocycles();
+  }
+}
+function startMesoRoutine(mi){
+  const m=state.mesocycles[mi];
+  const nextIdx=getNextMesoRoutineIndex(m);
+  if(nextIdx==null){alert('Add routines to this mesocycle first.');return;}
+  const routineId=m.routineIds[nextIdx];
+  const routineIdx=state.routines.findIndex(r=>r.id===routineId);
+  if(routineIdx===-1){alert('That routine no longer exists.');return;}
+  activeMesoContext={mesoIdx:mi,routinePos:nextIdx};
+  startRoutineWorkout(routineIdx);
+}
+
+
+function openAddRoutineToMesoModal(routineIdx){
+  addingMesoForRoutineIdx=routineIdx;
+  const list=document.getElementById('add-routine-meso-list');
+  if(!state.mesocycles.length){
+    list.innerHTML='<div class="small text2" style="text-align:center;padding:14px 0">No mesocycles yet &mdash; create one first from the Cycles tab.</div>';
+  }else{
+    list.innerHTML=state.mesocycles.map((m,mi)=>{
+      const timesInMeso=m.routineIds.filter(id=>id===state.routines[routineIdx].id).length;
+      return '<div class="ex-item" onclick="toggleRoutineInMeso('+mi+')" style="cursor:pointer">'
+        +'<div><div class="bold">'+escHtml(m.name)+(timesInMeso?' <span class="tight-badge" style="background:var(--bg4);color:var(--text2)">x'+timesInMeso+'</span>':'')+'</div><div class="small text2">'+m.routineIds.length+' routine'+(m.routineIds.length!==1?'s':'')+' in sequence</div></div>'
+        +'<span style="color:var(--accent);font-size:18px">＋</span>'
+        +'</div>';
+    }).join('');
+  }
+  openModal('modal-add-routine-meso');
+}
+function toggleRoutineInMeso(mi){
+  if(addingMesoForRoutineIdx===null)return;
+  const routine=state.routines[addingMesoForRoutineIdx];
+  const m=state.mesocycles[mi];
+  // Allow the same routine to be added more than once — mesocycles are
+  // sequences, so repeats (e.g. Push, Pull, Legs, Push) are valid.
+  m.routineIds.push(routine.id);
+  save();
+  openAddRoutineToMesoModal(addingMesoForRoutineIdx); // refresh counts, keep open
+  renderMesocycles();
+  renderRoutinesList();
+}
+
+function handleCardClick(e,i){if(e.target.closest('[onclick*="toggleDropdown"]')||e.target.closest('.r-dropdown'))return;closeAllDropdowns();openRoutineDetail(i);}
 
 function toggleDropdown(e,i){
   e.stopPropagation();
   const drop=document.getElementById('rdrop-'+i);
   const wasOpen=drop.classList.contains('open');
   closeAllDropdowns();
-  if(wasOpen)return;
+  if(wasOpen){activeDropdownBtn=null;return;}
   const btn=e.currentTarget;
+  activeDropdownBtn=btn;
   const rect=btn.getBoundingClientRect();
   const dropW=200;
   let left=rect.right-dropW;
@@ -1596,65 +1870,21 @@ function toggleDropdown(e,i){
     const top=parseFloat(drop.style.top);
     if(top+dh>window.innerHeight-10)drop.style.top=(rect.top-dh-6)+'px';
   });
-  const outsideClose=(ev)=>{
-    if(!drop.contains(ev.target)){
-      closeAllDropdowns();
-      document.removeEventListener('click',outsideClose,true);
-    }
-  };
-  setTimeout(()=>document.addEventListener('click',outsideClose,true),50);
 }
-function closeAllDropdowns(){document.querySelectorAll('.r-dropdown.open').forEach(d=>d.classList.remove('open'));}
-
-// ── DRAG TO REORDER ROUTINES ──
-function initDragSort(){
-  const list=document.getElementById('routines-list');
-  let dragIdx=null,dragEl=null;
-
-  list.querySelectorAll('.drag-handle').forEach(handle=>{
-    handle.addEventListener('touchstart',e=>{
-      const idx=parseInt(handle.getAttribute('data-idx'));
-      dragIdx=idx;
-      dragEl=handle.closest('[data-routine-idx]');
-      dragEl.classList.add('routine-dragging');
-      e.preventDefault();
-    },{passive:false});
-  });
-
-  list.addEventListener('touchmove',e=>{
-    if(dragIdx===null)return;
-    e.preventDefault();
-    const touch=e.touches[0];
-    const els=[...list.querySelectorAll('[data-routine-idx]')];
-    let target=null;
-    els.forEach(el=>{
-      el.classList.remove('routine-drag-over');
-      const r=el.getBoundingClientRect();
-      if(touch.clientY>=r.top&&touch.clientY<=r.bottom)target=el;
-    });
-    if(target&&target!==dragEl)target.classList.add('routine-drag-over');
-  },{passive:false});
-
-  list.addEventListener('touchend',e=>{
-    if(dragIdx===null)return;
-    const touch=e.changedTouches[0];
-    const els=[...list.querySelectorAll('[data-routine-idx]')];
-    let targetIdx=dragIdx;
-    els.forEach(el=>{
-      el.classList.remove('routine-drag-over','routine-dragging');
-      const r=el.getBoundingClientRect();
-      if(touch.clientY>=r.top&&touch.clientY<=r.bottom){
-        targetIdx=parseInt(el.getAttribute('data-routine-idx'));
-      }
-    });
-    if(targetIdx!==dragIdx){
-      const moved=state.routines.splice(dragIdx,1)[0];
-      state.routines.splice(targetIdx,0,moved);
-      save();renderRoutinesList();
-    }
-    dragIdx=null;dragEl=null;
-  });
+function closeAllDropdowns(){
+  document.querySelectorAll('.r-dropdown.open').forEach(d=>d.classList.remove('open'));
+  activeDropdownBtn=null;
 }
+// Single global listener: closes any open dropdown when tapping outside it
+// and outside the button that opened it. Registered once on load, not
+// re-added per dropdown, to avoid race conditions with toggling.
+document.addEventListener('click',function(ev){
+  const openDrop=document.querySelector('.r-dropdown.open');
+  if(!openDrop)return;
+  if(openDrop.contains(ev.target))return; // clicked inside the menu — let its own item handler run
+  if(activeDropdownBtn&&activeDropdownBtn.contains(ev.target))return; // clicked the toggle button itself — toggleDropdown already handles this
+  closeAllDropdowns();
+},true);
 function openEditRoutineModal_fromList(i){viewingRoutineIdx=i;openEditRoutineModal();}
 function duplicateRoutine(i){
   const r=state.routines[i];
@@ -1734,112 +1964,75 @@ function startRoutineWorkout(i){
 }
 function startEmptyWorkout(){beginWorkout('Workout',[],null,[]);}
 function beginWorkout(name,exercises,srcId,origIds){
-  try{
-    activeWorkout={name,startTime:Date.now(),exercises,sourceRoutineId:srcId||null,originalExerciseIds:origIds||[],notes:''};
-    document.getElementById('active-workout-name').value=name;
-    document.getElementById('workout-notes').value='';
-    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
-    document.getElementById('screen-workout').classList.add('active');
-    try{renderActiveWorkout();}catch(err){
-      document.getElementById('exercises-container').innerHTML='<div style="padding:20px;color:#ff4757;font-size:14px;background:#1a1d24;border-radius:10px;margin:16px">⚠️ Render error: '+err.message+'<br><pre style="font-size:11px;margin-top:8px;white-space:pre-wrap">'+err.stack+'</pre></div>';
-    }
-    startWorkoutClock();
-  }catch(err){
-    alert('FORGE error starting workout:\n'+err.message+'\n\nLine: '+(err.stack||'').split('\n')[1]);
-  }
+  activeWorkout={name,startTime:Date.now(),exercises,sourceRoutineId:srcId||null,originalExerciseIds:origIds||[],notes:''};
+  document.getElementById('active-workout-name').value=name;
+  document.getElementById('workout-notes').value='';
+  renderActiveWorkout();
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById('screen-workout').classList.add('active');
+  startWorkoutClock();
 }
 
 // ── ACTIVE WORKOUT RENDER ──
+// Superset colour palette
+
+
+function getSupersetColor(gid){
+  if(!ssColorMap[gid]){const used=Object.keys(ssColorMap).length;ssColorMap[gid]=SS_COLORS[used%SS_COLORS.length];}
+  return ssColorMap[gid];
+}
 function renderActiveWorkout(){
-  const c=document.getElementById('exercises-container');
-  if(!c)return;
-  c.innerHTML='<div style="height:8px"></div>';
-  try{
-    Object.keys(ssColorMap).forEach(k=>delete ssColorMap[k]);
-    if(!activeWorkout||!activeWorkout.exercises){
-      c.innerHTML+='<div class="empty-state" style="margin:40px 20px"><div class="empty-icon">🏋️</div><div class="empty-title">No Active Workout</div></div>';
-      return;
+  const c=document.getElementById('exercises-container');c.innerHTML='<div style="height:8px"></div>';
+  // Reset colour map each render
+  Object.keys(ssColorMap).forEach(k=>delete ssColorMap[k]);
+  // Assign colours in order of first appearance
+  activeWorkout.exercises.forEach(ex=>{if(ex.supersetGroup)getSupersetColor(ex.supersetGroup);});
+  const rendered=new Set();
+  activeWorkout.exercises.forEach((_,i)=>{
+    if(rendered.has(i))return;
+    const ex=activeWorkout.exercises[i];
+    if(ex.supersetGroup!=null){
+      const col=getSupersetColor(ex.supersetGroup);
+      const group=activeWorkout.exercises.map((e,idx)=>({e,idx})).filter(x=>x.e.supersetGroup===ex.supersetGroup);
+      group.forEach(x=>rendered.add(x.idx));
+      const wrap=document.createElement('div');wrap.className='superset-wrap anim';
+      wrap.innerHTML='<div class="superset-header" style="background:'+col.bg+';border:1px solid '+col.border+';color:'+col.text+'">🔗 SUPERSET</div>'
+        +'<div class="superset-inner" id="si-'+ex.supersetGroup+'" style="border:1px solid '+col.border+';border-top:none;border-radius:0 0 10px 10px"></div>';
+      c.appendChild(wrap);
+      const inner=document.getElementById('si-'+ex.supersetGroup);
+      group.forEach(x=>inner.appendChild(buildExerciseCard(x.idx)));
+    }else{
+      rendered.add(i);c.appendChild(buildExerciseCard(i));
     }
-    activeWorkout.exercises.forEach(ex=>{if(ex&&ex.supersetGroup)getSupersetColor(ex.supersetGroup);});
-    if(!activeWorkout.exercises.length){
-      c.innerHTML+='<div class="empty-state" style="margin:40px 20px"><div class="empty-icon">🏋️</div><div class="empty-title">No Exercises Yet</div><div class="empty-sub">Tap + Exercise below to get started</div></div>';
-      updateWorkoutStats();updateWorkoutEstimate();
-      return;
-    }
-    const rendered=new Set();
-    activeWorkout.exercises.forEach((_,i)=>{
-      if(rendered.has(i))return;
-      const ex=activeWorkout.exercises[i];
-      if(!ex)return;
-      if(ex.supersetGroup!=null){
-        try{
-          const col=getSupersetColor(ex.supersetGroup);
-          const group=activeWorkout.exercises.map((e,idx)=>({e,idx})).filter(x=>x.e&&x.e.supersetGroup===ex.supersetGroup);
-          group.forEach(x=>rendered.add(x.idx));
-          const wrap=document.createElement('div');wrap.className='superset-wrap anim';
-          wrap.innerHTML='<div class="superset-header" style="background:'+col.bg+';border:1px solid '+col.border+';color:'+col.text+'">🔗 SUPERSET</div>'
-            +'<div class="superset-inner" id="si-'+ex.supersetGroup+'" style="border:1px solid '+col.border+';border-top:none;border-radius:0 0 10px 10px"></div>';
-          c.appendChild(wrap);
-          const inner=document.getElementById('si-'+ex.supersetGroup);
-          if(inner)group.forEach(x=>inner.appendChild(buildExerciseCard(x.idx)));
-        }catch(supErr){
-          console.error('Superset render error:',supErr);
-          c.innerHTML+='<div style="padding:14px;color:#ff4757;font-size:12px;background:#1a1d24;border-radius:10px;margin:0 16px 12px">Superset render error: '+supErr.message+'</div>';
-        }
-      }else{
-        rendered.add(i);
-        try{
-          c.appendChild(buildExerciseCard(i));
-        }catch(cardErr){
-          console.error('Card render error:',cardErr);
-          c.innerHTML+='<div style="padding:14px;color:#ff4757;font-size:12px;background:#1a1d24;border-radius:10px;margin:0 16px 12px">Exercise card error: '+cardErr.message+'</div>';
-        }
-      }
-    });
-    updateWorkoutStats();updateWorkoutEstimate();
-  }catch(err){
-    console.error('renderActiveWorkout error:',err);
-    c.innerHTML+='<div style="padding:20px;color:#ff4757;font-size:14px;background:#1a1d24;border-radius:10px;margin:16px">⚠️ Render error: '+err.message+'<br><pre style="font-size:10px;margin-top:8px;white-space:pre-wrap;color:#ff8888">'+(err.stack||'')+'</pre></div>';
-  }
+  });
+  updateWorkoutStats();updateWorkoutEstimate();
 }
 
 function buildExerciseCard(exIdx){
-  try{
-    const ex=activeWorkout.exercises[exIdx];
-    if(!ex)throw new Error('Missing exercise at index '+exIdx);
-    const exData=state.exercises.find(e=>e.id===ex.exId)||{name:'Unknown Exercise',muscle:'',machine:'',secondary:'',note:'',bw:'no'};
-    const wrap=document.createElement('div');wrap.className='exercise-card anim';wrap.id='ex-card-'+exIdx;
-    const metaParts=[exData.muscle,exData.secondary,exData.machine].filter(Boolean);
-    const noteHtml=exData.note?'<div class="note-row"><span class="note-icon">📌</span><span class="note-text">'+escHtml(exData.note)+'</span></div>':'';
-    const isBW=exData.bw==='bw';
-    wrap.innerHTML='<div class="exercise-header">'
-      +'<div><div class="exercise-name">'+escHtml(exData.name)+'</div><div class="exercise-meta">'+escHtml(metaParts.join(' · '))+'</div></div>'
-      +'<div style="display:flex;gap:4px">'
-      +'<button class="btn btn-ghost btn-sm" onclick="openProgressModal(\''+ex.exId+'\')">📈</button>'
-      +'<button class="btn btn-ghost btn-sm" onclick="openNoteModal(\''+ex.exId+'\')">📌</button>'
-      +'<button class="btn btn-danger btn-sm" onclick="removeExercise('+exIdx+')">✕</button></div></div>'
-      +noteHtml
-      +'<table class="set-table"><thead><tr>'
-      +'<th>#</th><th>Type</th><th style="color:var(--text3)">Prev</th>'
-      +(isBW?'':'<th>kg</th>')+'<th>Reps</th><th>RPE</th><th>✓</th>'
-      +'</tr></thead><tbody id="sets-body-'+exIdx+'"></tbody></table>'
-      +'<div class="exercise-actions">'
-      +'<button class="btn btn-ghost btn-sm" onclick="addSet('+exIdx+')">＋ Set</button>'
-      +'<button class="btn btn-accent2 btn-sm" onclick="openTimerModal()">⏱</button>'
-      +'<button class="btn btn-ghost btn-sm" style="color:var(--text3)" onclick="removeLastSet('+exIdx+')">－</button>'
-      +'</div>';
-    setTimeout(()=>{
-      try{renderSets(exIdx);}catch(e){console.error('renderSets error:',e);}
-    },0);
-    return wrap;
-  }catch(err){
-    console.error('buildExerciseCard error:',err);
-    const errDiv=document.createElement('div');
-    errDiv.className='exercise-card';
-    errDiv.style.cssText='color:#ff4757;padding:16px;font-size:13px';
-    errDiv.textContent='Error rendering exercise: '+err.message;
-    return errDiv;
-  }
+  const ex=activeWorkout.exercises[exIdx];
+  const exData=state.exercises.find(e=>e.id===ex.exId)||{name:'Unknown',muscle:'',machine:'',secondary:'',note:'',bw:'no'};
+  const wrap=document.createElement('div');wrap.className='exercise-card anim';wrap.id='ex-card-'+exIdx;
+  const metaParts=[exData.muscle,exData.secondary,exData.machine].filter(Boolean);
+  const noteHtml=exData.note?'<div class="note-row"><span class="note-icon">📌</span><span class="note-text">'+escHtml(exData.note)+'</span></div>':'';
+  const isBW=exData.bw==='bw';
+  wrap.innerHTML='<div class="exercise-header">'
+    +'<div><div class="exercise-name">'+escHtml(exData.name)+'</div><div class="exercise-meta">'+escHtml(metaParts.join(' · '))+'</div></div>'
+    +'<div style="display:flex;gap:4px">'
+    +'<button class="btn btn-ghost btn-sm" onclick="openProgressModal(\''+ex.exId+'\')">📈</button>'
+    +'<button class="btn btn-ghost btn-sm" onclick="openNoteModal(\''+ex.exId+'\')">📌</button>'
+    +'<button class="btn btn-danger btn-sm" onclick="removeExercise('+exIdx+')">✕</button></div></div>'
+    +noteHtml
+    +'<table class="set-table"><thead><tr>'
+    +'<th>#</th><th>Type</th><th style="color:var(--text3)">Prev</th>'
+    +(isBW?'':'<th>kg</th>')+'<th>Reps</th><th>RPE</th><th>✓</th>'
+    +'</tr></thead><tbody id="sets-body-'+exIdx+'"></tbody></table>'
+    +'<div class="exercise-actions">'
+    +'<button class="btn btn-ghost btn-sm" onclick="addSet('+exIdx+')">＋ Set</button>'
+    +'<button class="btn btn-accent2 btn-sm" onclick="openTimerModal()">⏱</button>'
+    +'<button class="btn btn-ghost btn-sm" style="color:var(--text3)" onclick="removeLastSet('+exIdx+')">－</button>'
+    +'</div>';
+  setTimeout(()=>renderSets(exIdx),0);
+  return wrap;
 }
 
 function renderSets(exIdx){
@@ -2405,10 +2598,35 @@ function confirmFinishWorkout(){
     state.routines.push({id:uid(),name:rn,desc:'',exerciseIds:ids,supersetGroups:supersetData});
   }
 
-  save();closeModal('modal-finish');endWorkout();renderHistory();renderRoutinesList();maybeAutoSync();
+  save();closeModal('modal-finish');
+  // Advance mesocycle progress if this workout was started from one
+  if(activeMesoContext){
+    const m=state.mesocycles[activeMesoContext.mesoIdx];
+    if(m)m.lastCompletedPos=activeMesoContext.routinePos;
+    activeMesoContext=null;
+    save();
+  }
+  endWorkout();renderHistory();renderRoutinesList();maybeAutoSync();
 }
-function cancelWorkout(){if(confirm('Discard this workout?'))endWorkout();}
+function cancelWorkout(){
+  forgeConfirm('Discard Workout?','Everything you\'ve logged in this session will be lost. This cannot be undone.',()=>{activeMesoContext=null;endWorkout();});
+}
 function endWorkout(){if(workoutTimer){clearInterval(workoutTimer);workoutTimer=null;}stopTimer();activeWorkout=null;switchTab('routines');}
+
+// Custom in-app confirm dialog — replaces native confirm() which can be
+// silently blocked/suppressed inside some installed PWA shells on Android.
+function forgeConfirm(title,message,onConfirm){
+  document.getElementById('confirm-title').textContent=title;
+  document.getElementById('confirm-message').textContent=message;
+  const okBtn=document.getElementById('confirm-ok-btn');
+  const cancelBtn=document.getElementById('confirm-cancel-btn');
+  // Clone+replace to clear any previously attached listeners
+  const newOk=okBtn.cloneNode(true);
+  okBtn.parentNode.replaceChild(newOk,okBtn);
+  newOk.addEventListener('click',()=>{closeModal('modal-confirm');onConfirm();});
+  cancelBtn.onclick=()=>closeModal('modal-confirm');
+  openModal('modal-confirm');
+}
 
 // ── HISTORY ──
 function renderHistory(){
