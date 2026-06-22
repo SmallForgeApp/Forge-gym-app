@@ -915,7 +915,7 @@ const DEFAULT_ROUTINES=[
 ];
 
 // ── STATE ──
-let state={exercises:[],routines:[],history:[],mesocycles:[],equipment:null,barbellWeight:20,plates:{},warmupDone:{},bodyWeights:[],exDbSort:'muscle',addExSort:'muscle',filterByEquip:true,addExFilterEquip:true,lightMode:false};
+let state={exercises:[],routines:[],history:[],mesocycles:[],activeMesoId:null,equipment:null,barbellWeight:20,plates:{},warmupDone:{},bodyWeights:[],exDbSort:'muscle',addExSort:'muscle',filterByEquip:true,addExFilterEquip:true,lightMode:false};
 let activeWorkout=null,workoutTimer=null,restTimer=null,restRemaining=0;
 let activeMesoContext=null;
 let editingNoteExId=null,editingSetTypeInfo=null,pendingSetType=null,fromWorkout=false,editingExId=null,viewingRoutineIdx=null;
@@ -1471,9 +1471,13 @@ function renderActiveMesoHero(){
   if(!state.mesocycles||!state.mesocycles.length){el.innerHTML='';return;}
   const withRoutines=state.mesocycles.filter(m=>m.routineIds&&m.routineIds.length);
   if(!withRoutines.length){el.innerHTML='';return;}
-  // Prefer the mesocycle with the most recent progress; fall back to the first with routines.
-  const started=withRoutines.filter(m=>m.lastCompletedPos!=null);
-  const meso=started.length?started[started.length-1]:withRoutines[0];
+  // Use the explicitly activated mesocycle if set, otherwise the most-progressed one
+  let meso=null;
+  if(state.activeMesoId){meso=withRoutines.find(m=>m.id===state.activeMesoId)||null;}
+  if(!meso){
+    const started=withRoutines.filter(m=>m.currentPos!=null);
+    meso=started.length?started[started.length-1]:withRoutines[0];
+  }
   const mesoIdx=state.mesocycles.indexOf(meso);
   const nextIdx=getNextMesoRoutineIndex(meso);
 
@@ -1611,12 +1615,16 @@ function renderMesocycles(){
   state.mesocycles.forEach((m,mi)=>{
     const routineIds=m.routineIds||[];
     const nextIdx=getNextMesoRoutineIndex(m);
+    const isActive=state.activeMesoId===m.id;
     const card=document.createElement('div');
     card.className='meso-card';
+    card.style.cssText=isActive?'border-color:var(--accent)44;box-shadow:0 0 0 1px var(--accent)22,0 8px 28px rgba(0,0,0,0.35)':'';
     card.onclick=()=>openMesocycleDetail(mi);
     const totalInCycle=routineIds.length;
-    const completedCount=m.lastCompletedPos==null?0:(m.lastCompletedPos+1);
-    const pct=totalInCycle?Math.round(((completedCount%totalInCycle)||(completedCount&&totalInCycle))/totalInCycle*100):0;
+    const completedCount=state.history.filter(w=>w.mesoId===m.id).length;
+    const cyclesPct=totalInCycle?(m.currentPos||0)/totalInCycle*100:0;
+
+    // Next up row
     let nextHtml='';
     if(routineIds.length&&nextIdx!=null){
       const nextRoutine=state.routines.find(r=>r.id===routineIds[nextIdx]);
@@ -1627,17 +1635,37 @@ function renderMesocycles(){
           +'<div style="width:34px;height:34px;border-radius:9px;background:'+col+'18;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+getCategoryIconSVG(muscat,16,col)+'</div>'
           +'<div style="flex:1;min-width:0"><div style="font-size:10px;color:var(--accent);font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Up Next</div>'
           +'<div style="font-weight:600;font-size:13px">'+escHtml(nextRoutine.name)+'</div></div>'
-          +'<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();startMesoRoutine('+mi+')">Start</button>'
+          +'<div style="display:flex;gap:6px">'
+          +'<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();skipMesoRoutine('+mi+')" style="color:var(--text3);font-size:11px">Skip</button>'
+          +'<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();startMesoRoutine('+mi+')">&#9654; Start</button>'
+          +'</div>'
           +'</div>';
       }
     }
-    card.innerHTML='<div style="display:flex;align-items:flex-start;justify-content:space-between">'
-      +'<div><div class="meso-title">'+escHtml(m.name)+'</div><div class="meso-sub">'+routineIds.length+' routine'+(routineIds.length!==1?'s':'')+' in sequence</div></div>'
+
+    // Stats row
+    const statsHtml='<div style="display:flex;gap:12px;margin-top:10px;font-size:11px;color:var(--text3)">'
+      +'<span>'+completedCount+' workout'+(completedCount!==1?'s':'')+' done</span>'
+      +(m.startedAt?'<span>&middot;</span><span>'+Math.floor((Date.now()-new Date(m.startedAt))/(1000*60*60*24))+' days running</span>':'')
+      +'</div>';
+
+    card.innerHTML=
+      '<div style="display:flex;align-items:flex-start;justify-content:space-between">'
+      +'<div>'
+      +(isActive?'<div style="font-size:9px;font-weight:800;letter-spacing:1px;color:var(--accent);text-transform:uppercase;margin-bottom:4px">&#9679; Active</div>':'')
+      +'<div class="meso-title">'+escHtml(m.name)+'</div>'
+      +'<div class="meso-sub">'+routineIds.length+' routine'+(routineIds.length!==1?'s':'')+' in sequence</div>'
+      +'</div>'
       +'<button class="tight-dots" onclick="event.stopPropagation();toggleMesoDropdown(event,'+mi+')">'+uiIcon('dots',16,'currentColor')+'</button>'
       +'</div>'
-      +'<div class="meso-progress-track"><div class="meso-progress-fill" style="width:'+pct+'%"></div></div>'
+      +'<div class="meso-progress-track" style="margin-top:10px"><div class="meso-progress-fill" style="width:'+cyclesPct+'%"></div></div>'
+      +statsHtml
       +nextHtml
       +'<div class="r-dropdown" id="mdrop-'+mi+'">'
+      +(isActive
+        ?'<div class="r-dropdown-item" onclick="event.stopPropagation();state.activeMesoId=null;save();renderMesocycles();renderRoutinesList();closeAllMesoDropdowns()">&#9633; Deactivate</div>'
+        :'<div class="r-dropdown-item" onclick="event.stopPropagation();activateMesocycle('+mi+');closeAllMesoDropdowns()">&#9679; Set as Active</div>'
+      )
       +'<div class="r-dropdown-item" onclick="event.stopPropagation();openMesocycleDetail('+mi+');closeAllMesoDropdowns()">'+uiIcon('eye',15,'currentColor')+' View / Edit</div>'
       +'<div class="r-dropdown-item danger" onclick="event.stopPropagation();deleteMesocycle('+mi+');closeAllMesoDropdowns()">'+uiIcon('trash',15,'currentColor')+' Delete</div>'
       +'</div>';
@@ -1645,11 +1673,20 @@ function renderMesocycles(){
   });
 }
 
+// currentPos is an explicit pointer to "next up" in the sequence — it advances
+// both when a workout from that slot is completed AND when the user taps Skip,
+// so skipping never gets re-suggested as "next" again.
 function getNextMesoRoutineIndex(m){
   const ids=m.routineIds||[];
   if(!ids.length)return null;
-  const lastPos=m.lastCompletedPos==null?-1:m.lastCompletedPos;
-  return (lastPos+1)%ids.length;
+  if(m.currentPos==null)m.currentPos=0;
+  return m.currentPos%ids.length;
+}
+function advanceMesoPos(m){
+  const ids=m.routineIds||[];
+  if(!ids.length)return;
+  if(m.currentPos==null)m.currentPos=0;
+  m.currentPos=(m.currentPos+1)%ids.length;
 }
 
 function toggleMesoDropdown(e,mi){
@@ -1669,7 +1706,7 @@ function openNewMesocycleModal(){
 }
 function saveNewMesocycle(){
   const name=document.getElementById('new-meso-name').value.trim();if(!name)return;
-  state.mesocycles.push({id:uid(),name,routineIds:[],lastCompletedPos:null});
+  state.mesocycles.push({id:uid(),name,routineIds:[],currentPos:0,startedAt:null,completedWorkouts:0});
   save();renderMesocycles();closeModal('modal-new-mesocycle');
 }
 
@@ -1812,9 +1849,32 @@ function startMesoRoutine(mi){
   if(nextIdx==null){alert('Add routines to this mesocycle first.');return;}
   const routineId=m.routineIds[nextIdx];
   const routineIdx=state.routines.findIndex(r=>r.id===routineId);
-  if(routineIdx===-1){alert('That routine no longer exists.');return;}
+  if(routineIdx===-1){alert('That routine no longer exists. Remove it from the mesocycle and try again.');return;}
+  // Tag the workout with this mesocycle so history can track it
   activeMesoContext={mesoIdx:mi,routinePos:nextIdx};
   startRoutineWorkout(routineIdx);
+}
+
+function skipMesoRoutine(mi){
+  forgeConfirm(
+    'Skip This Workout?',
+    'The next routine in the sequence will be skipped and the cycle will advance to the following one.',
+    ()=>{
+      const m=state.mesocycles[mi];
+      if(!m)return;
+      advanceMesoPos(m);
+      save();
+      renderMesocycles();
+      renderRoutinesList();
+    }
+  );
+}
+
+function activateMesocycle(mi){
+  state.activeMesoId=state.mesocycles[mi].id;
+  save();
+  renderMesocycles();
+  renderRoutinesList();
 }
 
 
@@ -2583,7 +2643,8 @@ function confirmFinishWorkout(){
 
   const workout={id:uid(),name,date:new Date().toISOString(),
     duration:Math.floor((Date.now()-activeWorkout.startTime)/1000),
-    notes:activeWorkout.notes||'',exercises:cleanExercises};
+    notes:activeWorkout.notes||'',exercises:cleanExercises,
+    mesoId:activeMesoContext?state.mesocycles[activeMesoContext.mesoIdx]?.id:null};
   state.history.unshift(workout);
 
   const ids=activeWorkout.exercises.map(e=>e.exId);
@@ -2602,7 +2663,7 @@ function confirmFinishWorkout(){
   // Advance mesocycle progress if this workout was started from one
   if(activeMesoContext){
     const m=state.mesocycles[activeMesoContext.mesoIdx];
-    if(m)m.lastCompletedPos=activeMesoContext.routinePos;
+    if(m){advanceMesoPos(m);if(!m.startedAt)m.startedAt=new Date().toISOString();m.completedWorkouts=(m.completedWorkouts||0)+1;}
     activeMesoContext=null;
     save();
   }
@@ -2633,18 +2694,38 @@ function renderHistory(){
   const list=document.getElementById('history-list');
   if(!state.history.length){list.innerHTML='<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-title">No Workouts Yet</div><div class="empty-sub">Complete a workout to see it here</div></div>';return;}
   list.innerHTML='';
+
+  // Build a mesocycle summary map: mesoId → {name, startedAt, completedWorkouts}
+  const mesoMap={};
+  (state.mesocycles||[]).forEach(m=>{
+    const workoutsInMeso=state.history.filter(w=>w.mesoId===m.id);
+    const daysSinceStart=m.startedAt?Math.floor((Date.now()-new Date(m.startedAt))/(1000*60*60*24)):null;
+    mesoMap[m.id]={name:m.name,count:workoutsInMeso.length,days:daysSinceStart};
+  });
+
   state.history.forEach(w=>{
     const d=new Date(w.date);
     const ds=d.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
     let vol=0,sets=0;w.exercises.forEach(ex=>ex.sets.forEach(s=>{if(s.done){sets++;vol+=(s.weight||0)*(s.reps||0);}}));
     const names=w.exercises.slice(0,3).map(ex=>{const e=state.exercises.find(e=>e.id===ex.exId);return e?e.name:'?';}).join(', ')+(w.exercises.length>3?' +'+(w.exercises.length-3)+' more':'');
     const muscles=[...new Set(w.exercises.map(ex=>{const e=state.exercises.find(e=>e.id===ex.exId);return e?e.muscle:'';}).filter(Boolean))];
+
+    // Mesocycle tag for this workout
+    const mesoInfo=w.mesoId&&mesoMap[w.mesoId]?mesoMap[w.mesoId]:null;
+    const mesoHtml=mesoInfo
+      ?'<div style="display:inline-flex;align-items:center;gap:5px;background:var(--accent)14;border:1px solid var(--accent)33;border-radius:6px;padding:2px 8px;margin-top:6px">'
+        +'<span style="font-size:9px;font-weight:800;letter-spacing:0.8px;color:var(--accent);text-transform:uppercase">'+escHtml(mesoInfo.name)+'</span>'
+        +'<span style="font-size:10px;color:var(--text3)">&middot; '+mesoInfo.count+' workout'+(mesoInfo.count!==1?'s':'')+' done'+(mesoInfo.days!=null?' &middot; '+mesoInfo.days+' days running':'')+'</span>'
+        +'</div>'
+      :'';
+
     const div=document.createElement('div');div.className='history-item';
     div.innerHTML='<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">'
       +'<div style="flex:1;min-width:0">'
       +'<div class="history-date">'+ds+'</div>'
       +'<div class="history-name">'+escHtml(w.name)+'</div>'
-      +'<div class="history-meta">'+Math.floor(w.duration/60)+' min · '+sets+' sets · '+vol.toFixed(0)+' kg</div>'
+      +'<div class="history-meta">'+Math.floor(w.duration/60)+' min &middot; '+sets+' sets &middot; '+vol.toFixed(0)+' kg</div>'
+      +mesoHtml
       +'</div>'
       +'<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0">'+muscles.slice(0,3).map(m=>'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+(MUSCLE_COLORS[m]||'#aaa')+'" title="'+m+'"></span>').join('')+'</div>'
       +'</div>'
