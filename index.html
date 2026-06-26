@@ -857,68 +857,173 @@ const TIMER_PRESETS=[30,60,90,120,150,180,240,300];
 const DEFAULT_PLATES=[1.25,2.5,5,10,15,20,25];
 
 const DEFAULT_EXERCISES=[
+// ── CHEST ──
   {id:'e1',name:'Bench Press',muscle:'Chest',secondary:'Triceps, Front Delts',machine:'Barbell',bw:'no',note:''},
   {id:'e2',name:'Incline Dumbbell Press',muscle:'Chest',secondary:'Triceps',machine:'Dumbbell',bw:'no',note:''},
   {id:'e3',name:'Cable Fly',muscle:'Chest',secondary:'',machine:'Cable Machine',bw:'no',note:''},
   {id:'e4',name:'Push-Up',muscle:'Chest',secondary:'Triceps, Core',machine:'Bodyweight',bw:'bw',note:''},
+  {id:'e39',name:'Chest Press Machine',muscle:'Chest',secondary:'Triceps',machine:'Chest Press Machine',bw:'no',note:''},
+  {id:'e40',name:'Pec Deck Fly',muscle:'Chest',secondary:'',machine:'Pec Deck Machine',bw:'no',note:''},
+  {id:'e49',name:'Smith Machine Bench Press',muscle:'Chest',secondary:'Triceps',machine:'Smith Machine',bw:'no',note:''},
+  {id:'ex2',name:'Cable Crossover',muscle:'Chest',secondary:'',machine:'Cable Machine',bw:'no',note:''},
+  {id:'ec1',name:'Incline Barbell Press',muscle:'Chest',secondary:'Triceps, Front Delts',machine:'Barbell',bw:'no',note:''},
+  {id:'ec2',name:'Decline Bench Press',muscle:'Chest',secondary:'Triceps',machine:'Barbell',bw:'no',note:''},
+  {id:'ec3',name:'Dumbbell Fly',muscle:'Chest',secondary:'',machine:'Dumbbell',bw:'no',note:''},
+  {id:'ec4',name:'Single Arm Cable Fly',muscle:'Chest',secondary:'',machine:'Cable Machine',bw:'no',note:'',uni:true},
+  {id:'ec5',name:'Single Arm Dumbbell Press',muscle:'Chest',secondary:'Triceps',machine:'Dumbbell',bw:'no',note:'',uni:true},
+  {id:'ec6',name:'Landmine Press',muscle:'Chest',secondary:'Shoulders, Triceps',machine:'Barbell',bw:'no',note:''},
+  {id:'ec7',name:'Close Grip Bench Press',muscle:'Chest',secondary:'Triceps',machine:'Barbell',bw:'no',note:''},
+// ── BACK ──
+  {id:'e13',name:'Pull-Up',muscle:'Back',secondary:'Biceps',machine:'Pull-Up Bar',bw:'bw',note:''},
+  {id:'e14',name:'Chin-Up',muscle:'Back',secondary:'Biceps',machine:'Pull-Up Bar',bw:'bw',note:''},
+  {id:'e15',name:'Barbell Row',muscle:'Back',secondary:'Biceps',machine:'Barbell',bw:'no',note:''},
+  {id:'e16',name:'Dumbbell Row',muscle:'Back',secondary:'Biceps',machine:'Dumbbell',bw:'no',note:'',uni:true},
+  {id:'e17',name:'Cable Row',muscle:'Back',secondary:'Biceps',machine:'Cable Machine',bw:'no',note:''},
+  {id:'e18',name:'Deadlift',muscle:'Back',secondary:'Legs, Glutes',machine:'Barbell',bw:'no',note:''},
+  {id:'e36',name:'Lat Pulldown',muscle:'Back',secondary:'Biceps',machine:'Lat Pulldown Machine',bw:'no',note:''},
+  {id:'e37',name:'Close Grip Lat Pulldown',muscle:'Back',secondary:'Biceps',machine:'Lat Pulldown Machine',bw:'no',note:''},
+  {id:'e38',name:'Seated Cable Row',muscle:'Back',secondary:'Biceps',machine:'Seated Row Machine',bw:'no',note:''},
+  {id:'e41',name:'Shoulder Press Machine',muscle:'Shoulders',secondary:'Triceps',machine:'Shoulder Press Machine',bw:'no',note:''},
+  {id:'e43',name:'Assisted Pull-Up',muscle:'Back',secondary:'Biceps',machine:'Assisted Pull-Up Machine',bw:'bw',note:''},
+  {id:'ex6',name:'Iso-Lateral Row',muscle:'Back',secondary:'Biceps',machine:'Seated Row Machine',bw:'no',note:'',uni:true},
+  {id:'eb1',name:'T-Bar Row',muscle:'Back',secondary:'Biceps',machine:'Barbell',bw:'no',note:''},
+  {id:'eb2',name:'Single Arm Cable Row',muscle:'Back',secondary:'Biceps',machine:'Cable Machine',bw:'no',note:'',uni:true},
+  {id:'eb3',name:'Meadows Row',muscle:'Back',secondary:'Biceps',machine:'Barbell',bw:'no',note:'',uni:true},
+  {id:'eb4',name:'Single Arm Lat Pulldown',muscle:'Back',secondary:'Biceps',machine:'Lat Pulldown Machine',bw:'no',note:'',uni:true},
+  {id:'eb5',name:'Chest Supported Row',muscle:'Back',secondary:'Biceps',machine:'Dumbbell',bw:'no',note:''},
+  {id:'eb6',name:'Rack Pull',muscle:'Back',secondary:'Glutes',machine:'Barbell',bw:'no',note:''},
+  {id:'eb7',name:'Face Pull',muscle:'Back',secondary:'Rear Delts',machine:'Cable Machine',bw:'no',note:''},
+  {id:'eb8',name:'Wide Grip Lat Pulldown',muscle:'Back',secondary:'Biceps',machine:'Lat Pulldown Machine',bw:'no',note:''},
+  {id:'eb9',name:'Pendlay Row',muscle:'Back',secondary:'Biceps',machine:'Barbell',bw:'no',note:''},
+// ── SHOULDERS ──
+  {id:'e10',name:'Overhead Press',muscle:'Shoulders',secondary:'Triceps',machine:'Barbell',bw:'no',note:''},
+  {id:'e11',name:'Dumbbell Shoulder Press',muscle:'Shoulders',secondary:'Triceps',machine:'Dumbbell',bw:'no',note:''},
+  {id:'e12',name:'Lateral Raise',muscle:'Shoulders',secondary:'',machine:'Dumbbell',bw:'no',note:''},
+  {id:'e31',name:'Band Pull-Apart',muscle:'Shoulders',secondary:'Back',machine:'Resistance Band',bw:'no',note:''},
+  {id:'ex1',name:'Reverse Fly',muscle:'Shoulders',secondary:'Back',machine:'Cable Machine',bw:'no',note:''},
+  {id:'ex5',name:'Lateral Raise (Cable)',muscle:'Shoulders',secondary:'',machine:'Cable Machine',bw:'no',note:'',uni:true},
+  {id:'es1',name:'Single Arm Dumbbell Lateral Raise',muscle:'Shoulders',secondary:'',machine:'Dumbbell',bw:'no',note:'',uni:true},
+  {id:'es2',name:'Single Arm Overhead Press',muscle:'Shoulders',secondary:'Triceps',machine:'Dumbbell',bw:'no',note:'',uni:true},
+  {id:'es3',name:'Arnold Press',muscle:'Shoulders',secondary:'Triceps',machine:'Dumbbell',bw:'no',note:''},
+  {id:'es4',name:'Front Raise',muscle:'Shoulders',secondary:'',machine:'Dumbbell',bw:'no',note:''},
+  {id:'es5',name:'Single Arm Front Raise',muscle:'Shoulders',secondary:'',machine:'Dumbbell',bw:'no',note:'',uni:true},
+  {id:'es6',name:'Upright Row',muscle:'Shoulders',secondary:'Biceps',machine:'Barbell',bw:'no',note:''},
+  {id:'es7',name:'Seated Dumbbell Shoulder Press',muscle:'Shoulders',secondary:'Triceps',machine:'Dumbbell',bw:'no',note:''},
+  {id:'es8',name:'Cable Reverse Fly',muscle:'Shoulders',secondary:'Back',machine:'Cable Machine',bw:'no',note:''},
+  {id:'es9',name:'Single Arm Cable Reverse Fly',muscle:'Shoulders',secondary:'Back',machine:'Cable Machine',bw:'no',note:'',uni:true},
+  {id:'es10',name:'Landmine Lateral Raise',muscle:'Shoulders',secondary:'',machine:'Barbell',bw:'no',note:'',uni:true},
+// ── BICEPS ──
+  {id:'e19',name:'Dumbbell Curl',muscle:'Biceps',secondary:'',machine:'Dumbbell',bw:'no',note:''},
+  {id:'e20',name:'Barbell Curl',muscle:'Biceps',secondary:'',machine:'Barbell',bw:'no',note:''},
+  {id:'e21',name:'Band Curl',muscle:'Biceps',secondary:'',machine:'Resistance Band',bw:'no',note:''},
+  {id:'e45',name:'EZ Bar Curl',muscle:'Biceps',secondary:'',machine:'EZ Bar',bw:'no',note:''},
+  {id:'ex3',name:'Incline Dumbbell Curl',muscle:'Biceps',secondary:'',machine:'Dumbbell',bw:'no',note:''},
+  {id:'ex4',name:'Bayesian Curl',muscle:'Biceps',secondary:'',machine:'Cable Machine',bw:'no',note:'',uni:true},
+  {id:'ebi1',name:'Single Arm Dumbbell Curl',muscle:'Biceps',secondary:'',machine:'Dumbbell',bw:'no',note:'',uni:true},
+  {id:'ebi2',name:'Hammer Curl',muscle:'Biceps',secondary:'Forearms',machine:'Dumbbell',bw:'no',note:''},
+  {id:'ebi3',name:'Single Arm Hammer Curl',muscle:'Biceps',secondary:'Forearms',machine:'Dumbbell',bw:'no',note:'',uni:true},
+  {id:'ebi4',name:'Preacher Curl',muscle:'Biceps',secondary:'',machine:'EZ Bar',bw:'no',note:''},
+  {id:'ebi5',name:'Single Arm Preacher Curl',muscle:'Biceps',secondary:'',machine:'Dumbbell',bw:'no',note:'',uni:true},
+  {id:'ebi6',name:'Cable Curl',muscle:'Biceps',secondary:'',machine:'Cable Machine',bw:'no',note:''},
+  {id:'ebi7',name:'Single Arm Cable Curl',muscle:'Biceps',secondary:'',machine:'Cable Machine',bw:'no',note:'',uni:true},
+  {id:'ebi8',name:'Concentration Curl',muscle:'Biceps',secondary:'',machine:'Dumbbell',bw:'no',note:'',uni:true},
+  {id:'ebi9',name:'Cross Body Curl',muscle:'Biceps',secondary:'Forearms',machine:'Dumbbell',bw:'no',note:'',uni:true},
+  {id:'ebi10',name:'Spider Curl',muscle:'Biceps',secondary:'',machine:'Dumbbell',bw:'no',note:''},
+// ── TRICEPS ──
+  {id:'e22',name:'Tricep Pushdown',muscle:'Triceps',secondary:'',machine:'Cable Machine',bw:'no',note:''},
+  {id:'e23',name:'Skull Crusher',muscle:'Triceps',secondary:'',machine:'Barbell',bw:'no',note:''},
+  {id:'e23b',name:'EZ Bar Skull Crusher',muscle:'Triceps',secondary:'',machine:'EZ Bar',bw:'no',note:''},
+  {id:'e24',name:'Dip',muscle:'Triceps',secondary:'Chest',machine:'Dip Bars',bw:'bw',note:''},
+  {id:'e44',name:'Assisted Dip',muscle:'Triceps',secondary:'Chest',machine:'Assisted Pull-Up Machine',bw:'bw',note:''},
+  {id:'e46',name:'EZ Bar Overhead Extension',muscle:'Triceps',secondary:'',machine:'EZ Bar',bw:'no',note:''},
+  {id:'ex7',name:'Tricep Pushdown (Cable)',muscle:'Triceps',secondary:'',machine:'Cable Machine',bw:'no',note:''},
+  {id:'etr1',name:'Single Arm Tricep Pushdown',muscle:'Triceps',secondary:'',machine:'Cable Machine',bw:'no',note:'',uni:true},
+  {id:'etr2',name:'Overhead Tricep Extension (Cable)',muscle:'Triceps',secondary:'',machine:'Cable Machine',bw:'no',note:''},
+  {id:'etr3',name:'Single Arm Overhead Extension',muscle:'Triceps',secondary:'',machine:'Dumbbell',bw:'no',note:'',uni:true},
+  {id:'etr4',name:'Dumbbell Skull Crusher',muscle:'Triceps',secondary:'',machine:'Dumbbell',bw:'no',note:''},
+  {id:'etr5',name:'Close Grip Push-Up',muscle:'Triceps',secondary:'Chest',machine:'Bodyweight',bw:'bw',note:''},
+  {id:'etr6',name:'Tricep Kickback',muscle:'Triceps',secondary:'',machine:'Dumbbell',bw:'no',note:'',uni:true},
+  {id:'etr7',name:'Diamond Push-Up',muscle:'Triceps',secondary:'Chest',machine:'Bodyweight',bw:'bw',note:''},
+  {id:'etr8',name:'Rope Pushdown',muscle:'Triceps',secondary:'',machine:'Cable Machine',bw:'no',note:''},
+// ── LEGS ──
   {id:'e5',name:'Squat',muscle:'Legs',secondary:'Glutes, Core',machine:'Barbell',bw:'no',note:''},
   {id:'e6',name:'Goblet Squat',muscle:'Legs',secondary:'Glutes',machine:'Kettlebell',bw:'no',note:''},
   {id:'e7',name:'Leg Press',muscle:'Legs',secondary:'Glutes',machine:'Leg Press Machine',bw:'no',note:''},
   {id:'e8',name:'Romanian Deadlift',muscle:'Legs',secondary:'Glutes, Lower Back',machine:'Barbell',bw:'no',note:''},
   {id:'e9',name:'Dumbbell Romanian Deadlift',muscle:'Legs',secondary:'Glutes',machine:'Dumbbell',bw:'no',note:''},
-  {id:'e10',name:'Overhead Press',muscle:'Shoulders',secondary:'Triceps',machine:'Barbell',bw:'no',note:''},
-  {id:'e11',name:'Dumbbell Shoulder Press',muscle:'Shoulders',secondary:'Triceps',machine:'Dumbbell',bw:'no',note:''},
-  {id:'e12',name:'Lateral Raise',muscle:'Shoulders',secondary:'',machine:'Dumbbell',bw:'no',note:''},
-  {id:'e13',name:'Pull-Up',muscle:'Back',secondary:'Biceps',machine:'Pull-Up Bar',bw:'bw',note:''},
-  {id:'e14',name:'Chin-Up',muscle:'Back',secondary:'Biceps',machine:'Pull-Up Bar',bw:'bw',note:''},
-  {id:'e15',name:'Barbell Row',muscle:'Back',secondary:'Biceps',machine:'Barbell',bw:'no',note:''},
-  {id:'e16',name:'Dumbbell Row',muscle:'Back',secondary:'Biceps',machine:'Dumbbell',bw:'no',note:''},
-  {id:'e17',name:'Cable Row',muscle:'Back',secondary:'Biceps',machine:'Cable Machine',bw:'no',note:''},
-  {id:'e18',name:'Deadlift',muscle:'Back',secondary:'Legs, Glutes',machine:'Barbell',bw:'no',note:''},
-  {id:'e19',name:'Dumbbell Curl',muscle:'Biceps',secondary:'',machine:'Dumbbell',bw:'no',note:''},
-  {id:'e20',name:'Barbell Curl',muscle:'Biceps',secondary:'',machine:'Barbell',bw:'no',note:''},
-  {id:'e21',name:'Band Curl',muscle:'Biceps',secondary:'',machine:'Resistance Band',bw:'no',note:''},
-  {id:'e22',name:'Tricep Pushdown',muscle:'Triceps',secondary:'',machine:'Cable Machine',bw:'no',note:''},
-  {id:'e23',name:'Skull Crusher',muscle:'Triceps',secondary:'',machine:'Barbell',bw:'no',note:''},
-  {id:'e23b',name:'EZ Bar Skull Crusher',muscle:'Triceps',secondary:'',machine:'EZ Bar',bw:'no',note:''},
-  {id:'e24',name:'Dip',muscle:'Triceps',secondary:'Chest',machine:'Dip Bars',bw:'bw',note:''},
-  {id:'e25',name:'Hip Thrust',muscle:'Glutes',secondary:'',machine:'Barbell',bw:'no',note:''},
-  {id:'e25b',name:'Hip Thrust Machine',muscle:'Glutes',secondary:'',machine:'Hip Thrust Machine',bw:'no',note:''},
-  {id:'e26',name:'Glute Bridge',muscle:'Glutes',secondary:'',machine:'Bodyweight',bw:'bw',note:''},
-  {id:'e27',name:'Calf Raise',muscle:'Calves',secondary:'',machine:'Barbell',bw:'no',note:''},
-  {id:'e27b',name:'Calf Raise Machine',muscle:'Calves',secondary:'',machine:'Calf Raise Machine',bw:'no',note:''},
-  {id:'e28',name:'Dumbbell Calf Raise',muscle:'Calves',secondary:'',machine:'Dumbbell',bw:'no',note:''},
-  {id:'e29',name:'Plank',muscle:'Core',secondary:'',machine:'Bodyweight',bw:'bw',note:''},
-  {id:'e30',name:'Ab Wheel Rollout',muscle:'Core',secondary:'',machine:'Ab Wheel',bw:'bw',note:''},
-  {id:'e31',name:'Band Pull-Apart',muscle:'Shoulders',secondary:'Back',machine:'Resistance Band',bw:'no',note:''},
-  {id:'e32',name:'Kettlebell Swing',muscle:'Glutes',secondary:'Back, Core',machine:'Kettlebell',bw:'no',note:''},
   {id:'e33',name:'Leg Extension',muscle:'Legs',secondary:'',machine:'Leg Extension Machine',bw:'no',note:''},
   {id:'e34',name:'Seated Leg Curl',muscle:'Legs',secondary:'',machine:'Leg Curl Machine',bw:'no',note:''},
   {id:'e35',name:'Lying Leg Curl',muscle:'Legs',secondary:'',machine:'Leg Curl Machine',bw:'no',note:''},
-  {id:'e36',name:'Lat Pulldown',muscle:'Back',secondary:'Biceps',machine:'Lat Pulldown Machine',bw:'no',note:''},
-  {id:'e37',name:'Close Grip Lat Pulldown',muscle:'Back',secondary:'Biceps',machine:'Lat Pulldown Machine',bw:'no',note:''},
-  {id:'e38',name:'Seated Cable Row',muscle:'Back',secondary:'Biceps',machine:'Seated Row Machine',bw:'no',note:''},
-  {id:'e39',name:'Chest Press Machine',muscle:'Chest',secondary:'Triceps',machine:'Chest Press Machine',bw:'no',note:''},
-  {id:'e40',name:'Pec Deck Fly',muscle:'Chest',secondary:'',machine:'Pec Deck Machine',bw:'no',note:''},
-  {id:'e41',name:'Shoulder Press Machine',muscle:'Shoulders',secondary:'Triceps',machine:'Shoulder Press Machine',bw:'no',note:''},
   {id:'e42',name:'Hack Squat',muscle:'Legs',secondary:'Glutes',machine:'Hack Squat Machine',bw:'no',note:''},
-  {id:'e43',name:'Assisted Pull-Up',muscle:'Back',secondary:'Biceps',machine:'Assisted Pull-Up Machine',bw:'no',note:''},
-  {id:'e44',name:'Assisted Dip',muscle:'Triceps',secondary:'Chest',machine:'Assisted Pull-Up Machine',bw:'no',note:''},
-  {id:'e45',name:'EZ Bar Curl',muscle:'Biceps',secondary:'',machine:'EZ Bar',bw:'no',note:''},
-  {id:'e46',name:'EZ Bar Overhead Extension',muscle:'Triceps',secondary:'',machine:'EZ Bar',bw:'no',note:''},
-  {id:'e47',name:'Cable Crunch',muscle:'Core',secondary:'',machine:'Ab Machine',bw:'no',note:''},
   {id:'e48',name:'Smith Machine Squat',muscle:'Legs',secondary:'Glutes',machine:'Smith Machine',bw:'no',note:''},
-  {id:'e49',name:'Smith Machine Bench Press',muscle:'Chest',secondary:'Triceps',machine:'Smith Machine',bw:'no',note:''},
+  {id:'el1',name:'Bulgarian Split Squat',muscle:'Legs',secondary:'Glutes',machine:'Dumbbell',bw:'no',note:'',uni:true},
+  {id:'el2',name:'Barbell Bulgarian Split Squat',muscle:'Legs',secondary:'Glutes',machine:'Barbell',bw:'no',note:'',uni:true},
+  {id:'el3',name:'Lunges',muscle:'Legs',secondary:'Glutes',machine:'Dumbbell',bw:'no',note:''},
+  {id:'el4',name:'Walking Lunges',muscle:'Legs',secondary:'Glutes',machine:'Dumbbell',bw:'no',note:''},
+  {id:'el5',name:'Barbell Lunge',muscle:'Legs',secondary:'Glutes',machine:'Barbell',bw:'no',note:''},
+  {id:'el6',name:'Single Leg Press',muscle:'Legs',secondary:'Glutes',machine:'Leg Press Machine',bw:'no',note:'',uni:true},
+  {id:'el7',name:'Single Leg Extension',muscle:'Legs',secondary:'',machine:'Leg Extension Machine',bw:'no',note:'',uni:true},
+  {id:'el8',name:'Single Leg Curl',muscle:'Legs',secondary:'',machine:'Leg Curl Machine',bw:'no',note:'',uni:true},
+  {id:'el9',name:'Step Up',muscle:'Legs',secondary:'Glutes',machine:'Dumbbell',bw:'no',note:'',uni:true},
+  {id:'el10',name:'Box Jump',muscle:'Legs',secondary:'Glutes, Core',machine:'Bodyweight',bw:'bw',note:''},
+  {id:'el11',name:'Nordic Curl',muscle:'Legs',secondary:'',machine:'Bodyweight',bw:'bw',note:''},
+  {id:'el12',name:'Single Leg Romanian Deadlift',muscle:'Legs',secondary:'Glutes',machine:'Dumbbell',bw:'no',note:'',uni:true},
+  {id:'el13',name:'Cyclist Squat',muscle:'Legs',secondary:'',machine:'Barbell',bw:'no',note:''},
+  {id:'el14',name:'Sumo Squat',muscle:'Legs',secondary:'Glutes, Inner Thighs',machine:'Dumbbell',bw:'no',note:''},
+  {id:'el15',name:'Front Squat',muscle:'Legs',secondary:'Core',machine:'Barbell',bw:'no',note:''},
+  {id:'el16',name:'Pendulum Squat',muscle:'Legs',secondary:'Glutes',machine:'Pendulum Squat Machine',bw:'no',note:''},
+// ── GLUTES ──
+  {id:'e25',name:'Hip Thrust',muscle:'Glutes',secondary:'',machine:'Barbell',bw:'no',note:''},
+  {id:'e25b',name:'Hip Thrust Machine',muscle:'Glutes',secondary:'',machine:'Hip Thrust Machine',bw:'no',note:''},
+  {id:'e26',name:'Glute Bridge',muscle:'Glutes',secondary:'',machine:'Bodyweight',bw:'bw',note:''},
+  {id:'e32',name:'Kettlebell Swing',muscle:'Glutes',secondary:'Back, Core',machine:'Kettlebell',bw:'no',note:''},
   {id:'e50',name:'Smith Machine Hip Thrust',muscle:'Glutes',secondary:'',machine:'Smith Machine',bw:'no',note:''},
-  {id:'ex1',name:'Reverse Fly',muscle:'Shoulders',secondary:'Back',machine:'Cable Machine',bw:'no',note:''},
-  {id:'ex2',name:'Cable Crossover',muscle:'Chest',secondary:'',machine:'Cable Machine',bw:'no',note:''},
-  {id:'ex3',name:'Incline Dumbbell Curl',muscle:'Biceps',secondary:'',machine:'Dumbbell',bw:'no',note:''},
-  {id:'ex4',name:'Bayesian Curl',muscle:'Biceps',secondary:'',machine:'Cable Machine',bw:'no',note:''},
-  {id:'ex5',name:'Lateral Raise (Cable)',muscle:'Shoulders',secondary:'',machine:'Cable Machine',bw:'no',note:''},
-  {id:'ex6',name:'Iso-Lateral Row',muscle:'Back',secondary:'Biceps',machine:'Seated Row Machine',bw:'no',note:''},
-  {id:'ex7',name:'Tricep Pushdown (Cable)',muscle:'Triceps',secondary:'',machine:'Cable Machine',bw:'no',note:''},
+  {id:'eg1',name:'Single Leg Hip Thrust',muscle:'Glutes',secondary:'',machine:'Bodyweight',bw:'bw',note:'',uni:true},
+  {id:'eg2',name:'Cable Kickback',muscle:'Glutes',secondary:'',machine:'Cable Machine',bw:'no',note:'',uni:true},
+  {id:'eg3',name:'Donkey Kick',muscle:'Glutes',secondary:'',machine:'Bodyweight',bw:'bw',note:'',uni:true},
+  {id:'eg4',name:'Romanian Deadlift (Dumbbell)',muscle:'Glutes',secondary:'Legs',machine:'Dumbbell',bw:'no',note:''},
+  {id:'eg5',name:'Abduction Machine',muscle:'Glutes',secondary:'',machine:'Abductor Machine',bw:'no',note:''},
+  {id:'eg6',name:'Clamshell',muscle:'Glutes',secondary:'',machine:'Resistance Band',bw:'no',note:'',uni:true},
+  {id:'eg7',name:'Fire Hydrant',muscle:'Glutes',secondary:'',machine:'Bodyweight',bw:'bw',note:'',uni:true},
+  {id:'eg8',name:'Frog Pump',muscle:'Glutes',secondary:'',machine:'Bodyweight',bw:'bw',note:''},
+// ── CALVES ──
+  {id:'e27',name:'Calf Raise (Standing)',muscle:'Calves',secondary:'',machine:'Barbell',bw:'no',note:''},
+  {id:'e27b',name:'Calf Raise Machine',muscle:'Calves',secondary:'',machine:'Calf Raise Machine',bw:'no',note:''},
+  {id:'e28',name:'Dumbbell Calf Raise',muscle:'Calves',secondary:'',machine:'Dumbbell',bw:'no',note:''},
   {id:'ex8',name:'Standing Calf Raise (Barbell)',muscle:'Calves',secondary:'',machine:'Barbell',bw:'no',note:''},
+  {id:'eca1',name:'Seated Calf Raise',muscle:'Calves',secondary:'',machine:'Seated Calf Raise Machine',bw:'no',note:''},
+  {id:'eca2',name:'Single Leg Calf Raise',muscle:'Calves',secondary:'',machine:'Bodyweight',bw:'bw',note:'',uni:true},
+  {id:'eca3',name:'Leg Press Calf Raise',muscle:'Calves',secondary:'',machine:'Leg Press Machine',bw:'no',note:''},
+  {id:'eca4',name:'Single Leg Calf Raise (Machine)',muscle:'Calves',secondary:'',machine:'Calf Raise Machine',bw:'no',note:'',uni:true},
+  {id:'eca5',name:'Tibialis Raise',muscle:'Calves',secondary:'',machine:'Bodyweight',bw:'bw',note:''},
+// ── CORE ──
+  {id:'e29',name:'Plank',muscle:'Core',secondary:'',machine:'Bodyweight',bw:'bw',note:''},
+  {id:'e30',name:'Ab Wheel Rollout',muscle:'Core',secondary:'',machine:'Ab Wheel',bw:'bw',note:''},
+  {id:'e47',name:'Cable Crunch',muscle:'Core',secondary:'',machine:'Ab Machine',bw:'no',note:''},
+  {id:'eco1',name:'Hanging Leg Raise',muscle:'Core',secondary:'',machine:'Pull-Up Bar',bw:'bw',note:''},
+  {id:'eco2',name:'Sit-Up',muscle:'Core',secondary:'',machine:'Bodyweight',bw:'bw',note:''},
+  {id:'eco3',name:'Crunch',muscle:'Core',secondary:'',machine:'Bodyweight',bw:'bw',note:''},
+  {id:'eco4',name:'Russian Twist',muscle:'Core',secondary:'',machine:'Bodyweight',bw:'bw',note:''},
+  {id:'eco5',name:'Pallof Press',muscle:'Core',secondary:'',machine:'Cable Machine',bw:'no',note:'',uni:true},
+  {id:'eco6',name:'Dead Bug',muscle:'Core',secondary:'',machine:'Bodyweight',bw:'bw',note:''},
+  {id:'eco7',name:'Leg Raise',muscle:'Core',secondary:'',machine:'Bodyweight',bw:'bw',note:''},
+  {id:'eco8',name:'Bicycle Crunch',muscle:'Core',secondary:'',machine:'Bodyweight',bw:'bw',note:''},
+  {id:'eco9',name:'Mountain Climber',muscle:'Core',secondary:'',machine:'Bodyweight',bw:'bw',note:''},
+  {id:'eco10',name:'Side Plank',muscle:'Core',secondary:'',machine:'Bodyweight',bw:'bw',note:'',uni:true},
+  {id:'eco11',name:'Dragon Flag',muscle:'Core',secondary:'',machine:'Bodyweight',bw:'bw',note:''},
+  {id:'eco12',name:'Woodchop',muscle:'Core',secondary:'',machine:'Cable Machine',bw:'no',note:'',uni:true},
+  {id:'eco13',name:'Landmine Rotation',muscle:'Core',secondary:'',machine:'Barbell',bw:'no',note:''},
+  {id:'eco14',name:'Ab Machine',muscle:'Core',secondary:'',machine:'Ab Machine',bw:'no',note:''},
+  {id:'eco15',name:'Hollow Hold',muscle:'Core',secondary:'',machine:'Bodyweight',bw:'bw',note:''},
+// ── FULL BODY / COMPOUND ──
+  {id:'ef1',name:'Clean and Press',muscle:'Full Body',secondary:'',machine:'Barbell',bw:'no',note:''},
+  {id:'ef2',name:'Thruster',muscle:'Full Body',secondary:'',machine:'Barbell',bw:'no',note:''},
+  {id:'ef3',name:'Burpee',muscle:'Full Body',secondary:'',machine:'Bodyweight',bw:'bw',note:''},
+  {id:'ef4',name:'Turkish Get-Up',muscle:'Full Body',secondary:'Core',machine:'Kettlebell',bw:'no',note:'',uni:true},
+  {id:'ef5',name:'Kettlebell Clean',muscle:'Full Body',secondary:'',machine:'Kettlebell',bw:'no',note:'',uni:true},
+  {id:'ef6',name:'Power Clean',muscle:'Full Body',secondary:'',machine:'Barbell',bw:'no',note:''},
 ];
+
 const DEFAULT_ROUTINES=[
   {id:'r1',name:'Monday — Full Body A',desc:'Upper + Lower + Core',exerciseIds:['e5','e1','e13','e4','ex5','ex4','ex7','ex8','e38']},
   {id:'r2',name:'Wednesday — Full Body B',desc:'Pull + Legs + Core',exerciseIds:['e8','e41','ex6','e35','e19','ex7','e47']},
@@ -1236,14 +1341,21 @@ function openEditRoutineModal(){
   editingRoutineIdx=viewingRoutineIdx;
   const r=state.routines[editingRoutineIdx];
   editingRoutineExIds=[...(r.exerciseIds||[])];
+  // Load saved defaults or derive from history
+  window.editingRoutineDefaults=(r.exerciseIds||[]).map((id,idx)=>{
+    if(r.routineDefaults&&r.routineDefaults[idx])return{...r.routineDefaults[idx]};
+    const prev=getLastSets(id);
+    if(prev.length)return{sets:prev.length,reps:prev[0].reps||10,weight:prev[0].weight||0};
+    return{sets:3,reps:10,weight:0};
+  });
   document.getElementById('edit-routine-modal-title').textContent='Edit Routine';
   document.getElementById('edit-routine-name').value=r.name;
   document.getElementById('edit-routine-desc').value=r.desc||'';
   document.getElementById('edit-routine-delete-btn').onclick=()=>{
-    if(confirm('Delete "'+r.name+'"?')){
+    forgeConfirm('Delete Routine?','Delete "'+r.name+'"? This cannot be undone.',()=>{
       state.routines.splice(editingRoutineIdx,1);save();renderRoutinesList();
       closeModal('modal-edit-routine');closeModal('modal-routine-detail');viewingRoutineIdx=null;editingRoutineIdx=null;
-    }
+    });
   };
   renderEditRoutineExList();
   openModal('modal-edit-routine');
@@ -1252,10 +1364,19 @@ function openEditRoutineModal(){
 function renderEditRoutineExList(){
   const list=document.getElementById('edit-routine-ex-list');
   if(!editingRoutineExIds.length){list.innerHTML='<div class="small text2" style="text-align:center;padding:10px 0">No exercises yet. Tap + Add Exercise below.</div>';return;}
+  // editingRoutineDefaults: array of {sets,reps,weight} parallel to editingRoutineExIds
+  if(!window.editingRoutineDefaults)window.editingRoutineDefaults=[];
+  while(window.editingRoutineDefaults.length<editingRoutineExIds.length)
+    window.editingRoutineDefaults.push({sets:3,reps:10,weight:0});
+
   list.innerHTML=editingRoutineExIds.map((id,idx)=>{
     const ex=state.exercises.find(e=>e.id===id);if(!ex)return'';
     const color=MUSCLE_COLORS[ex.muscle]||'#aaa';
-    return'<div class="edit-ex-row">'
+    const d=window.editingRoutineDefaults[idx]||{sets:3,reps:10,weight:0};
+    const isBW=ex.bw==='bw';
+    return'<div class="edit-ex-row" style="flex-direction:column;align-items:stretch;gap:8px;padding:12px 0;border-bottom:1px solid var(--border)">'
+      // Header row
+      +'<div style="display:flex;align-items:center;gap:8px">'
       +'<div style="width:22px;height:22px;border-radius:6px;background:var(--bg4);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--text2);flex-shrink:0">'+(idx+1)+'</div>'
       +'<span class="rd-muscle-dot" style="background:'+color+'"></span>'
       +'<div style="flex:1"><div class="bold" style="font-size:13px">'+escHtml(ex.name)+'</div>'
@@ -1264,18 +1385,44 @@ function renderEditRoutineExList(){
       +(idx>0?'<button class="btn btn-ghost btn-sm" onclick="moveRoutineEx('+idx+',-1)" style="padding:4px 8px">↑</button>':'')
       +(idx<editingRoutineExIds.length-1?'<button class="btn btn-ghost btn-sm" onclick="moveRoutineEx('+idx+',1)" style="padding:4px 8px">↓</button>':'')
       +'<button class="btn btn-danger btn-sm" onclick="removeRoutineEx('+idx+')" style="padding:4px 8px">✕</button>'
-      +'</div></div>';
+      +'</div></div>'
+      // Sets/reps/weight defaults row
+      +'<div style="display:flex;gap:8px;padding:0 4px">'
+      +'<div style="flex:1;text-align:center">'
+      +'<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Sets</div>'
+      +'<input type="number" inputmode="numeric" value="'+d.sets+'" min="1" max="20" style="text-align:center;padding:7px 4px;font-size:14px;font-weight:700" oninput="updateRoutineDefault('+idx+',\'sets\',this.value)"/>'
+      +'</div>'
+      +'<div style="flex:1;text-align:center">'
+      +'<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Reps</div>'
+      +'<input type="number" inputmode="numeric" value="'+d.reps+'" min="1" max="100" style="text-align:center;padding:7px 4px;font-size:14px;font-weight:700" oninput="updateRoutineDefault('+idx+',\'reps\',this.value)"/>'
+      +'</div>'
+      +(isBW?'':'<div style="flex:1;text-align:center">'
+      +'<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">kg</div>'
+      +'<input type="number" inputmode="decimal" value="'+d.weight+'" min="0" step="0.5" style="text-align:center;padding:7px 4px;font-size:14px;font-weight:700" oninput="updateRoutineDefault('+idx+',\'weight\',this.value)"/>'
+      +'</div>')
+      +'</div>'
+      +'</div>';
   }).join('');
+}
+
+function updateRoutineDefault(idx,field,value){
+  if(!window.editingRoutineDefaults)window.editingRoutineDefaults=[];
+  if(!window.editingRoutineDefaults[idx])window.editingRoutineDefaults[idx]={sets:3,reps:10,weight:0};
+  window.editingRoutineDefaults[idx][field]=parseFloat(value)||0;
 }
 
 function moveRoutineEx(idx,dir){
   const arr=editingRoutineExIds;
   const tmp=arr[idx];arr[idx]=arr[idx+dir];arr[idx+dir]=tmp;
+  if(window.editingRoutineDefaults){
+    const d=window.editingRoutineDefaults;
+    const tmpd=d[idx];d[idx]=d[idx+dir];d[idx+dir]=tmpd;
+  }
   renderEditRoutineExList();
 }
-
 function removeRoutineEx(idx){
   editingRoutineExIds.splice(idx,1);
+  if(window.editingRoutineDefaults)window.editingRoutineDefaults.splice(idx,1);
   renderEditRoutineExList();
 }
 
@@ -1311,6 +1458,7 @@ function saveEditRoutine(){
   state.routines[editingRoutineIdx].name=name;
   state.routines[editingRoutineIdx].desc=document.getElementById('edit-routine-desc').value.trim();
   state.routines[editingRoutineIdx].exerciseIds=[...editingRoutineExIds];
+  state.routines[editingRoutineIdx].routineDefaults=[...(window.editingRoutineDefaults||[])];
   save();renderRoutinesList();closeModal('modal-edit-routine');
   openRoutineDetail(editingRoutineIdx);
 }
@@ -1515,7 +1663,10 @@ function renderActiveMesoHero(){
         +'<div class="bold" style="font-size:16px;line-height:1.2">'+escHtml(r.name)+'</div>'
         +'<div class="small text2" style="margin-top:2px">'+n+' exercise'+(n!==1?'s':'')+' &middot; '+est+'</div>'
         +'</div>'
-        +'<button class="btn btn-primary btn-sm" onclick="startMesoRoutine('+mesoIdx+')" style="flex-shrink:0;font-weight:800">\u25B6 Start</button>'
+        +'<div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0">'
+        +'<button class="btn btn-primary btn-sm" onclick="startMesoRoutine('+mesoIdx+')" style="font-weight:800">\u25B6 Start</button>'
+        +'<button class="btn btn-ghost btn-sm" onclick="skipMesoRoutine('+mesoIdx+')" style="font-size:11px;color:var(--text3)">Skip</button>'
+        +'</div>'
         +'</div>';
     }
     return '<div class="tight-row" style="border-radius:10px;margin:2px 0" onclick="startRoutineWorkout('+state.routines.indexOf(r)+')">'
@@ -2033,9 +2184,20 @@ function startRoutineWorkout(i){
   const exercises=(r.exerciseIds||[]).map((id,idx)=>{
     const ex=state.exercises.find(e=>e.id===id);if(!ex)return null;
     const prev=getLastSets(id);
-    // Restore saved superset group from routine
     const sg=(r.supersetGroups&&r.supersetGroups[idx])||null;
-    return{exId:id,sets:prev.length?prev.map(s=>({...s,done:false})):[newSet()],supersetGroup:sg};
+    if(prev.length){
+      return{exId:id,sets:prev.map(s=>({...s,done:false})),supersetGroup:sg};
+    }
+    // No history — use routine defaults if set, otherwise blank set
+    const def=r.routineDefaults&&r.routineDefaults[idx];
+    if(def&&(def.sets>0)){
+      const sets=[];
+      for(let s=0;s<(def.sets||3);s++){
+        sets.push({type:'normal',weight:def.weight||0,reps:def.reps||10,rpe:0,done:false});
+      }
+      return{exId:id,sets,supersetGroup:sg};
+    }
+    return{exId:id,sets:[newSet()],supersetGroup:sg};
   }).filter(Boolean);
   beginWorkout(r.name,exercises,r.id,[...(r.exerciseIds||[])]);
 }
@@ -2092,8 +2254,9 @@ function buildExerciseCard(exIdx){
   const metaParts=[exData.muscle,exData.secondary,exData.machine].filter(Boolean);
   const noteHtml=exData.note?'<div class="note-row"><span class="note-icon">📌</span><span class="note-text">'+escHtml(exData.note)+'</span></div>':'';
   const isBW=exData.bw==='bw';
+  const isUni=!!exData.uni;
   wrap.innerHTML='<div class="exercise-header">'
-    +'<div><div class="exercise-name">'+escHtml(exData.name)+'</div><div class="exercise-meta">'+escHtml(metaParts.join(' · '))+'</div></div>'
+    +'<div><div class="exercise-name">'+escHtml(exData.name)+'</div><div class="exercise-meta">'+escHtml(metaParts.join(' · '))+(isUni?' <span style="color:var(--accent);font-size:10px;font-weight:700">UNILATERAL</span>':'')+'</div></div>'
     +'<div style="display:flex;gap:4px">'
     +'<button class="btn btn-ghost btn-sm" onclick="openProgressModal(\''+ex.exId+'\')">📈</button>'
     +'<button class="btn btn-ghost btn-sm" onclick="openNoteModal(\''+ex.exId+'\')">📌</button>'
@@ -2101,7 +2264,7 @@ function buildExerciseCard(exIdx){
     +noteHtml
     +'<table class="set-table"><thead><tr>'
     +'<th>#</th><th>Type</th><th style="color:var(--text3)">Prev</th>'
-    +(isBW?'':'<th>kg</th>')+'<th>Reps</th><th>RPE</th><th>✓</th>'
+    +(isBW?'':'<th>kg</th>')+(isUni?'<th style="color:#47c8ff;font-size:10px">L</th><th style="color:#F97316;font-size:10px">R</th>':'<th>Reps</th>')+'<th>RPE</th><th>✓</th>'
     +'</tr></thead><tbody id="sets-body-'+exIdx+'"></tbody></table>'
     +'<div class="exercise-actions">'
     +'<button class="btn btn-ghost btn-sm" onclick="addSet('+exIdx+')">＋ Set</button>'
@@ -2117,41 +2280,41 @@ function renderSets(exIdx){
   const exData=state.exercises.find(e=>e.id===ex.exId)||{bw:'no'};
   const tbody=document.getElementById('sets-body-'+exIdx);if(!tbody)return;
   const isBW=exData.bw==='bw';
+  const isUni=!!exData.uni;
   const prevSets=getLastSets(ex.exId);
   tbody.innerHTML='';
   ex.sets.forEach((set,setIdx)=>{
     const tr=document.createElement('tr');
-    const isPR=set.done&&set.weight>0&&checkSetForPR(ex.exId,set.weight||0,set.reps||0);
+    const isPR=set.done&&set.weight>0&&checkSetForPR(ex.exId,set.weight||0,(set.repsL||set.reps)||0);
     tr.className='set-row'+(set.done?' completed':'')+(isPR?' pr-row':'');
     tr.id='set-row-'+exIdx+'-'+setIdx;
     const t=SET_TYPES.find(x=>x.id===set.type)||SET_TYPES[0];
     const rpeColor=set.rpe?(set.rpe<=5?'#2ed573':set.rpe<=7?'#ff8c00':'#ff4757'):'var(--text3)';
-    // Previous set for this slot — from history first, then from set's stored prev values
     const ps=prevSets[setIdx]||prevSets[prevSets.length-1];
-    // Use history slot if available, else fall back to what addSet calculated
     const phWeight=ps?ps.weight:(set.prevWeight||null);
     const phReps=ps?ps.reps:(set.prevReps||null);
-    const prevTxt=ps?(isBW?ps.reps+'r':(ps.weight||0)+'kg\n'+(ps.reps||0)+'r')
+    const prevTxt=ps
+      ?(isBW?ps.reps+'r':(ps.weight||0)+'kg\n'+(ps.repsL!=null?(ps.repsL+'L '+ps.repsR+'R'):(ps.reps||0)+'r'))
       :(set.prevWeight||set.prevReps?(isBW?(set.prevReps||0)+'r':(set.prevWeight||0)+'kg\n'+(set.prevReps||0)+'r'):'—');
-    if(isBW){
-      tr.innerHTML='<td><span class="set-num">'+(setIdx+1)+'</span></td>'
-        +'<td><button class="btn btn-sm set-type-btn '+t.badgeClass+'" onclick="openSetTypeModal('+exIdx+','+setIdx+')">'+t.label+'</button></td>'
-        +'<td><div class="prev-cell">'+escHtml(prevTxt)+'</div></td>'
-        +'<td><input class="set-input'+(isPR?' pr-input':'')+'" type="number" inputmode="numeric" value="'+(set.reps||'')+'" placeholder="'+(phReps||'—')+'" onchange="updateSet('+exIdx+','+setIdx+',\'reps\',this.value)" onfocus="if(!this.value&&this.placeholder!==\'—\')this.value=this.placeholder;" style="width:52px"/></td>'
-        +'<td><input class="rpe-input" type="number" inputmode="numeric" value="'+(set.rpe||'')+'" placeholder="'+(set.prevRpe||'—')+'" min="1" max="10" oninput="updateRPE('+exIdx+','+setIdx+',this)" style="color:'+rpeColor+'"/></td>'
-        +'<td><button class="complete-btn'+(set.done?' done':'')+'" onclick="toggleSetDone('+exIdx+','+setIdx+')">✓</button></td>';
-    }else{
-      tr.innerHTML='<td><span class="set-num">'+(setIdx+1)+'</span></td>'
-        +'<td><button class="btn btn-sm set-type-btn '+t.badgeClass+'" onclick="openSetTypeModal('+exIdx+','+setIdx+')">'+t.label+'</button></td>'
-        +'<td><div class="prev-cell">'+escHtml(prevTxt)+'</div></td>'
-        +'<td><input class="set-input'+(isPR?' pr-input':'')+'" type="number" inputmode="decimal" value="'+(set.weight||'')+'" placeholder="'+(phWeight||'—')+'" onchange="updateSet('+exIdx+','+setIdx+',\'weight\',this.value)" onfocus="if(!this.value&&this.placeholder!==\'—\')this.value=this.placeholder;"/></td>'
-        +'<td><input class="set-input'+(isPR?' pr-input':'')+'" type="number" inputmode="numeric" value="'+(set.reps||'')+'" placeholder="'+(phReps||'—')+'" onchange="updateSet('+exIdx+','+setIdx+',\'reps\',this.value)" onfocus="if(!this.value&&this.placeholder!==\'—\')this.value=this.placeholder;"/></td>'
-        +'<td><input class="rpe-input" type="number" inputmode="numeric" value="'+(set.rpe||'')+'" placeholder="'+(set.prevRpe||'—')+'" min="1" max="10" oninput="updateRPE('+exIdx+','+setIdx+',this)" style="color:'+rpeColor+'"/></td>'
-        +'<td><button class="complete-btn'+(set.done?' done':'')+'" onclick="toggleSetDone('+exIdx+','+setIdx+')">✓</button></td>';
+    let cells='<td><span class="set-num">'+(setIdx+1)+'</span></td>'
+      +'<td><button class="btn btn-sm set-type-btn '+t.badgeClass+'" onclick="openSetTypeModal('+exIdx+','+setIdx+')">'+t.label+'</button></td>'
+      +'<td><div class="prev-cell">'+escHtml(prevTxt)+'</div></td>';
+    if(!isBW){
+      cells+='<td><input class="set-input'+(isPR?' pr-input':'')+'" type="number" inputmode="decimal" value="'+(set.weight||'')+'" placeholder="'+(phWeight||'—')+'" onchange="updateSet('+exIdx+','+setIdx+',\'weight\',this.value)" onfocus="if(!this.value&&this.placeholder!==\'—\')this.value=this.placeholder;"/></td>';
     }
+    if(isUni){
+      cells+='<td><input class="set-input" type="number" inputmode="numeric" value="'+(set.repsL!=null?set.repsL:'')+'" placeholder="'+(phReps||'—')+'" onchange="updateSet('+exIdx+','+setIdx+',\'repsL\',this.value)" onfocus="if(!this.value&&this.placeholder!==\'—\')this.value=this.placeholder;" style="width:38px;border-color:#47c8ff55;"/></td>'
+        +'<td><input class="set-input" type="number" inputmode="numeric" value="'+(set.repsR!=null?set.repsR:'')+'" placeholder="'+(phReps||'—')+'" onchange="updateSet('+exIdx+','+setIdx+',\'repsR\',this.value)" onfocus="if(!this.value&&this.placeholder!==\'—\')this.value=this.placeholder;" style="width:38px;border-color:#F9731655;"/></td>';
+    }else{
+      cells+='<td><input class="set-input'+(isPR?' pr-input':'')+'" type="number" inputmode="numeric" value="'+(set.reps||'')+'" placeholder="'+(phReps||'—')+'" onchange="updateSet('+exIdx+','+setIdx+',\'reps\',this.value)" onfocus="if(!this.value&&this.placeholder!==\'—\')this.value=this.placeholder;"/></td>';
+    }
+    cells+='<td><input class="rpe-input" type="number" inputmode="numeric" value="'+(set.rpe||'')+'" placeholder="'+(set.prevRpe||'—')+'" min="1" max="10" oninput="updateRPE('+exIdx+','+setIdx+',this)" style="color:'+rpeColor+'"/></td>'
+      +'<td><button class="complete-btn'+(set.done?' done':'')+'" onclick="toggleSetDone('+exIdx+','+setIdx+')">✓</button></td>';
+    tr.innerHTML=cells;
     tbody.appendChild(tr);
   });
 }
+
 
 function updateSet(exIdx,setIdx,field,value){
   activeWorkout.exercises[exIdx].sets[setIdx][field]=parseFloat(value)||0;
@@ -2173,9 +2336,21 @@ function toggleSetDone(exIdx,setIdx){
   const set=activeWorkout.exercises[exIdx].sets[setIdx];
   const row=document.getElementById('set-row-'+exIdx+'-'+setIdx);
   const inputs=row.querySelectorAll('.set-input');
-  // Auto-fill from placeholder if blank
-  if(inputs[0]&&!set.weight&&inputs[0].placeholder&&inputs[0].placeholder!=='—'){set.weight=parseFloat(inputs[0].placeholder)||0;inputs[0].value=set.weight;}
-  if(inputs[1]&&!set.reps&&inputs[1].placeholder&&inputs[1].placeholder!=='—'){set.reps=parseFloat(inputs[1].placeholder)||0;inputs[1].value=set.reps;}
+  // Auto-fill from placeholder if blank — handles both standard and unilateral
+  const exData=state.exercises.find(e=>e.id===activeWorkout.exercises[exIdx].exId)||{};
+  const isUni=!!exData.uni;
+  const isBW=exData.bw==='bw';
+  if(isUni){
+    const inputL=row.querySelector('input[onchange*="repsL"]');
+    const inputR=row.querySelector('input[onchange*="repsR"]');
+    if(inputL&&set.repsL==null&&inputL.placeholder&&inputL.placeholder!=='—'){set.repsL=parseFloat(inputL.placeholder)||0;inputL.value=set.repsL;}
+    if(inputR&&set.repsR==null&&inputR.placeholder&&inputR.placeholder!=='—'){set.repsR=parseFloat(inputR.placeholder)||0;inputR.value=set.repsR;}
+    // Set reps to avg of L/R for PR/volume tracking
+    if(set.repsL!=null||set.repsR!=null)set.reps=Math.round(((set.repsL||0)+(set.repsR||0))/2);
+  }else{
+    if(inputs[0]&&!set.weight&&!isBW&&inputs[0].placeholder&&inputs[0].placeholder!=='—'){set.weight=parseFloat(inputs[0].placeholder)||0;inputs[0].value=set.weight;}
+    if(inputs[1]&&!set.reps&&inputs[1].placeholder&&inputs[1].placeholder!=='—'){set.reps=parseFloat(inputs[1].placeholder)||0;inputs[1].value=set.reps;}
+  }
   set.done=!set.done;
   const btn=row.querySelector('.complete-btn');
   row.classList.toggle('completed',set.done);btn.classList.toggle('done',set.done);
