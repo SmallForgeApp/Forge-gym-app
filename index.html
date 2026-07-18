@@ -60,6 +60,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'DM San
 .btn-orange{background:#ff8c0022;color:var(--orange);border:1px solid #ff8c0044;}
 .btn-sm{padding:6px 11px;font-size:12px;border-radius:7px;}.btn-full{width:100%;}
 input,textarea,select{background:var(--bg3);border:1px solid var(--border);border-radius:10px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:14px;padding:11px 14px;outline:none;transition:border-color 0.15s;width:100%;}
+input[type="radio"],input[type="checkbox"]{width:auto;padding:0;background:none;border:1px solid var(--border);}
 input:focus,textarea:focus,select:focus{border-color:#e8ff4788;}
 select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .input-label{font-size:12px;color:var(--text2);margin-bottom:5px;font-weight:500;letter-spacing:0.4px;text-transform:uppercase;}
@@ -104,7 +105,7 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .tight-name{font-weight:600;font-size:14px;color:var(--text);line-height:1.2;}
 .tight-meta{font-size:11px;color:var(--text3);margin-top:1px;}
 .tight-badge{font-size:9px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;background:var(--accent);color:#0F1117;padding:2px 7px;border-radius:6px;margin-left:6px;}
-.tight-drag{padding:6px 4px;cursor:grab;color:var(--text3);font-size:16px;line-height:1;touch-action:none;flex-shrink:0;}
+.lp-dragging{opacity:0.55;box-shadow:0 6px 18px rgba(0,0,0,0.35);transform:scale(0.99);}
 .tight-dots{width:30px;height:30px;border-radius:8px;border:none;background:transparent;color:var(--text2);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-right:4px;}
 /* MESOCYCLE CARDS */
 .meso-card{background:var(--bg2);border-radius:var(--radius);margin:0 16px 12px;padding:16px;border:1px solid var(--border);box-shadow:var(--shadow);cursor:pointer;}
@@ -292,26 +293,27 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
         <div style="font-size:13px;color:var(--text2);margin-top:4px;">Home</div>
       </div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
-        <button class="icon-btn" onclick="openHomeLayoutModal()" title="Reorder">↕️</button>
         <button class="icon-btn" onclick="toggleTheme()" id="theme-btn">🌙</button>
       </div>
     </div>
   </div>
   <div class="scroll pb" id="home-scroll" style="display:flex;flex-direction:column;">
-    <div id="home-sec-meso"><div id="active-meso-hero"></div></div>
-    <div id="home-sec-startEmpty" style="padding:12px 16px 8px;">
+    <div class="home-sec" id="home-sec-meso" data-home-key="meso">
+      <div id="active-meso-hero"></div>
+    </div>
+    <div class="home-sec" id="home-sec-startEmpty" data-home-key="startEmpty" style="padding:12px 16px 8px;">
       <button class="btn btn-ghost btn-full" onclick="startEmptyWorkout()" style="border-style:dashed;font-size:13px;border-radius:var(--radius);">⚡ Start Empty Workout</button>
     </div>
-    <div id="home-sec-quickAccess">
+    <div class="home-sec" id="home-sec-quickAccess" data-home-key="quickAccess">
       <div class="sec-hdr"><span class="sec-hdr-title">Quick Access</span></div>
       <div class="qs-grid">
         <div class="qs-card" onclick="switchTab('routines')"><div class="qs-icon">📋</div><div class="qs-label">Routines</div></div>
         <div class="qs-card" onclick="openPlateCalc()"><div class="qs-icon">🏋️</div><div class="qs-label">Plates</div></div>
-        <div class="qs-card" onclick="openBWTracker()"><div class="qs-icon">⚖️</div><div class="qs-label">Body Weight</div></div>
+        <div class="qs-card" onclick="openBWTracker()"><div class="qs-icon">📏</div><div class="qs-label">Body Measurements</div></div>
         <div class="qs-card" onclick="switchTab('settings')"><div class="qs-icon">⚙️</div><div class="qs-label">Settings</div></div>
       </div>
     </div>
-    <div id="home-sec-chart">
+    <div class="home-sec" id="home-sec-chart" data-home-key="chart">
       <div class="sec-hdr"><span class="sec-hdr-title">Weekly Consistency</span></div>
       <div id="weekly-consistency-chart" style="margin:0 16px 16px;padding:14px;background:var(--bg2);border-radius:var(--radius);"></div>
     </div>
@@ -357,9 +359,11 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <div class="workout-stat">Time: <span id="workout-duration">0:00</span></div>
       <div class="workout-stat">Vol: <span id="workout-volume">0kg</span></div>
       <div class="workout-stat">Sets: <span id="workout-sets">0</span></div>
-      <div class="workout-stat">RPE: <span id="workout-rpe" style="color:var(--orange)">—</span></div>
+      <div class="workout-stat">Effort (RIR): <span id="workout-rpe" style="color:var(--orange)">—</span></div>
     </div>
     <div id="workout-est-time" style="margin-top:4px;font-size:11px;color:var(--accent2)"></div>
+    <div id="workout-meso-note" style="margin-top:4px;font-size:11px;color:#ff8c00;display:none"></div>
+    <div id="workout-rir-note" style="margin-top:4px;font-size:11px;color:var(--accent);font-weight:700;display:none"></div>
     <input id="workout-notes" placeholder="Session notes..." style="margin-top:6px;font-size:12px;padding:6px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px"/>
   </div>
   <div class="scroll pb" id="exercises-container"><div style="height:10px"></div></div>
@@ -538,24 +542,12 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <div class="input-label mt12">Description</div><input id="edit-routine-desc" placeholder="optional"/>
       <div class="input-label mt16">Exercises</div>
       <div id="edit-routine-ex-list" style="margin-bottom:10px"></div>
-      <button class="btn btn-ghost btn-full" onclick="openAddExToRoutine()">＋ Add Exercise</button>
+      <button class="btn btn-ghost btn-full" onclick="openAddExerciseModal('routine')">＋ Add Exercise</button>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost flex-1" onclick="closeModal('modal-edit-routine')">Cancel</button>
       <button class="btn btn-primary flex-1" onclick="saveEditRoutine()">Save Routine</button>
     </div>
-  </div>
-</div>
-<!-- Add exercise to routine picker -->
-<div class="modal-overlay" id="modal-add-ex-to-routine">
-  <div class="modal"><div class="modal-handle"></div><div class="modal-title">Add Exercise</div>
-    <div class="search-sort-bar" style="border-top:1px solid var(--border)">
-      <div class="search-wrap"><span class="search-icon">🔍</span>
-        <input class="search-input" id="add-ex-routine-search" placeholder="Search..." oninput="renderAddExToRoutineList()">
-      </div>
-    </div>
-    <div id="add-ex-routine-list" style="max-height:50vh;overflow-y:auto"></div>
-    <div class="modal-actions"><button class="btn btn-ghost btn-full" onclick="closeModal('modal-add-ex-to-routine')">Cancel</button></div>
   </div>
 </div>
 <div class="modal-overlay" id="modal-new-routine">
@@ -736,17 +728,6 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     </div>
   </div>
 </div>
-<div class="modal-overlay" id="modal-home-layout">
-  <div class="modal"><div class="modal-handle"></div><div class="modal-title">Reorder Home</div>
-    <div class="modal-body">
-      <div class="small text2" style="margin-bottom:12px">Use the arrows to change what shows first on your Home page.</div>
-      <div id="home-layout-list"></div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-primary flex-1" onclick="closeModal('modal-home-layout')">Done</button>
-    </div>
-  </div>
-</div>
 <div class="modal-overlay" id="modal-progress">
   <div class="modal"><div class="modal-handle"></div><div class="modal-title" id="progress-ex-name">Progress</div>
     <div class="modal-body">
@@ -800,14 +781,24 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
   </div>
 </div>
 <div class="modal-overlay" id="modal-bw">
-  <div class="modal"><div class="modal-handle"></div><div class="modal-title">⚖️ Body Weight</div>
+  <div class="modal"><div class="modal-handle"></div><div class="modal-title">📏 Body Measurements</div>
     <div class="modal-body">
       <div style="display:flex;gap:10px;margin-bottom:14px">
-        <input type="number" id="bw-input" placeholder="kg" inputmode="decimal" style="flex:1"/>
+        <input type="number" id="bw-input" placeholder="Weight (kg)" inputmode="decimal" style="flex:1"/>
         <button class="btn btn-primary" onclick="logBodyWeight()" style="flex-shrink:0;padding:10px 16px">Log</button>
       </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <span class="small text2" style="font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Chart</span>
+        <select id="bw-metric-select" onchange="renderBWChart()" style="width:auto;padding:6px 10px;font-size:12px"></select>
+      </div>
       <div class="chart-wrap" style="height:120px"><canvas id="bw-canvas"></canvas></div>
-      <div id="bw-list" style="margin-top:10px;max-height:180px;overflow-y:auto"></div>
+      <button class="btn btn-ghost btn-full" style="margin-top:14px" onclick="toggleMeasurementsForm()">📏 <span id="measurements-toggle-label">Add Body Measurements</span></button>
+      <div id="measurements-form" style="display:none;margin-top:10px">
+        <div class="small text2" style="margin-bottom:8px">All in cm — fill in whichever you're tracking today.</div>
+        <div id="measurements-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+        <button class="btn btn-primary btn-full" style="margin-top:10px" onclick="saveMeasurements()">Save Measurements</button>
+      </div>
+      <div id="bw-list" style="margin-top:14px;max-height:180px;overflow-y:auto"></div>
     </div>
     <div class="modal-actions"><button class="btn btn-primary btn-full" onclick="closeModal('modal-bw')">Done</button></div>
   </div>
@@ -845,12 +836,109 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
   <div class="modal"><div class="modal-handle"></div>
     <div class="modal-title" id="meso-detail-title">Mesocycle</div>
     <div class="modal-body">
+      <div id="meso-progress-summary"></div>
       <div id="meso-detail-body"></div>
       <button class="btn btn-ghost btn-full mt12" onclick="openAddRoutineToActiveMeso()">＋ Add Routine to This Mesocycle</button>
+      <button class="btn btn-ghost btn-full mt12" id="meso-settings-btn">⚙ Cycle Settings</button>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost flex-1" onclick="closeModal('modal-mesocycle-detail')">Close</button>
       <button class="btn btn-primary flex-1" id="meso-start-btn">▶ Start Next</button>
+    </div>
+  </div>
+</div>
+
+<!-- Mesocycle Cycle Settings: rotations, repeats, deload, and reset baseline -->
+<div class="modal-overlay" id="modal-meso-settings">
+  <div class="modal"><div class="modal-handle"></div><div class="modal-title">Cycle Settings</div>
+    <div class="modal-body">
+      <div class="input-label">Rotations per mesocycle</div>
+      <input id="meso-set-rotations" type="number" inputmode="numeric" min="1"/>
+      <div class="small text3 mt4" style="line-height:1.5">A rotation = completing every routine in the sequence once.</div>
+
+      <div class="input-label mt12">Times to repeat this mesocycle</div>
+      <input id="meso-set-repeats" type="number" inputmode="numeric" min="0"/>
+      <div class="small text3 mt4" style="line-height:1.5">0 = repeat indefinitely.</div>
+
+      <div class="input-label mt12" style="display:flex;align-items:center;justify-content:space-between">
+        <span>Deload after each mesocycle</span>
+        <input id="meso-set-deload-enabled" type="checkbox" style="width:auto"/>
+      </div>
+      <div id="meso-deload-fields">
+        <div class="input-label mt12">Deload method</div>
+        <select id="meso-set-deload-method">
+          <option value="weight">Cut weight (keep the same sets)</option>
+          <option value="sets">Cut sets (keep the same weight)</option>
+        </select>
+
+        <div id="meso-deload-weight-fields">
+          <div class="input-label mt12">Deload weight drop (%)</div>
+          <input id="meso-set-deload-pct" type="number" inputmode="numeric" min="1" max="90"/>
+          <div class="small text3 mt4" style="line-height:1.5">Cuts this % off the "starting point for the next mesocycle" weight below — not the heaviest cycle of this mesocycle — so the deload's own weight is based on the same reference point the next mesocycle will resume from.</div>
+
+          <div class="input-label mt12">Fewer sets during deload (optional)</div>
+          <input id="meso-set-deload-sets-drop" type="number" inputmode="numeric" min="0"/>
+          <div class="small text3 mt4" style="line-height:1.5">Drops this many sets off the end of each exercise, on top of the weight cut. 0 = same set count, lighter weight only.</div>
+        </div>
+
+        <div id="meso-deload-sets-fields">
+          <div class="input-label mt12">Reduce sets to</div>
+          <select id="meso-set-deload-set-mode">
+            <option value="flat">A fixed number of sets</option>
+            <option value="relative">This many fewer than normal</option>
+          </select>
+          <input id="meso-set-deload-set-value" type="number" inputmode="numeric" min="1"/>
+
+          <div class="input-label mt12">Target effort (RIR)</div>
+          <input id="meso-set-deload-rir" type="number" inputmode="numeric" min="0" max="10"/>
+          <div class="small text3 mt4" style="line-height:1.5">Only the number of sets drops. Weight and reps come from the "starting point for the next mesocycle" setting below — not the heaviest cycle of this mesocycle — so the deload is never accidentally programmed too heavy. This RIR is shown as guidance at the top of each deload workout; it isn't mechanically enforced, the same way your normal RIR target isn't.</div>
+        </div>
+
+        <div id="meso-deload-reset-mode-wrap">
+          <div class="input-label mt12">Starting point for the next mesocycle</div>
+          <select id="meso-set-reset-mode">
+            <option value="deload">Continue from deload weights</option>
+            <option value="preDeload">Resume pre-deload weights</option>
+            <option value="mesoStart">Restart at this mesocycle's starting weights</option>
+            <option value="rotation">Resume weights from a specific rotation</option>
+          </select>
+          <div class="small text3 mt4" style="line-height:1.5">This also decides what weight/reps the deload itself is based on (the weight method cuts a % off it, the sets method uses it as-is). "Continue from deload weights" has nothing to resolve to yet at that point, so it falls back to your pre-deload weights automatically.</div>
+          <div id="meso-reset-rotation-field">
+            <div class="input-label mt12">Which rotation to resume from</div>
+            <input id="meso-set-reset-rotation" type="number" inputmode="numeric" min="1"/>
+            <div class="small text3 mt4" style="line-height:1.5">Uses the weights you started that rotation at, averaged with the rotations either side of it and sanity-checked against the whole mesocycle — e.g. rotation 4 of 6 gives you two rotations' worth of room to progress past your previous peak.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="input-label mt12" style="display:flex;align-items:center;justify-content:space-between">
+        <span>Ramp RIR across the mesocycle</span>
+        <input id="meso-set-rir-enabled" type="checkbox" style="width:auto"/>
+      </div>
+      <div id="meso-rir-fields">
+        <div class="input-label mt12">RIR target on the last rotation</div>
+        <input id="meso-set-rir-end" type="number" inputmode="numeric" min="0" max="5"/>
+
+        <div class="input-label mt12">Starting RIR cap</div>
+        <input id="meso-set-rir-cap" type="number" inputmode="numeric" min="0" max="8"/>
+        <div class="small text3 mt4" style="line-height:1.5">Rotation 1 starts at this RIR (or lower, if the mesocycle is short) and ramps down evenly each rotation to your last-rotation target. Shown at the top of each meso-linked workout.</div>
+      </div>
+
+      <div class="input-label mt12">Early deload detection</div>
+      <select id="meso-set-early-deload">
+        <option value="off">Off</option>
+        <option value="suggest">Suggest — ask before deloading early</option>
+        <option value="auto">Automatic — deload early with no prompt</option>
+      </select>
+      <div id="meso-early-deload-fields">
+        <div class="input-label mt12">Exercises declining (threshold)</div>
+        <input id="meso-set-decline-count" type="number" inputmode="numeric" min="1"/>
+        <div class="small text3 mt4" style="line-height:1.5">Triggers early if this many exercises' top sets decline against their last two sessions, or if effort is already hitting your final-rotation RIR target well ahead of schedule — before the mesocycle's planned rotation count runs out.</div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost flex-1" onclick="closeModal('modal-meso-settings')">Cancel</button>
+      <button class="btn btn-primary flex-1" onclick="saveMesoSettings()">Save</button>
     </div>
   </div>
 </div>
@@ -895,6 +983,65 @@ const MUSCLE_COLORS={Chest:'#e8ff47',Back:'#47c8ff',Shoulders:'#ff8c00',Biceps:'
 const COMPOUND_MUSCLES=['Quads','Hamstrings','Back','Chest','Glutes','Full Body'];
 // Legacy 'Legs' catalogue names, used only to migrate exercises/history saved before the Quads/Hamstrings split.
 const LEGACY_LEGS_TO_HAMSTRINGS=['Good Morning','Leg Curl','Nordic Curl','Romanian Deadlift'];
+
+// ============================================================
+// LONG-PRESS DRAG REORDER (shared by every reorderable list — no drag icon needed:
+// press and hold anywhere on an item, then drag it up/down to reorder, same as
+// the standard "hold to reorder" pattern in most list-based mobile apps)
+// ============================================================
+const LP_PRESS_MS=420, LP_MOVE_CANCEL=10;
+function initLongPressDragSort(container,itemSelector,keyAttr,excludeSelector,onReorder,handleSelector){
+  if(!container||container.dataset.lpDragInit==='1')return;
+  container.dataset.lpDragInit='1';
+  const startSelector=handleSelector||itemSelector;
+  let pressTimer=null,dragKey=null,dragEl=null,startX=0,startY=0,dragging=false;
+  const clearPress=()=>{clearTimeout(pressTimer);pressTimer=null;};
+  const endDrag=()=>{
+    container.querySelectorAll(itemSelector).forEach(el=>{el.style.borderTop='';el.classList.remove('lp-dragging');});
+    dragKey=null;dragEl=null;dragging=false;
+  };
+  container.addEventListener('touchstart',e=>{
+    if(excludeSelector&&e.target.closest(excludeSelector))return;
+    if(!e.target.closest(startSelector))return;
+    const item=e.target.closest(itemSelector);if(!item)return;
+    const touch=e.touches[0];startX=touch.clientX;startY=touch.clientY;
+    clearPress();
+    pressTimer=setTimeout(()=>{
+      dragging=true;dragEl=item;dragKey=item.getAttribute(keyAttr);
+      dragEl.classList.add('lp-dragging');
+      if(navigator.vibrate)navigator.vibrate(10);
+    },LP_PRESS_MS);
+  },{passive:true});
+  container.addEventListener('touchmove',e=>{
+    if(!dragging){
+      const touch=e.touches[0];
+      if(Math.abs(touch.clientX-startX)>LP_MOVE_CANCEL||Math.abs(touch.clientY-startY)>LP_MOVE_CANCEL)clearPress();
+      return;
+    }
+    e.preventDefault();
+    const touch=e.touches[0];
+    container.querySelectorAll(itemSelector).forEach(el=>{
+      el.style.borderTop='';
+      const r=el.getBoundingClientRect();
+      if(touch.clientY>=r.top&&touch.clientY<=r.bottom&&el!==dragEl)el.style.borderTop='2px solid var(--accent)';
+    });
+  },{passive:false});
+  container.addEventListener('touchend',e=>{
+    clearPress();
+    if(!dragging){return;}
+    e.preventDefault();
+    const touch=e.changedTouches[0];
+    let targetKey=dragKey;
+    container.querySelectorAll(itemSelector).forEach(el=>{
+      const r=el.getBoundingClientRect();
+      if(touch.clientY>=r.top&&touch.clientY<=r.bottom)targetKey=el.getAttribute(keyAttr);
+    });
+    const fromKey=dragKey;
+    endDrag();
+    if(targetKey!==fromKey)onReorder(fromKey,targetKey);
+  },{passive:false});
+  container.addEventListener('touchcancel',()=>{clearPress();endDrag();});
+}
 
 const DEFAULT_ROUTINES_META=[
   {id:'r1',name:'Push A',desc:'Chest · Shoulders · Triceps'},
@@ -958,10 +1105,10 @@ function buildDefaultRoutineExercises(){
 // ── STATE ──
 // Bump this whenever a change to `state`'s shape needs a one-time migration in load() below.
 const CURRENT_SCHEMA_VERSION=2;
-let state={schemaVersion:CURRENT_SCHEMA_VERSION,exercises:[],routines:[],history:[],mesocycles:[],activeMesoId:null,equipment:null,barbellWeight:20,plates:{},warmupDone:{},bodyWeights:[],exDbSort:'muscle',addExSort:'muscle',filterByEquip:true,addExFilterEquip:true,lightMode:false};
+let state={schemaVersion:CURRENT_SCHEMA_VERSION,exercises:[],routines:[],history:[],mesocycles:[],activeMesoId:null,equipment:null,barbellWeight:20,plates:{},warmupDone:{},bodyWeights:[],bodyMeasurements:[],exDbSort:'muscle',addExSort:'muscle',filterByEquip:true,addExFilterEquip:true,lightMode:false};
 let activeWorkout=null,workoutTimer=null,restTimer=null,restRemaining=0;
 let activeMesoContext=null;
-let editingNoteExId=null,editingSetTypeInfo=null,pendingSetType=null,fromWorkout=false,editingExId=null,viewingRoutineIdx=null,libRowRegistry=[],exDbMuscleView=null,exDbMachineExpanded={};
+let editingNoteExId=null,editingSetTypeInfo=null,pendingSetType=null,fromWorkout=false,editingExId=null,viewingRoutineIdx=null,libRowRegistry=[],exDbMuscleView=null,exDbMachineExpanded={},pickerDestination='workout';
 let progressExId=null,chartMetric='weight';
 
 // ── PERSISTENCE ──
@@ -1038,7 +1185,45 @@ function load(){
   });
   if(!state.plates||!Object.keys(state.plates).length){const p={};DEFAULT_PLATES.forEach(kg=>{p[kg]=4;});state.plates=p;}
   if(!state.bodyWeights)state.bodyWeights=[];
+  if(!state.bodyMeasurements)state.bodyMeasurements=[];
+  // One-time migration: fold any legacy weight-only entries into the new measurements log
+  if(state.bodyWeights.length&&!state.bodyMeasurementsMigrated){
+    state.bodyWeights.forEach(bw=>{
+      if(!state.bodyMeasurements.some(m=>m.date===bw.date))state.bodyMeasurements.push({date:bw.date,weight:bw.weight});
+    });
+    state.bodyMeasurements.sort((a,b)=>new Date(b.date)-new Date(a.date));
+    state.bodyMeasurementsMigrated=true;
+  }
   if(!state.mesocycles)state.mesocycles=[];
+  // Migration: give existing mesocycles the new rotation/deload/repeat config + progress fields
+  state.mesocycles.forEach(m=>{
+    if(m.rotationsPerMeso==null)m.rotationsPerMeso=4;
+    if(m.mesoRepeats==null)m.mesoRepeats=1; // 0 = repeat indefinitely
+    if(m.deloadEnabled==null)m.deloadEnabled=true;
+    if(m.deloadPercent==null)m.deloadPercent=40;
+    if(m.deloadSetsDrop==null)m.deloadSetsDrop=0;
+    if(m.resetFallbackNote===undefined)m.resetFallbackNote=null;
+    if(m.rirRampEnabled==null)m.rirRampEnabled=true;
+    if(m.rirEnd==null)m.rirEnd=0;
+    if(m.rirStartCap==null)m.rirStartCap=4;
+    if(!m.earlyDeloadDetection)m.earlyDeloadDetection='suggest'; // 'off' | 'suggest' | 'auto'
+    if(m.earlyDeloadDeclineCount==null)m.earlyDeloadDeclineCount=2;
+    if(!m.deloadMethod)m.deloadMethod='weight'; // 'weight' | 'sets'
+    if(!m.deloadSetMode)m.deloadSetMode='flat'; // 'flat' | 'relative'
+    if(m.deloadSetValue==null)m.deloadSetValue=1;
+    if(m.deloadTargetRIR==null)m.deloadTargetRIR=4;
+    if(!m.resetMode)m.resetMode='preDeload'; // 'deload' | 'preDeload' | 'mesoStart' | 'rotation'
+    if(m.resetRotationNumber==null)m.resetRotationNumber=1;
+    if(m.rotationsDone==null)m.rotationsDone=0;
+    if(m.repeatsDone==null)m.repeatsDone=0;
+    if(!m.phase)m.phase='training'; // 'training' | 'deload' | 'finished'
+    if(m.passWorkoutCount==null)m.passWorkoutCount=0;
+    if(m.rotationWorkoutCount==null)m.rotationWorkoutCount=0;
+    if(!m.baselines)m.baselines={};
+    if(!m.rotationBaselines)m.rotationBaselines={};
+    if(!m.preDeloadBaselines)m.preDeloadBaselines={};
+    if(!m.pendingResetBaseline)m.pendingResetBaseline=null;
+  });
   if(!state.customCatalogueFields)state.customCatalogueFields={};
   if(!state.homeEquipment)state.homeEquipment=[];
   if(!state.equipmentFilterMode)state.equipmentFilterMode='all';
@@ -1069,13 +1254,16 @@ function estimateRoutineTime(exerciseIds){
 }
 function updateWorkoutStats(){
   if(!activeWorkout)return;
-  let vol=0,sets=0,rpeSum=0,rpeCount=0;
+  let vol=0,sets=0,effSum=0,effCount=0;
   activeWorkout.exercises.forEach(ex=>{
+    const useRIR=!!ex.useRIR;
     (ex.sets||[]).forEach(s=>{
       if(s.done){
         sets++;
         vol+=(s.weight||0)*(s.reps||0);
-        if(s.rpe){rpeSum+=s.rpe;rpeCount++;}
+        // Convert to a common RIR-equivalent scale using THIS exercise's own mode, so a workout
+        // mixing RIR-tracked and RPE-tracked exercises still averages to something meaningful
+        if(s.rpe!=null){effSum+=useRIR?s.rpe:(10-s.rpe);effCount++;}
       }
     });
   });
@@ -1084,7 +1272,7 @@ function updateWorkoutStats(){
   const rpeEl=document.getElementById('workout-rpe');
   if(volEl)volEl.textContent=vol>0?vol.toFixed(vol%1?1:0)+'kg':'0kg';
   if(setsEl)setsEl.textContent=sets;
-  if(rpeEl)rpeEl.textContent=rpeCount?( rpeSum/rpeCount).toFixed(1):'—';
+  if(rpeEl)rpeEl.textContent=effCount?(effSum/effCount).toFixed(1):'—';
 }
 function updateWorkoutEstimate(){
   const el=document.getElementById('workout-est-time');if(!el||!activeWorkout)return;
@@ -1123,11 +1311,11 @@ function getLastSets(exId){
   for(let i=0;i<state.history.length;i++){
     const w=state.history[i];
     const ex=(w.exercises||[]).find(e=>e.exId===exId);
-    if(ex&&ex.sets&&ex.sets.length)return ex.sets;
+    if(ex&&ex.sets&&ex.sets.length)return ex.sets.map(s=>({...s,useRIR:!!ex.useRIR}));
   }
   return[];
 }
-function newSet(pw=0,pr=0){return{type:'normal',weight:pw||0,reps:pr||0,rpe:0,done:false,prevWeight:pw,prevReps:pr};}
+function newSet(pw=0,pr=0){return{type:'normal',weight:pw||0,reps:pr||0,rpe:null,done:false,prevWeight:pw,prevReps:pr};}
 function checkSetForPR(exId,weight,reps){
   const pr=getPR(exId);
   return weight>pr.weight||reps>pr.reps||calcORM(weight,reps)>pr.orm;
@@ -1540,6 +1728,9 @@ function resolveExercise(muscle,exName,equipment,position,grip,isUni,modifier,at
   return ex;
 }
 const TIMER_PRESETS=[0,30,60,90,120,180,240,300];
+// Shared plate weight list — includes small "micro-loading" fractional plates (0.25/0.5/0.75kg)
+// below the standard 1.25kg, since not everyone's smallest plate is 1.25kg.
+const DEFAULT_PLATES=[0.25,0.5,0.75,1.25,2.5,5,10,15,20,25];
 const MODIFIER_PRESETS=['Paused','Slow Eccentric','Partial Reps','1.5 Reps','Ankle Weights','Chains','Bands','Deficit'];
 function renderModifierChips(containerEl,stateObj,onChange){
   containerEl.innerHTML='';
@@ -1570,7 +1761,6 @@ function renderModifierChips(containerEl,stateObj,onChange){
 let editingExIdx=null;
 let editExWorkoutMeta={useRIR:false};
 let editExState={muscle:null,exDef:null,equipment:null,position:null,grip:null,isUni:false,modifier:null,modifierCustomMode:false,attachment:null,customValues:{},addingField:null,cablePosition:null,benchBack:null,benchSeat:null,showBenchSetup:false};
-let workoutReorderDragIdx=null;
 load();initNavs();buildTimerPresets();buildPlateInventoryUI();checkForWorkoutDraft();
 document.getElementById('barbell-weight-input').value=state.barbellWeight||20;
 document.getElementById('prog-inc-dumbbell').value=state.progressionIncrements.Dumbbell;
@@ -1634,7 +1824,7 @@ function renderEditRoutineExList(){
     const color=MUSCLE_COLORS[ex.muscle]||'#aaa';
     const meta=editingRoutineMeta[id]||{repRange:null,useRIR:false,repRangeExplicit:false};
     const repLabel=meta.repRange?('Reps '+meta.repRange.min+(meta.repRange.min!==meta.repRange.max?'\u2013'+meta.repRange.max:'')+(meta.repRangeExplicit?'':' (default)')):'Set Rep Range';
-    return'<div class="edit-ex-row">'
+    return'<div class="edit-ex-row" data-routine-ex-idx="'+idx+'">'
       +'<div style="width:22px;height:22px;border-radius:6px;background:var(--bg4);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--text2);flex-shrink:0">'+(idx+1)+'</div>'
       +'<span class="rd-muscle-dot" style="background:'+color+'"></span>'
       +'<div style="flex:1;min-width:0"><div class="bold" style="font-size:13px">'+escHtml(ex.name)+'</div>'
@@ -1644,11 +1834,27 @@ function renderEditRoutineExList(){
       +'<button class="sort-chip" style="font-size:11px;padding:4px 10px" onclick="toggleRoutineExRIR(\''+id+'\')">Track: '+(meta.useRIR?'RIR':'RPE')+'</button>'
       +'</div></div>'
       +'<div style="display:flex;gap:4px">'
-      +(idx>0?'<button class="btn btn-ghost btn-sm" onclick="moveRoutineEx('+idx+',-1)" style="padding:4px 8px">↑</button>':'')
-      +(idx<editingRoutineExIds.length-1?'<button class="btn btn-ghost btn-sm" onclick="moveRoutineEx('+idx+',1)" style="padding:4px 8px">↓</button>':'')
       +'<button class="btn btn-danger btn-sm" onclick="removeRoutineEx('+idx+')" style="padding:4px 8px">✕</button>'
       +'</div></div>';
   }).join('');
+  initRoutineExDragSort();
+}
+// ── EDIT ROUTINE EXERCISE REORDER (long-press anywhere on a row to drag it) ──
+function initRoutineExDragSort(){
+  const list=document.getElementById('edit-routine-ex-list');
+  initLongPressDragSort(list,'[data-routine-ex-idx]','data-routine-ex-idx','button',(fromIdx,toIdx)=>{
+    fromIdx=parseInt(fromIdx);toIdx=parseInt(toIdx);
+    const moved=editingRoutineExIds.splice(fromIdx,1)[0];
+    editingRoutineExIds.splice(toIdx,0,moved);
+    renderEditRoutineExList();
+  });
+}
+
+function removeRoutineEx(idx){
+  const id=editingRoutineExIds[idx];
+  editingRoutineExIds.splice(idx,1);
+  if(id&&editingRoutineMeta[id])delete editingRoutineMeta[id];
+  renderEditRoutineExList();
 }
 function openRepRangeEditor(exId){
   repRangeEditingExId=exId;
@@ -1681,45 +1887,6 @@ function toggleRoutineExRIR(id){
   if(!editingRoutineMeta[id])editingRoutineMeta[id]={repRange:null,useRIR:false};
   editingRoutineMeta[id].useRIR=!editingRoutineMeta[id].useRIR;
   renderEditRoutineExList();
-}
-
-function moveRoutineEx(idx,dir){
-  const arr=editingRoutineExIds;
-  const tmp=arr[idx];arr[idx]=arr[idx+dir];arr[idx+dir]=tmp;
-  renderEditRoutineExList();
-}
-
-function removeRoutineEx(idx){
-  const id=editingRoutineExIds[idx];
-  editingRoutineExIds.splice(idx,1);
-  if(id&&editingRoutineMeta[id])delete editingRoutineMeta[id];
-  renderEditRoutineExList();
-}
-
-function openAddExToRoutine(){
-  document.getElementById('add-ex-routine-search').value='';
-  renderAddExToRoutineList();
-  openModal('modal-add-ex-to-routine');
-}
-
-function renderAddExToRoutineList(){
-  const q=document.getElementById('add-ex-routine-search').value.toLowerCase();
-  const list=document.getElementById('add-ex-routine-list');list.innerHTML='';
-  const filtered=state.exercises.filter(e=>
-    e.name.toLowerCase().includes(q)||e.muscle.toLowerCase().includes(q)||(e.machine||'').toLowerCase().includes(q)
-  );
-  const groups=groupExercises(sortExercises(filtered,'muscle'),'muscle');
-  Object.keys(groups).sort().forEach(key=>{
-    const lbl=document.createElement('div');lbl.className='section-label';lbl.textContent=key;list.appendChild(lbl);
-    groups[key].forEach(e=>{
-      const already=editingRoutineExIds.includes(e.id);
-      const div=document.createElement('div');div.className='ex-item';
-      div.innerHTML='<div><div class="bold">'+escHtml(e.name)+'</div><div class="small text2">'+escHtml([e.muscle,e.machine].filter(Boolean).join(' · '))+'</div></div>'
-        +'<span style="color:'+(already?'var(--text3)':'var(--accent)')+';font-size:18px">'+(already?'✓':'＋')+'</span>';
-      if(!already)div.onclick=()=>{editingRoutineExIds.push(e.id);renderEditRoutineExList();renderAddExToRoutineList();};
-      list.appendChild(div);
-    });
-  });
 }
 
 function saveEditRoutine(){
@@ -1956,9 +2123,12 @@ function renderActiveMesoHero(){
       +'</div>';
   }).join('');
 
+  const heroPhaseBadge=meso.phase==='deload'
+    ?' <span class="tight-badge" style="background:#ff8c0022;color:#ff8c00">DELOAD</span>'
+    :meso.phase==='finished'?' <span class="tight-badge" style="background:#2ed57322;color:#2ed573">COMPLETE</span>':'';
   el.innerHTML='<div style="padding:12px 16px 4px">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
-    +'<div style="font-size:11px;font-weight:700;letter-spacing:1.2px;color:var(--accent);text-transform:uppercase">'+escHtml(meso.name)+'</div>'
+    +'<div style="font-size:11px;font-weight:700;letter-spacing:1.2px;color:var(--accent);text-transform:uppercase">'+escHtml(meso.name)+heroPhaseBadge+'</div>'
     +'<div style="font-size:11px;color:var(--text3);cursor:pointer" onclick="openMesocycleDetail('+mesoIdx+')">Manage ›</div>'
     +'</div>'
     +'<div style="background:var(--bg2);border-radius:var(--radius);padding:8px 10px;border:1px solid var(--border);box-shadow:var(--shadow)">'+rowsHtml+'</div></div>';
@@ -1978,35 +2148,23 @@ function applyHomeLayout(){
     if(el)el.style.order=i;
   });
 }
-function openHomeLayoutModal(){
-  renderHomeLayoutList();
-  openModal('modal-home-layout');
-}
-function renderHomeLayoutList(){
-  const list=document.getElementById('home-layout-list');
-  if(!list)return;
-  const order=state.homeLayout||['meso','startEmpty','quickAccess','chart'];
-  list.innerHTML=order.map((key,idx)=>{
-    return '<div class="edit-ex-row">'
-      +'<div style="width:22px;height:22px;border-radius:6px;background:var(--bg4);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--text2);flex-shrink:0">'+(idx+1)+'</div>'
-      +'<div style="flex:1;font-size:13px;font-weight:700">'+HOME_SECTION_LABELS[key]+'</div>'
-      +'<div style="display:flex;gap:4px">'
-      +(idx>0?'<button class="btn btn-ghost btn-sm" onclick="moveHomeSection('+idx+',-1)" style="padding:4px 8px">↑</button>':'')
-      +(idx<order.length-1?'<button class="btn btn-ghost btn-sm" onclick="moveHomeSection('+idx+',1)" style="padding:4px 8px">↓</button>':'')
-      +'</div></div>';
-  }).join('');
-}
-function moveHomeSection(idx,dir){
-  const order=(state.homeLayout||['meso','startEmpty','quickAccess','chart']).slice();
-  const newIdx=idx+dir;
-  if(newIdx<0||newIdx>=order.length)return;
-  const tmp=order[idx];order[idx]=order[newIdx];order[newIdx]=tmp;
-  state.homeLayout=order;save();
-  renderHomeLayoutList();
-  applyHomeLayout();
+// ── HOME SECTION REORDER (long-press anywhere on a section to drag it) ──
+function initHomeDragSort(){
+  const container=document.getElementById('home-scroll');
+  initLongPressDragSort(container,'.home-sec','data-home-key',null,(fromKey,toKey)=>{
+    const order=(state.homeLayout||['meso','startEmpty','quickAccess','chart']).slice();
+    const fromIdx=order.indexOf(fromKey),toIdx=order.indexOf(toKey);
+    if(fromIdx>-1&&toIdx>-1){
+      const moved=order.splice(fromIdx,1)[0];
+      order.splice(toIdx,0,moved);
+      state.homeLayout=order;save();
+      applyHomeLayout();
+    }
+  });
 }
 function renderHomeScreen(){
   applyHomeLayout();
+  initHomeDragSort();
   renderActiveMesoHero();
   renderWeeklyConsistencyChart();
 }
@@ -2027,7 +2185,6 @@ function renderRoutinesList(){
     row.setAttribute('data-routine-idx',i);
     row.innerHTML=
       '<div class="tight-accent" style="background:'+rcol+'"></div>'
-      +'<div class="tight-drag" data-idx="'+i+'">&#10070;</div>'
       +'<div class="tight-icon" style="background:'+rcol+'18">'
       +getCategoryIconSVG(rmuscat,16,rcol)
       +'</div>'
@@ -2049,48 +2206,14 @@ function renderRoutinesList(){
   initRoutineDragSort();
 }
 
-let routineDragIdx=null,routineDragEl=null;
+// ── ROUTINE LIST REORDER (long-press anywhere on a row to drag it) ──
 function initRoutineDragSort(){
   const list=document.getElementById('routines-list');
-  list.querySelectorAll('.tight-drag').forEach(handle=>{
-    handle.addEventListener('touchstart',e=>{
-      routineDragIdx=parseInt(handle.getAttribute('data-idx'));
-      routineDragEl=handle.closest('[data-routine-idx]');
-      routineDragEl.style.opacity='0.4';
-      e.preventDefault();
-    },{passive:false});
-  });
-  // The container itself persists across renders (only its rows are rebuilt above), so its
-  // touchmove/touchend listeners must be attached once, not re-added on every render.
-  if(list.dataset.dragInit==='1')return;
-  list.dataset.dragInit='1';
-  list.addEventListener('touchmove',e=>{
-    if(routineDragIdx===null)return;
-    e.preventDefault();
-    const touch=e.touches[0];
-    const els=[...list.querySelectorAll('[data-routine-idx]')];
-    els.forEach(el=>{
-      el.style.borderTop='';
-      const r=el.getBoundingClientRect();
-      if(touch.clientY>=r.top&&touch.clientY<=r.bottom&&el!==routineDragEl)el.style.borderTop='2px solid var(--accent)';
-    });
-  },{passive:false});
-  list.addEventListener('touchend',e=>{
-    if(routineDragIdx===null)return;
-    const touch=e.changedTouches[0];
-    const els=[...list.querySelectorAll('[data-routine-idx]')];
-    let targetIdx=routineDragIdx;
-    els.forEach(el=>{
-      el.style.borderTop='';el.style.opacity='';
-      const r=el.getBoundingClientRect();
-      if(touch.clientY>=r.top&&touch.clientY<=r.bottom)targetIdx=parseInt(el.getAttribute('data-routine-idx'));
-    });
-    if(targetIdx!==routineDragIdx){
-      const moved=state.routines.splice(routineDragIdx,1)[0];
-      state.routines.splice(targetIdx,0,moved);
-      save();renderRoutinesList();
-    }
-    routineDragIdx=null;routineDragEl=null;
+  initLongPressDragSort(list,'[data-routine-idx]','data-routine-idx','.tight-dots, .r-dropdown',(fromIdx,toIdx)=>{
+    fromIdx=parseInt(fromIdx);toIdx=parseInt(toIdx);
+    const moved=state.routines.splice(fromIdx,1)[0];
+    state.routines.splice(toIdx,0,moved);
+    save();renderRoutinesList();
   });
 }
 
@@ -2115,6 +2238,9 @@ function renderMesocycles(){
     const totalInCycle=routineIds.length;
     const completedCount=state.history.filter(w=>w.mesoId===m.id).length;
     const cyclesPct=totalInCycle?(m.currentPos||0)/totalInCycle*100:0;
+    const phaseBadge=m.phase==='deload'
+      ?'<span class="tight-badge" style="background:#ff8c0022;color:#ff8c00;margin-left:6px">DELOAD</span>'
+      :m.phase==='finished'?'<span class="tight-badge" style="background:#2ed57322;color:#2ed573;margin-left:6px">COMPLETE</span>':'';
 
     // Next up row
     let nextHtml='';
@@ -2145,8 +2271,8 @@ function renderMesocycles(){
       '<div style="display:flex;align-items:flex-start;justify-content:space-between">'
       +'<div>'
       +(isActive?'<div style="font-size:9px;font-weight:800;letter-spacing:1px;color:var(--accent);text-transform:uppercase;margin-bottom:4px">&#9679; Active</div>':'')
-      +'<div class="meso-title">'+escHtml(m.name)+'</div>'
-      +'<div class="meso-sub">'+routineIds.length+' routine'+(routineIds.length!==1?'s':'')+' in sequence</div>'
+      +'<div class="meso-title">'+escHtml(m.name)+phaseBadge+'</div>'
+      +'<div class="meso-sub">'+routineIds.length+' routine'+(routineIds.length!==1?'s':'')+' in sequence &middot; rotation '+Math.min((m.rotationsDone||0)+1,m.rotationsPerMeso||1)+'/'+(m.rotationsPerMeso||1)+'</div>'
       +'</div>'
       +'<button class="tight-dots" onclick="event.stopPropagation();toggleMesoDropdown(event,'+mi+')">'+uiIcon('dots',16,'currentColor')+'</button>'
       +'</div>'
@@ -2174,11 +2300,343 @@ function getNextMesoRoutineIndex(m){
   if(m.currentPos==null)m.currentPos=0;
   return m.currentPos%ids.length;
 }
-function advanceMesoPos(m){
+// Snapshot a baseline (weight/reps) for each exercise in loggedExercises, keyed by exId,
+// only filling in entries not already present in target.
+// Captures a full per-set baseline (not just the top set) so varied/pyramid schemes survive
+// being carried into a reset or deload — each entry is {weight,reps,repsL,repsR}.
+function snapshotBaselines(target,loggedExercises){
+  (loggedExercises||[]).forEach(ex=>{
+    if(target[ex.exId])return;
+    const normalSets=(ex.sets||[]).filter(s=>s.done&&(!s.type||s.type==='normal'));
+    if(!normalSets.length)return;
+    target[ex.exId]=normalSets.map(s=>({weight:s.weight,reps:s.reps,repsL:s.repsL,repsR:s.repsR}));
+  });
+}
+// Snapshot from history (getLastSets) for every exercise across a mesocycle's routines —
+// used right before a deload rotation begins, to freeze the real pre-deload numbers.
+function snapshotPreDeloadBaselines(m){
+  const out={};
+  (m.routineIds||[]).forEach(rid=>{
+    const r=getRoutine(rid);if(!r)return;
+    (r.exerciseIds||[]).forEach(exId=>{
+      if(out[exId])return;
+      const sets=getLastSets(exId);if(!sets||!sets.length)return;
+      const normalSets=sets.filter(s=>s.done&&(!s.type||s.type==='normal'));
+      if(!normalSets.length)return;
+      out[exId]=normalSets.map(s=>({weight:s.weight,reps:s.reps,repsL:s.repsL,repsR:s.repsR}));
+    });
+  });
+  return out;
+}
+// When a workout was skipped (no logged data), fall back to real history so a baseline still
+// gets captured for that rotation/pass instead of being silently left empty.
+function loggedOrHistoryFallback(loggedExercises,routine){
+  if(loggedExercises&&loggedExercises.length)return loggedExercises;
+  if(!routine)return [];
+  return(routine.exerciseIds||[]).map(exId=>{
+    const sets=getLastSets(exId);
+    return(sets&&sets.length)?{exId,sets}:null;
+  }).filter(Boolean);
+}
+// Advances a mesocycle's position through its routine sequence, and drives the full
+// rotation → meso-pass → deload → repeat lifecycle. A "rotation" = one full pass through
+// every routine in the sequence. loggedExercises (optional) is the just-finished workout's
+// exercise/set data, used to capture "start of this meso pass" baselines.
+function advanceMesoProgress(m,loggedExercises){
   const ids=m.routineIds||[];
   if(!ids.length)return;
   if(m.currentPos==null)m.currentPos=0;
+  if(m.rotationsDone==null)m.rotationsDone=0;
+  if(m.repeatsDone==null)m.repeatsDone=0;
+  if(!m.phase)m.phase='training';
+  if(m.passWorkoutCount==null)m.passWorkoutCount=0;
+  if(m.rotationWorkoutCount==null)m.rotationWorkoutCount=0;
+  if(!m.baselines)m.baselines={};
+  if(!m.rotationBaselines)m.rotationBaselines={};
+  if(!m.preDeloadBaselines)m.preDeloadBaselines={};
+
+  if(m.phase==='training'){
+    const effectiveLogged=loggedOrHistoryFallback(loggedExercises,getRoutine(ids[m.currentPos]));
+    // First workout of a fresh training pass — capture its numbers as this pass's baseline
+    // (used later if resetMode is 'mesoStart' on the NEXT repeat of this mesocycle).
+    if(m.passWorkoutCount===0)snapshotBaselines(m.baselines,effectiveLogged);
+    // First workout of THIS rotation — capture its numbers so a specific rotation number
+    // (e.g. "rotation 4 of 6") can be picked as the next pass's starting point.
+    const rotNum=(m.rotationsDone||0)+1;
+    if(m.rotationWorkoutCount===0){
+      if(!m.rotationBaselines[rotNum])m.rotationBaselines[rotNum]={};
+      snapshotBaselines(m.rotationBaselines[rotNum],effectiveLogged);
+    }
+  }
+  m.passWorkoutCount++;
+  m.rotationWorkoutCount++;
+
+  const wasLast=m.currentPos===ids.length-1;
   m.currentPos=(m.currentPos+1)%ids.length;
+  if(!wasLast)return; // rotation not complete yet — nothing else to do
+  m.rotationWorkoutCount=0; // whatever rotation starts next begins fresh
+
+  const totalRepeats=m.mesoRepeats||0;
+
+  if(m.phase==='deload'){
+    // The deload rotation just finished — this meso pass is fully complete. pendingResetBaseline
+    // was already resolved the moment deload began (see below) and used consistently for the
+    // deload's own sets — keep that same value here so there's no jump between the deload and
+    // the pass that follows it, for either deload method.
+    m.repeatsDone++;
+    m.rotationsDone=0;
+    m.passWorkoutCount=0;
+    m.baselines={};
+    m.rotationBaselines={};
+    m.preDeloadBaselines={};
+    m.phase=(totalRepeats>0&&m.repeatsDone>=totalRepeats)?'finished':'training';
+    return;
+  }
+
+  // A normal training rotation just completed
+  m.rotationsDone++;
+  // Guard against a rotationsPerMeso lowered mid-pass leaving rotationsDone stranded above it
+  if(m.rotationsDone>(m.rotationsPerMeso||1))m.rotationsDone=m.rotationsPerMeso||1;
+  if(m.rotationsDone<(m.rotationsPerMeso||1))return; // more training rotations left in this pass
+
+  // All training rotations for this pass are done
+  if(m.deloadEnabled){
+    enterDeloadPhase(m);
+  }else{
+    m.repeatsDone++;
+    m.pendingResetBaseline=resolvePendingResetBaseline(m);
+    m.rotationsDone=0;
+    m.passWorkoutCount=0;
+    m.baselines={};
+    m.rotationBaselines={};
+    m.phase=(totalRepeats>0&&m.repeatsDone>=totalRepeats)?'finished':'training';
+  }
+}
+// Averages a chosen rotation's captured baseline with whichever of its immediate neighbors
+// (rotation-1, rotation+1) were actually captured — a single rotation's numbers can be a noisy
+// one-off (an off day, a missed rep), so blending with the rotations either side gives a
+// steadier, more representative starting point. Sanity-checked per exercise by treating the
+// requested rotation's own value as ground truth: a neighbor is only blended in if it's within
+// 30% of it, otherwise it's more likely an anomaly (a skipped/fallback workout, a data glitch)
+// than genuine week-to-week variation, and is excluded rather than allowed to skew the average.
+function getSmoothedRotationBaseline(m,rotationNum){
+  const rb=m.rotationBaselines||{};
+  const centerData=rb[rotationNum];
+  if(!centerData)return{};
+  const neighborNums=[rotationNum-1,rotationNum+1].filter(n=>rb[n]);
+  const exIds=new Set(Object.keys(centerData));
+  neighborNums.forEach(n=>Object.keys(rb[n]).forEach(id=>exIds.add(id)));
+  const out={};
+  exIds.forEach(exId=>{
+    const centerArr=centerData[exId];
+    if(!centerArr||!centerArr.length){
+      // No data for this exercise at the chosen rotation — fall back to whichever neighbor has
+      // it, unaveraged (nothing to sanity-check against without the chosen rotation's own value)
+      const fallbackArr=neighborNums.map(n=>rb[n][exId]).find(a=>a&&a.length);
+      if(fallbackArr)out[exId]=fallbackArr;
+      return;
+    }
+    const centerTop=centerArr[0].weight;
+    // Only blend a neighbor in if its top-set weight is reasonably close (within 30%) to the
+    // chosen rotation's own — otherwise it's more likely an anomaly (a skipped/fallback workout,
+    // a data glitch) than genuine week-to-week variation, and averaging it in would corrupt the
+    // result rather than smooth it. This is the actual sense-check: trust the requested rotation
+    // as ground truth, don't let an outlier neighbor drag it somewhere it doesn't belong.
+    const usableNeighbors=neighborNums
+      .map(n=>rb[n][exId])
+      .filter(a=>a&&a.length&&a[0].weight!=null&&centerTop>0&&Math.abs(a[0].weight-centerTop)/centerTop<=0.3);
+    const arrays=[centerArr,...usableNeighbors];
+    if(arrays.length===1){out[exId]=centerArr;return;}
+    const setCount=Math.min(...arrays.map(a=>a.length));
+    const avgOf=(pts,key)=>{
+      const vals=pts.map(p=>p[key]).filter(v=>v!=null);
+      return vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:undefined;
+    };
+    const avgSets=[];
+    for(let i=0;i<setCount;i++){
+      const pts=arrays.map(a=>a[i]).filter(Boolean);
+      const w=avgOf(pts,'weight'),r=avgOf(pts,'reps'),rl=avgOf(pts,'repsL'),rr=avgOf(pts,'repsR');
+      avgSets.push({
+        weight:w!=null?Math.round(w*2)/2:undefined, // nearest 0.5kg, matching deload rounding elsewhere
+        reps:r!=null?Math.round(r):undefined,
+        repsL:rl!=null?Math.round(rl):undefined,
+        repsR:rr!=null?Math.round(rr):undefined
+      });
+    }
+    out[exId]=avgSets;
+  });
+  return out;
+}
+// Picks the baseline set to carry into the next mesocycle pass, per the mesocycle's resetMode:
+// 'deload' → none (just continue from the reduced deload numbers)
+// 'preDeload' → the real working numbers from right before the deload began
+// 'mesoStart' → whatever the just-finished pass itself started at
+// 'rotation' → a specific rotation within the just-finished pass (e.g. rotation 4 of 6), smoothed
+//              against its immediate neighbors and sanity-checked, so the next pass has room to
+//              progress past it again without inheriting one session's noise
+// Also records m.resetFallbackNote when the requested rotation wasn't available, so the UI
+// can surface that a substitute was used instead of silently swapping it in.
+function resolvePendingResetBaseline(m){
+  const mode=m.resetMode||'preDeload';
+  m.resetFallbackNote=null;
+  if(mode==='preDeload')return m.preDeloadBaselines||{};
+  if(mode==='mesoStart')return m.baselines||{};
+  if(mode==='rotation'){
+    const rb=m.rotationBaselines||{};
+    const keys=Object.keys(rb).map(Number).filter(n=>!isNaN(n));
+    if(!keys.length)return{};
+    const want=m.resetRotationNumber||1;
+    let chosen=want;
+    if(!rb[want]){
+      // Requested rotation wasn't captured (e.g. setting changed mid-meso, or it was skipped) —
+      // use the closest one available and flag it so the workout screen can note the swap.
+      let best=keys[0];
+      keys.forEach(k=>{if(Math.abs(k-want)<Math.abs(best-want))best=k;});
+      chosen=best;
+      m.resetFallbackNote='Rotation '+want+' wasn\'t available — resumed from rotation '+best+' instead.';
+    }
+    return getSmoothedRotationBaseline(m,chosen);
+  }
+  return null; // 'deload'
+}
+// Transitions a mesocycle into its deload phase — used by both the normal scheduled path (all
+// training rotations complete) and the early-deload trigger (checkEarlyDeloadSignals), so both
+// resolve the SAME reset baseline consistently rather than the early-trigger path leaving
+// pendingResetBaseline null or stale from a previous pass.
+function enterDeloadPhase(m){
+  m.preDeloadBaselines=snapshotPreDeloadBaselines(m);
+  m.phase='deload';
+  // Both deload methods perform the deload at the SAME weight/reps the next mesocycle pass
+  // will resume at (per resetMode — e.g. a specific mid-pack rotation), not the heaviest,
+  // closest-to-failure numbers from the pass that just finished. resetMode 'deload' has nothing
+  // to resolve to yet at this point, so it falls back to the pre-deload numbers.
+  const resolved=resolvePendingResetBaseline(m);
+  const hasData=resolved&&Object.keys(resolved).length;
+  m.pendingResetBaseline=hasData?resolved:(m.preDeloadBaselines||{});
+}
+// Returns an array of {weight,reps,repsL,repsR} — one per set — to seed this exercise's sets
+// with when starting a meso-linked workout, or null when normal history-based progression
+// should apply. Both deload methods draw weight/reps from the SAME resolved reset baseline
+// (m.pendingResetBaseline, per resetMode — not the heaviest, closest-to-failure pre-deload
+// cycle): 'weight' then cuts load off it (and cuts reps instead for bodyweight exercises, where
+// load isn't a meaningful lever), rounding to a real 0.5kg increment; 'sets' instead cuts the
+// number of sets and leaves weight/reps exactly as resolved — with the target effort
+// (deloadTargetRIR) shown as guidance rather than mechanically enforced, since RIR is
+// self-reported everywhere else in the app too.
+function getMesoSetAdjustments(m,exId){
+  if(!m)return null;
+  const exData=getExercise(exId)||{};
+  const isBW=exData.bw==='bw';
+  if(m.phase==='deload'){
+    const base=(m.pendingResetBaseline||{})[exId]||(m.preDeloadBaselines||{})[exId];
+    if(!base||!base.length)return null;
+    const method=m.deloadMethod||'weight';
+    if(method==='sets'){
+      const setMode=m.deloadSetMode||'flat';
+      const setVal=m.deloadSetValue!=null?m.deloadSetValue:1;
+      const targetCount=setMode==='flat'?Math.max(1,Math.min(setVal,base.length)):Math.max(1,base.length-setVal);
+      return base.slice(0,targetCount).map(s=>({weight:s.weight,reps:s.reps,repsL:s.repsL,repsR:s.repsR}));
+    }
+    const pct=(m.deloadPercent||0)/100;
+    let trimmed=base;
+    const drop=m.deloadSetsDrop||0;
+    if(drop>0&&base.length>1)trimmed=base.slice(0,Math.max(1,base.length-drop));
+    return trimmed.map(s=>{
+      if(isBW){
+        return{weight:s.weight,reps:Math.max(1,Math.round((s.reps||0)*(1-pct))),
+          repsL:s.repsL!=null?Math.max(1,Math.round(s.repsL*(1-pct))):undefined,
+          repsR:s.repsR!=null?Math.max(1,Math.round(s.repsR*(1-pct))):undefined};
+      }
+      const dW=Math.round((s.weight||0)*(1-pct)*2)/2; // nearest 0.5kg
+      return{weight:dW,reps:s.reps,repsL:s.repsL,repsR:s.repsR};
+    });
+  }
+  if(m.phase==='training'&&(m.passWorkoutCount||0)===0&&m.pendingResetBaseline&&m.pendingResetBaseline[exId]){
+    return m.pendingResetBaseline[exId];
+  }
+  return null;
+}
+// Works out the RIR you should be aiming for on this rotation, ramping down from a capped
+// starting point (rirStartCap) on rotation 1 to your chosen finishing point (rirEnd, e.g. 0)
+// on the final rotation of the pass — so effort builds toward true failure by the last week
+// instead of grinding at 0 RIR the whole mesocycle. Deload guidance (deloadTargetRIR) shows
+// regardless of whether the ramp itself is enabled, since it matters for the 'sets' deload
+// method too, not just the ramp feature.
+function getMesoTargetRIR(m){
+  if(!m)return null;
+  if(m.phase==='finished')return null;
+  if(m.phase==='deload')return{deload:true,rir:m.deloadTargetRIR!=null?m.deloadTargetRIR:4};
+  if(!m.rirRampEnabled)return null;
+  const total=m.rotationsPerMeso||1;
+  const end=m.rirEnd!=null?m.rirEnd:0;
+  const cap=m.rirStartCap!=null?m.rirStartCap:4;
+  const rotNum=Math.min((m.rotationsDone||0)+1,total);
+  const start=Math.min(cap,end+total-1);
+  const rir=total<=1?end:Math.round(start+(end-start)*((rotNum-1)/(total-1)));
+  return{rotNum,total,rir};
+}
+function formatMesoRIRNote(info){
+  if(!info)return null;
+  if(info.deload)return 'Deload rotation — keep it light, aim '+info.rir+'+ RIR.';
+  return 'Rotation '+info.rotNum+' of '+info.total+' — aim for '+info.rir+' RIR today.';
+}
+// Prior normal top sets for an exercise, searching from state.history[1] onward — used right
+// after the just-finished workout has already been unshifted onto state.history[0], so index 0
+// itself is deliberately skipped (comparing "this session" against sessions before it).
+function getPriorNormalTopSets(exId,count){
+  const out=[];
+  for(let i=1;i<state.history.length&&out.length<count;i++){
+    const ex=(state.history[i].exercises||[]).find(e=>e.exId===exId);
+    if(!ex)continue;
+    const normalSets=(ex.sets||[]).filter(s=>s.done&&(!s.type||s.type==='normal'));
+    if(normalSets.length)out.push({...normalSets[0],useRIR:!!ex.useRIR});
+  }
+  return out;
+}
+// Looks for two independent early-warning signs that a mesocycle's remaining training
+// rotations may be more than the user can currently recover from: (1) effort is already at or
+// below the RIR ramp's final-rotation target well before the final rotation, or (2) multiple
+// exercises' top sets are a genuine decline versus their last two sessions. Only called on a
+// workout that was just logged (and already saved to history) while still mid-pass.
+function checkEarlyDeloadSignals(m,workoutExercises){
+  const mode=m.earlyDeloadDetection||'off';
+  if(mode==='off')return null;
+  let rirChecked=0,rirHits=0,declineHits=0;
+  const declineNames=[];
+  (workoutExercises||[]).forEach(ex=>{
+    const exData=getExercise(ex.exId)||{};
+    const isUni=!!exData.uni;
+    const useRIR=!!ex.useRIR;
+    const normalSets=(ex.sets||[]).filter(s=>s.done&&(!s.type||s.type==='normal'));
+    if(!normalSets.length)return;
+    const top={...normalSets[0],useRIR};
+    if(m.rirRampEnabled&&top.rpe!=null){
+      rirChecked++;
+      const actualRIR=useRIR?top.rpe:(10-top.rpe);
+      const threshold=m.rirEnd!=null?m.rirEnd:0;
+      if(actualRIR<=threshold)rirHits++;
+    }
+    const priors=getPriorNormalTopSets(ex.exId,2); // [mostRecentPast, olderPast], each tagged with its own logged mode
+    if(priors.length){
+      const points=[...priors].reverse(); // oldest → newest
+      points.push(top);
+      let up=false,down=false;
+      for(let i=1;i<points.length;i++){
+        const c=comparePerf(points[i-1],points[i],isUni);
+        if(c>0)up=true;if(c<0)down=true;
+      }
+      if(down&&!up){declineHits++;declineNames.push(exData.name||'an exercise');}
+    }
+  });
+  const reasons=[];
+  if(rirChecked>0&&rirHits>=Math.ceil(rirChecked/2)){
+    reasons.push('Several exercises are already at your final-rotation RIR target, well ahead of schedule.');
+  }
+  const declineThreshold=m.earlyDeloadDeclineCount||2;
+  if(declineHits>=declineThreshold){
+    reasons.push(declineHits+' exercises declined versus their last two sessions ('+declineNames.slice(0,3).join(', ')+(declineNames.length>3?', ...':'')+').');
+  }
+  return reasons.length?{reasons}:null;
 }
 
 function toggleMesoDropdown(e,mi){
@@ -2198,15 +2656,120 @@ function openNewMesocycleModal(){
 }
 function saveNewMesocycle(){
   const name=document.getElementById('new-meso-name').value.trim();if(!name)return;
-  state.mesocycles.push({id:uid(),name,routineIds:[],currentPos:0,startedAt:null,completedWorkouts:0});
+  state.mesocycles.push({id:uid(),name,routineIds:[],currentPos:0,startedAt:null,completedWorkouts:0,
+    rotationsPerMeso:4,mesoRepeats:1,deloadEnabled:true,deloadPercent:40,deloadSetsDrop:0,resetMode:'preDeload',resetRotationNumber:1,resetFallbackNote:null,
+    rirRampEnabled:true,rirEnd:0,rirStartCap:4,earlyDeloadDetection:'suggest',earlyDeloadDeclineCount:2,
+    deloadMethod:'weight',deloadSetMode:'flat',deloadSetValue:1,deloadTargetRIR:4,
+    rotationsDone:0,repeatsDone:0,phase:'training',passWorkoutCount:0,rotationWorkoutCount:0,baselines:{},rotationBaselines:{},preDeloadBaselines:{},pendingResetBaseline:null});
   save();renderMesocycles();closeModal('modal-new-mesocycle');
 }
 
 
+function renderMesoProgressSummary(m){
+  const el=document.getElementById('meso-progress-summary');
+  if(!el)return;
+  const perMeso=m.rotationsPerMeso||1;
+  const totalRepeats=m.mesoRepeats||0;
+  const phaseLabel=m.phase==='deload'?'&#9888; Deload rotation':m.phase==='finished'?'&#10003; Mesocycle complete':'Training';
+  const phaseColor=m.phase==='deload'?'#ff8c00':m.phase==='finished'?'#2ed573':'var(--accent)';
+  const rirInfo=getMesoTargetRIR(m);
+  const rirLine=rirInfo?'<div class="small" style="margin-top:4px;color:var(--accent);font-weight:700">'+escHtml(formatMesoRIRNote(rirInfo))+'</div>':'';
+  el.innerHTML='<div style="background:var(--bg3);border-radius:12px;padding:12px 14px;margin-bottom:12px">'
+    +'<div style="font-size:11px;font-weight:800;letter-spacing:0.6px;color:'+phaseColor+';text-transform:uppercase">'+phaseLabel+'</div>'
+    +'<div class="small text2" style="margin-top:4px">Rotation '+Math.min((m.rotationsDone||0)+1,perMeso)+' of '+perMeso
+    +' &middot; Repeat '+((m.repeatsDone||0)+(m.phase==='finished'?0:1))+(totalRepeats>0?' of '+totalRepeats:' (indefinite)')+'</div>'
+    +rirLine
+    +'</div>';
+}
+function openMesoSettingsModal(){
+  if(viewingMesoIdx===null)return;
+  const m=state.mesocycles[viewingMesoIdx];
+  document.getElementById('meso-set-rotations').value=m.rotationsPerMeso||4;
+  document.getElementById('meso-set-repeats').value=m.mesoRepeats||0;
+  document.getElementById('meso-set-deload-enabled').checked=!!m.deloadEnabled;
+  document.getElementById('meso-set-deload-method').value=m.deloadMethod||'weight';
+  document.getElementById('meso-set-deload-pct').value=m.deloadPercent||40;
+  document.getElementById('meso-set-deload-sets-drop').value=m.deloadSetsDrop||0;
+  document.getElementById('meso-set-deload-set-mode').value=m.deloadSetMode||'flat';
+  document.getElementById('meso-set-deload-set-value').value=m.deloadSetValue!=null?m.deloadSetValue:1;
+  document.getElementById('meso-set-deload-rir').value=m.deloadTargetRIR!=null?m.deloadTargetRIR:4;
+  document.getElementById('meso-set-reset-mode').value=m.resetMode||'preDeload';
+  document.getElementById('meso-set-reset-rotation').value=m.resetRotationNumber||1;
+  document.getElementById('meso-set-reset-rotation').max=m.rotationsPerMeso||4;
+  document.getElementById('meso-deload-fields').style.display=m.deloadEnabled?'':'none';
+  document.getElementById('meso-reset-rotation-field').style.display=(m.resetMode==='rotation')?'':'none';
+  const isSetsMethod=(m.deloadMethod==='sets');
+  document.getElementById('meso-deload-weight-fields').style.display=isSetsMethod?'none':'';
+  document.getElementById('meso-deload-sets-fields').style.display=isSetsMethod?'':'none';
+  document.getElementById('meso-set-rir-enabled').checked=!!m.rirRampEnabled;
+  document.getElementById('meso-set-rir-end').value=m.rirEnd!=null?m.rirEnd:0;
+  document.getElementById('meso-set-rir-cap').value=m.rirStartCap!=null?m.rirStartCap:4;
+  document.getElementById('meso-rir-fields').style.display=m.rirRampEnabled?'':'none';
+  document.getElementById('meso-set-early-deload').value=m.earlyDeloadDetection||'suggest';
+  document.getElementById('meso-set-decline-count').value=m.earlyDeloadDeclineCount||2;
+  document.getElementById('meso-early-deload-fields').style.display=(m.earlyDeloadDetection==='off')?'none':'';
+  openModal('modal-meso-settings');
+}
+document.getElementById('meso-set-deload-enabled').onchange=function(){
+  document.getElementById('meso-deload-fields').style.display=this.checked?'':'none';
+};
+document.getElementById('meso-set-deload-method').onchange=function(){
+  const isSetsMethod=(this.value==='sets');
+  document.getElementById('meso-deload-weight-fields').style.display=isSetsMethod?'none':'';
+  document.getElementById('meso-deload-sets-fields').style.display=isSetsMethod?'':'none';
+};
+document.getElementById('meso-set-reset-mode').onchange=function(){
+  document.getElementById('meso-reset-rotation-field').style.display=(this.value==='rotation')?'':'none';
+};
+document.getElementById('meso-set-rir-enabled').onchange=function(){
+  document.getElementById('meso-rir-fields').style.display=this.checked?'':'none';
+};
+document.getElementById('meso-set-early-deload').onchange=function(){
+  document.getElementById('meso-early-deload-fields').style.display=(this.value==='off')?'none':'';
+};
+function saveMesoSettings(){
+  if(viewingMesoIdx===null)return;
+  const m=state.mesocycles[viewingMesoIdx];
+  const rotations=parseInt(document.getElementById('meso-set-rotations').value);
+  const repeats=parseInt(document.getElementById('meso-set-repeats').value);
+  m.rotationsPerMeso=(!isNaN(rotations)&&rotations>0)?rotations:(m.rotationsPerMeso||4);
+  m.mesoRepeats=(!isNaN(repeats)&&repeats>=0)?repeats:(m.mesoRepeats||0);
+  m.deloadEnabled=document.getElementById('meso-set-deload-enabled').checked;
+  m.deloadMethod=document.getElementById('meso-set-deload-method').value||'weight';
+  const pct=parseFloat(document.getElementById('meso-set-deload-pct').value);
+  m.deloadPercent=(!isNaN(pct)&&pct>0)?pct:(m.deloadPercent||40);
+  const setsDrop=parseInt(document.getElementById('meso-set-deload-sets-drop').value);
+  m.deloadSetsDrop=(!isNaN(setsDrop)&&setsDrop>=0)?setsDrop:0;
+  m.deloadSetMode=document.getElementById('meso-set-deload-set-mode').value||'flat';
+  const setVal=parseInt(document.getElementById('meso-set-deload-set-value').value);
+  m.deloadSetValue=(!isNaN(setVal)&&setVal>=1)?setVal:1;
+  const deloadRIR=parseInt(document.getElementById('meso-set-deload-rir').value);
+  m.deloadTargetRIR=(!isNaN(deloadRIR)&&deloadRIR>=0)?deloadRIR:4;
+  m.resetMode=document.getElementById('meso-set-reset-mode').value||'preDeload';
+  const rotNum=parseInt(document.getElementById('meso-set-reset-rotation').value);
+  m.resetRotationNumber=(!isNaN(rotNum)&&rotNum>=1)?Math.min(rotNum,m.rotationsPerMeso):(m.resetRotationNumber||1);
+  m.rirRampEnabled=document.getElementById('meso-set-rir-enabled').checked;
+  const rirEnd=parseInt(document.getElementById('meso-set-rir-end').value);
+  m.rirEnd=(!isNaN(rirEnd)&&rirEnd>=0)?rirEnd:0;
+  const rirCap=parseInt(document.getElementById('meso-set-rir-cap').value);
+  m.rirStartCap=(!isNaN(rirCap)&&rirCap>=m.rirEnd)?rirCap:Math.max(m.rirEnd,4);
+  m.earlyDeloadDetection=document.getElementById('meso-set-early-deload').value||'suggest';
+  const declineCount=parseInt(document.getElementById('meso-set-decline-count').value);
+  m.earlyDeloadDeclineCount=(!isNaN(declineCount)&&declineCount>=1)?declineCount:2;
+  // A lowered rotation count shouldn't leave rotationsDone stranded above the new ceiling —
+  // clamp it so the next completed rotation transitions cleanly instead of skipping ahead.
+  if(m.phase==='training'&&m.rotationsDone>m.rotationsPerMeso)m.rotationsDone=m.rotationsPerMeso;
+  save();
+  closeModal('modal-meso-settings');
+  openMesocycleDetail(viewingMesoIdx);
+  renderMesocycles();
+}
 function openMesocycleDetail(mi){
   viewingMesoIdx=mi;
   const m=state.mesocycles[mi];
   document.getElementById('meso-detail-title').textContent=m.name;
+  renderMesoProgressSummary(m);
+  document.getElementById('meso-settings-btn').onclick=openMesoSettingsModal;
   const nextIdx=getNextMesoRoutineIndex(m);
   const body=document.getElementById('meso-detail-body');
   if(!m.routineIds.length){
@@ -2221,7 +2784,6 @@ function openMesocycleDetail(mi){
       const n=(r.exerciseIds||[]).length;
       if(isNext){
         return '<div data-meso-pos="'+idx+'" style="display:flex;align-items:center;gap:10px;background:linear-gradient(90deg,var(--accent)16,var(--accent)05);border:1px solid var(--accent)44;border-radius:14px;padding:14px;margin:6px 0">'
-          +'<div class="tight-drag" data-meso-drag="'+idx+'" style="color:var(--accent)">&#10070;</div>'
           +'<div style="width:32px;height:32px;border-radius:10px;background:var(--accent);color:#0F1117;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;flex-shrink:0">'+(idx+1)+'</div>'
           +'<div style="width:38px;height:38px;border-radius:11px;background:'+col+'20;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+getCategoryIconSVG(muscat,18,col)+'</div>'
           +'<div style="flex:1;min-width:0">'
@@ -2233,7 +2795,6 @@ function openMesocycleDetail(mi){
           +'</div>';
       }
       return '<div class="edit-ex-row" data-meso-pos="'+idx+'">'
-        +'<div class="tight-drag" data-meso-drag="'+idx+'">&#10070;</div>'
         +'<div style="width:24px;height:24px;border-radius:6px;background:var(--bg4);color:var(--text2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">'+(idx+1)+'</div>'
         +'<div style="width:28px;height:28px;border-radius:8px;background:'+col+'18;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+getCategoryIconSVG(muscat,14,col)+'</div>'
         +'<div style="flex:1"><div class="bold" style="font-size:13px">'+escHtml(r.name)+'</div><div class="small text2">'+n+' exercise'+(n!==1?'s':'')+'</div></div>'
@@ -2246,52 +2807,19 @@ function openMesocycleDetail(mi){
   openModal('modal-mesocycle-detail');
 }
 
-let mesoDragPos=null,mesoDragEl=null;
+// ── MESOCYCLE ROUTINE SEQUENCE REORDER (long-press anywhere on a row to drag it) ──
 function initMesoDragSort(){
   const body=document.getElementById('meso-detail-body');
-  body.querySelectorAll('[data-meso-drag]').forEach(handle=>{
-    handle.addEventListener('touchstart',e=>{
-      mesoDragPos=parseInt(handle.getAttribute('data-meso-drag'));
-      mesoDragEl=handle.closest('[data-meso-pos]');
-      mesoDragEl.style.opacity='0.4';
-      e.preventDefault();
-    },{passive:false});
-  });
-  // Same rule as the routine list: the container persists across renders, so its
-  // touchmove/touchend listeners must only be attached once.
-  if(body.dataset.dragInit==='1')return;
-  body.dataset.dragInit='1';
-  body.addEventListener('touchmove',e=>{
-    if(mesoDragPos===null)return;
-    e.preventDefault();
-    const touch=e.touches[0];
-    const els=[...body.querySelectorAll('[data-meso-pos]')];
-    els.forEach(el=>{
-      el.style.borderTop='';
-      const r=el.getBoundingClientRect();
-      if(touch.clientY>=r.top&&touch.clientY<=r.bottom&&el!==mesoDragEl)el.style.borderTop='2px solid var(--accent)';
-    });
-  },{passive:false});
-  body.addEventListener('touchend',e=>{
-    if(mesoDragPos===null)return;
-    const touch=e.changedTouches[0];
-    const els=[...body.querySelectorAll('[data-meso-pos]')];
-    let targetPos=mesoDragPos;
-    els.forEach(el=>{
-      el.style.borderTop='';el.style.opacity='';
-      const r=el.getBoundingClientRect();
-      if(touch.clientY>=r.top&&touch.clientY<=r.bottom)targetPos=parseInt(el.getAttribute('data-meso-pos'));
-    });
-    if(targetPos!==mesoDragPos&&viewingMesoIdx!==null){
-      const m=state.mesocycles[viewingMesoIdx];
-      const moved=m.routineIds.splice(mesoDragPos,1)[0];
-      m.routineIds.splice(targetPos,0,moved);
-      save();
-      openMesocycleDetail(viewingMesoIdx);
-      renderMesocycles();
-      renderRoutinesList();
-    }
-    mesoDragPos=null;mesoDragEl=null;
+  initLongPressDragSort(body,'[data-meso-pos]','data-meso-pos','button',(fromPos,toPos)=>{
+    fromPos=parseInt(fromPos);toPos=parseInt(toPos);
+    if(viewingMesoIdx===null)return;
+    const m=state.mesocycles[viewingMesoIdx];
+    const moved=m.routineIds.splice(fromPos,1)[0];
+    m.routineIds.splice(toPos,0,moved);
+    save();
+    openMesocycleDetail(viewingMesoIdx);
+    renderMesocycles();
+    renderRoutinesList();
   });
 }
 function removeRoutineFromMeso(idx){
@@ -2358,7 +2886,7 @@ function skipMesoRoutine(mi){
     ()=>{
       const m=state.mesocycles[mi];
       if(!m)return;
-      advanceMesoPos(m);
+      advanceMesoProgress(m,[]);
       save();
       renderMesocycles();
       renderRoutinesList();
@@ -2434,6 +2962,17 @@ function closeAllDropdowns(){
 // Single global listener: closes any open dropdown when tapping outside it
 // and outside the button that opened it. Registered once on load, not
 // re-added per dropdown, to avoid race conditions with toggling.
+// Redraw any currently-open canvas chart on resize/orientation change — otherwise it stays
+// sized to whatever the viewport was when it was first drawn. Both render functions already
+// no-op safely if their canvas isn't in the DOM (modal closed), so calling both is safe.
+let chartResizeTimer=null;
+window.addEventListener('resize',()=>{
+  clearTimeout(chartResizeTimer);
+  chartResizeTimer=setTimeout(()=>{
+    if(typeof renderProgressChart==='function')renderProgressChart();
+    if(typeof renderBWChart==='function')renderBWChart();
+  },150);
+});
 document.addEventListener('click',function(ev){
   const openDrop=document.querySelector('.r-dropdown.open');
   if(!openDrop)return;
@@ -2526,6 +3065,8 @@ function openRoutineDetail(i){
 // ── START WORKOUT ──
 function startRoutineWorkout(i){
   const r=state.routines[i];
+  const activeMeso=activeMesoContext?state.mesocycles[activeMesoContext.mesoIdx]:null;
+  let mesoNote=null;
   const exercises=(r.exerciseIds||[]).map((id,idx)=>{
     const ex=getExercise(id);if(!ex)return null;
     const prev=getLastSets(id);
@@ -2533,9 +3074,39 @@ function startRoutineWorkout(i){
     const sg=(r.supersetGroups&&r.supersetGroups[idx])||null;
     const repRange=resolveRepRangeForRoutine(r,id);
     const useRIR=!!(r.rirModes&&r.rirModes[id]);
-    return{exId:id,sets:prev.length?prev.map(s=>({...s,done:false})):[newSet()],supersetGroup:sg,repRange,useRIR};
+    let sets=prev.length?prev.map(s=>({...s,done:false})):[newSet()];
+    const adjArr=activeMeso?getMesoSetAdjustments(activeMeso,id):null;
+    if(adjArr&&adjArr.length){
+      if(activeMeso.phase==='deload'&&sets.length>adjArr.length)sets=sets.slice(0,adjArr.length);
+      sets=sets.map((s,si)=>{
+        const adj=adjArr[si]||adjArr[adjArr.length-1];
+        if(!adj)return s;
+        return{...s,
+          weight:adj.weight!=null?adj.weight:s.weight,
+          reps:adj.reps!=null?adj.reps:s.reps,
+          repsL:adj.repsL!=null?adj.repsL:s.repsL,
+          repsR:adj.repsR!=null?adj.repsR:s.repsR,
+          prevWeight:s.weight,prevReps:s.reps,prevRepsL:s.repsL,prevRepsR:s.repsR};
+      });
+      if(activeMeso.phase==='deload')mesoNote='Deload rotation — weights cut '+(activeMeso.deloadPercent||0)+'%.';
+      else if(activeMeso.resetFallbackNote)mesoNote=activeMeso.resetFallbackNote;
+      else mesoNote='Resuming this mesocycle at reset baseline weights.';
+    }
+    return{exId:id,sets,supersetGroup:sg,repRange,useRIR};
   }).filter(Boolean);
   beginWorkout(r.name,exercises,r.id,[...(r.exerciseIds||[])]);
+  const noteEl=document.getElementById('workout-meso-note');
+  if(noteEl){
+    if(mesoNote){noteEl.textContent=mesoNote;noteEl.style.display='';}
+    else noteEl.style.display='none';
+  }
+  const rirNoteEl=document.getElementById('workout-rir-note');
+  if(rirNoteEl){
+    const rirInfo=activeMeso?getMesoTargetRIR(activeMeso):null;
+    const rirText=formatMesoRIRNote(rirInfo);
+    if(rirText){rirNoteEl.textContent=rirText;rirNoteEl.style.display='';}
+    else rirNoteEl.style.display='none';
+  }
 }
 function startEmptyWorkout(){beginWorkout('Workout',[],null,[]);}
 function beginWorkout(name,exercises,srcId,origIds){
@@ -2624,7 +3195,8 @@ function getSessionsForExercise(exId,limit){
   for(let i=0;i<state.history.length&&sessions.length<limit;i++){
     const w=state.history[i];
     const ex=(w.exercises||[]).find(e=>e.exId===exId);
-    const done=ex&&ex.sets?ex.sets.filter(s=>s.done):[];
+    // Only normal working sets count toward progression/trend — warmups, drop sets etc. don't reflect real progress
+    const done=ex&&ex.sets?ex.sets.filter(s=>s.done&&(!s.type||s.type==='normal')).map(s=>({...s,useRIR:!!ex.useRIR})):[];
     if(done.length)sessions.push(done);
   }
   return sessions;
@@ -2639,6 +3211,97 @@ function checkMissedRepRange(exId,repRange){
   }
   return null;
 }
+const DEFAULT_REP_RANGE={min:8,max:12};
+// Computes a genuine progression TARGET for a set (double progression: add reps within the
+// range, then bump weight and reset to the bottom of the range) rather than just copying
+// last session's numbers. Falls back to an 8–12 default range when none is set anywhere.
+function getSetTarget(exId,workoutEx,setIdx,exData){
+  const prevSets=getLastSets(exId);
+  const ps=prevSets[setIdx]||prevSets[prevSets.length-1];
+  if(!ps||(!ps.weight&&!ps.reps&&!ps.repsL&&!ps.repsR))return null;
+  const isUni=!!(exData&&exData.uni);
+  // Don't apply progression math on top of a warm-up/drop-set/etc slot — just carry it over as-is
+  if(ps.type&&ps.type!=='normal'){
+    return isUni?{weight:ps.weight,repsL:ps.repsL,repsR:ps.repsR}:{weight:ps.weight,reps:ps.reps};
+  }
+  const range=(workoutEx&&workoutEx.repRange&&workoutEx.repRange.max)?workoutEx.repRange:DEFAULT_REP_RANGE;
+  const useRIR=!!ps.useRIR;
+  const raw=ps.rpe;
+  const rpeEq=raw!=null?(useRIR?(10-raw):raw):null;
+  const hasRoom=rpeEq==null||rpeEq<=8;
+  const isBW=!!(exData&&exData.bw==='bw');
+  const inc=getEquipmentIncrement(exData||{});
+  const w=ps.weight||0;
+  // For unilateral work, progress off the weaker side so both sides genuinely earn the next jump
+  const repsMetric=isUni?Math.min(ps.repsL||0,ps.repsR||0):(ps.reps||0);
+  let targetWeight,targetReps;
+  if(!isBW&&repsMetric>=range.max&&hasRoom){
+    targetWeight=Math.round((w+inc)*100)/100;
+    targetReps=range.min;
+  }else if(isBW||repsMetric<range.max){
+    targetWeight=w;
+    targetReps=repsMetric+1;
+  }else{
+    // Topped out but no effort room left (RPE was already very high) — hold rather than push
+    targetWeight=w;
+    targetReps=repsMetric;
+  }
+  return isUni?{weight:targetWeight,repsL:targetReps,repsR:targetReps}:{weight:targetWeight,reps:targetReps};
+}
+// Pairwise performance comparison between two sets of the same slot: +1 = b is better than a,
+// -1 = b is worse, 0 = equal (or not comparable). Weight first, then reps, then effort as the
+// tiebreaker when weight & reps are identical (harder for the same output = a real decline).
+// Compares two logged sets (same weight/reps slot, different sessions). isUni controls whether
+// reps are compared per-side; each point (a,b) carries its own .useRIR reflecting whichever mode
+// was actually active when IT was logged — not a single shared mode — so a comparison stays
+// correct even if the exercise's RIR/RPE setting was changed in between.
+function comparePerf(a,b,isUni){
+  const repsOf=p=>isUni?Math.min(p.repsL||0,p.repsR||0):(p.reps||0);
+  const aW=a.weight||0,bW=b.weight||0;
+  if(bW!==aW)return bW>aW?1:-1;
+  const aR=repsOf(a),bR=repsOf(b);
+  if(bR!==aR)return bR>aR?1:-1;
+  if(a.rpe==null||b.rpe==null)return 0; // no effort data to compare — call it flat rather than guess
+  const aEff=a.useRIR?(10-a.rpe):a.rpe; // normalize to RPE-equivalent (higher = harder)
+  const bEff=b.useRIR?(10-b.rpe):b.rpe;
+  if(bEff<aEff)return 1; // same output, less effort = genuine improvement
+  if(bEff>aEff)return -1; // same output, more effort = genuine decline
+  return 0;
+}
+// Trend across up to 3 points (2 previous sessions' same-slot set + this one), not just a
+// single-session comparison. Requires both hops to agree before calling it up/down — a mixed
+// signal (up then down, or vice versa) reads as flat rather than picking a side.
+function getSetTrend(exId,workoutEx,setIdx){
+  const set=workoutEx&&workoutEx.sets&&workoutEx.sets[setIdx];
+  if(!set||!set.done)return null;
+  if(set.type&&set.type!=='normal')return null;
+  const exData=getExercise(exId)||{};
+  const isUni=!!exData.uni;
+  const liveSet={...set,useRIR:!!(workoutEx&&workoutEx.useRIR)}; // tag with the mode active right now
+  const sessions=getSessionsForExercise(exId,2); // [mostRecentPast, olderPast] — each set already tagged with its own mode
+  const p1=sessions[0]?sessions[0][setIdx]:null;
+  const p0=sessions[1]?sessions[1][setIdx]:null;
+  const points=[];
+  if(p0)points.push(p0);
+  if(p1)points.push(p1);
+  if(!points.length)return null; // first time on this set — nothing to compare yet
+  points.push(liveSet);
+  let up=false,down=false;
+  for(let i=1;i<points.length;i++){
+    const c=comparePerf(points[i-1],points[i],isUni);
+    if(c>0)up=true;
+    if(c<0)down=true;
+  }
+  if(up&&down)return'flat'; // hops disagree — no consistent direction
+  if(up)return'up';
+  if(down)return'down';
+  return'flat';
+}
+const TREND_ICONS={
+  up:'<svg width="20" height="14" viewBox="0 0 20 14" fill="none"><path d="M1 12L7 6L11 9L19 2" stroke="#2ed573" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  flat:'<svg width="20" height="14" viewBox="0 0 20 14" fill="none"><path d="M1 7H19" stroke="var(--text3)" stroke-width="2" stroke-linecap="round"/></svg>',
+  down:'<svg width="20" height="14" viewBox="0 0 20 14" fill="none"><path d="M1 2L7 8L11 5L19 12" stroke="#ff4757" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+};
 function getEquipmentIncrement(exData){
   const eq=(exData&&exData.machine||'').trim();
   if(eq==='Barbell'){
@@ -2653,23 +3316,23 @@ function getEquipmentIncrement(exData){
   return inc.Other||2.5;
 }
 function suggestNextLoad(exId,workoutEx){
-  const sets=getLastSets(exId);
+  const sets=getLastSets(exId); // each set carries the mode it was actually logged under
   if(!sets||!sets.length)return null;
   const last=sets[sets.length-1];
   if(!last||(!last.weight&&!last.reps))return null;
   const exData=getExercise(exId)||{};
   const w=last.weight||0,r=last.reps||0;
-  const useRIR=!!(workoutEx&&workoutEx.useRIR);
-  const raw=last.rpe||0;
+  const useRIR=!!last.useRIR;
+  const raw=last.rpe;
   // Normalize to an RPE-equivalent scale internally regardless of which the person tracks
-  const rpeEq=raw?(useRIR?(10-raw):raw):0;
+  const rpeEq=raw!=null?(useRIR?(10-raw):raw):null;
   const range=workoutEx&&workoutEx.repRange&&workoutEx.repRange.max?workoutEx.repRange:null;
   const inc=getEquipmentIncrement(exData);
-  const effortLbl=raw?(useRIR?' @RIR '+raw:' @RPE '+raw):'';
+  const effortLbl=raw!=null?(useRIR?' @RIR '+raw:' @RPE '+raw):'';
   let tip;
   if(range){
     const atTop=r>=range.max;
-    const hasRoom=!rpeEq||rpeEq<=8;
+    const hasRoom=rpeEq==null||rpeEq<=8;
     if(atTop&&hasRoom){
       tip=inc?('Go up to '+(Math.round((w+inc)*100)/100)+'kg \u00d7 '+range.min+(range.min!==range.max?'\u2013'+range.max:'')+' reps'):('Push past '+range.max+' reps next time');
     }else if(r<range.max){
@@ -2677,9 +3340,9 @@ function suggestNextLoad(exId,workoutEx){
     }else{
       tip='Hold at '+(w?w+'kg \u00d7 ':'')+r+' reps'+(inc?', or add '+inc+'kg if that felt manageable':'');
     }
-  }else if(rpeEq&&rpeEq<=6){
+  }else if(rpeEq!=null&&rpeEq<=6){
     tip=inc?('Try '+(Math.round((w+inc)*100)/100)+'kg \u00d7 '+r):('Try '+(r+1)+' reps');
-  }else if(rpeEq&&rpeEq>=9){
+  }else if(rpeEq!=null&&rpeEq>=9){
     tip='Match '+(w?w+'kg \u00d7 ':'')+r+' reps, or rest a bit longer first';
   }else{
     tip=inc?('Try '+(Math.round((w+inc/2)*100)/100)+'kg \u00d7 '+r+', or '+w+'kg \u00d7 '+(r+1)):('Try '+(r+1)+' reps');
@@ -2699,10 +3362,9 @@ function buildExerciseCard(exIdx){
   const missHtml=missMsg?'<div class="small" style="padding:6px 16px;margin:0 16px 8px;background:rgba(255,71,87,0.12);border-radius:8px;color:#ff6b7a">\u26a0\ufe0f '+escHtml(missMsg)+'</div>':'';
   const isBW=exData.bw==='bw';
   const effortHdr=ex.useRIR?'RIR':'RPE';
-  const dragHandleHtml=activeWorkout.exercises.length>1?'<div class="ex-drag-handle" data-ex-idx="'+exIdx+'" style="cursor:grab;padding:4px 8px 4px 0;color:var(--text3);touch-action:none">&#10070;</div>':'';
+  const isUni=!!exData.uni;
   wrap.innerHTML='<div class="exercise-header">'
-    +'<div style="display:flex;align-items:center">'+dragHandleHtml
-    +'<div><div class="exercise-name">'+escHtml(exData.name)+'</div><div class="exercise-meta">'+escHtml(metaParts.join(' · '))+'</div></div></div>'
+    +'<div><div class="exercise-name">'+escHtml(exData.name)+'</div><div class="exercise-meta">'+escHtml(metaParts.join(' · '))+'</div></div>'
     +'<div style="display:flex;gap:4px">'
     +'<button class="btn btn-ghost btn-sm" onclick="openProgressModal(\''+ex.exId+'\')">📈</button>'
     +'<button class="btn btn-ghost btn-sm" onclick="openNoteModal(\''+ex.exId+'\')">📌</button>'
@@ -2712,7 +3374,7 @@ function buildExerciseCard(exIdx){
     +missHtml
     +'<table class="set-table"><thead><tr>'
     +'<th>#</th><th>Type</th><th style="color:var(--text3)">Prev</th>'
-    +(isBW?'':'<th>kg</th>')+'<th>Reps</th><th>'+effortHdr+'</th><th>✓</th>'
+    +(isBW?'':'<th>kg</th>')+(isUni?'<th>L Reps</th><th>R Reps</th>':'<th>Reps</th>')+'<th>'+effortHdr+'</th><th>✓</th><th>Trend</th>'
     +'</tr></thead><tbody id="sets-body-'+exIdx+'"></tbody></table>'
     +'<div class="small text3" style="padding:4px 16px 0">Swipe a set left to delete it</div>'
     +'<div class="exercise-actions">'
@@ -2729,38 +3391,44 @@ function renderSets(exIdx){
   const exData=getExercise(ex.exId)||{bw:'no'};
   const tbody=document.getElementById('sets-body-'+exIdx);if(!tbody)return;
   const isBW=exData.bw==='bw';
+  const isUni=!!exData.uni;
   const prevSets=getLastSets(ex.exId);
   tbody.innerHTML='';
   ex.sets.forEach((set,setIdx)=>{
     const tr=document.createElement('tr');
-    const isPR=set.done&&set.weight>0&&checkSetForPR(ex.exId,set.weight||0,set.reps||0);
+    const totalReps=isUni?(set.repsL||0)+(set.repsR||0):(set.reps||0);
+    const isPR=set.done&&set.weight>0&&checkSetForPR(ex.exId,set.weight||0,totalReps);
     tr.className='set-row'+(set.done?' completed':'')+(isPR?' pr-row':'');
     tr.id='set-row-'+exIdx+'-'+setIdx;
     const t=SET_TYPES.find(x=>x.id===set.type)||SET_TYPES[0];
-    const rpeColor=set.rpe?(ex.useRIR?(set.rpe<=1?'#ff4757':set.rpe<=3?'#ff8c00':'#2ed573'):(set.rpe<=5?'#2ed573':set.rpe<=7?'#ff8c00':'#ff4757')):'var(--text3)';
+    const rpeColor=set.rpe!=null?(ex.useRIR?(set.rpe<=1?'#ff4757':set.rpe<=3?'#ff8c00':'#2ed573'):(set.rpe<=5?'#2ed573':set.rpe<=7?'#ff8c00':'#ff4757')):'var(--text3)';
     // Previous set for this slot — from history first, then from set's stored prev values
     const ps=prevSets[setIdx]||prevSets[prevSets.length-1];
-    // Use history slot if available, else fall back to what addSet calculated
-    const phWeight=ps?ps.weight:(set.prevWeight||null);
-    const phReps=ps?ps.reps:(set.prevReps||null);
-    const prevTxt=ps?(isBW?ps.reps+'r':(ps.weight||0)+'kg\n'+(ps.reps||0)+'r')
-      :(set.prevWeight||set.prevReps?(isBW?(set.prevReps||0)+'r':(set.prevWeight||0)+'kg\n'+(set.prevReps||0)+'r'):'—');
-    if(isBW){
-      tr.innerHTML='<td><span class="set-num">'+(setIdx+1)+'</span></td>'
-        +'<td><button class="btn btn-sm set-type-btn '+t.badgeClass+'" onclick="openSetTypeModal('+exIdx+','+setIdx+')">'+t.label+'</button></td>'
-        +'<td><div class="prev-cell">'+escHtml(prevTxt)+'</div></td>'
-        +'<td><input class="set-input'+(isPR?' pr-input':'')+'" type="number" inputmode="numeric" value="'+(set.reps||'')+'" placeholder="'+(phReps||'—')+'" onchange="updateSet('+exIdx+','+setIdx+',\'reps\',this.value,this)" onfocus="if(!this.value&&this.placeholder!==\'—\')this.value=this.placeholder;" style="width:52px"/></td>'
-        +'<td><input class="rpe-input" type="number" inputmode="numeric" value="'+(set.rpe||'')+'" placeholder="'+(set.prevRpe||'—')+'" min="0" max="10" oninput="updateRPE('+exIdx+','+setIdx+',this)" style="color:'+rpeColor+'"/></td>'
-        +'<td><button class="complete-btn'+(set.done?' done':'')+'" onclick="toggleSetDone('+exIdx+','+setIdx+')">✓</button></td>';
-    }else{
-      tr.innerHTML='<td><span class="set-num">'+(setIdx+1)+'</span></td>'
-        +'<td><button class="btn btn-sm set-type-btn '+t.badgeClass+'" onclick="openSetTypeModal('+exIdx+','+setIdx+')">'+t.label+'</button></td>'
-        +'<td><div class="prev-cell">'+escHtml(prevTxt)+'</div></td>'
-        +'<td><input class="set-input'+(isPR?' pr-input':'')+'" type="number" inputmode="decimal" value="'+(set.weight||'')+'" placeholder="'+(phWeight||'—')+'" onchange="updateSet('+exIdx+','+setIdx+',\'weight\',this.value,this)" onfocus="if(!this.value&&this.placeholder!==\'—\')this.value=this.placeholder;"/></td>'
-        +'<td><input class="set-input'+(isPR?' pr-input':'')+'" type="number" inputmode="numeric" value="'+(set.reps||'')+'" placeholder="'+(phReps||'—')+'" onchange="updateSet('+exIdx+','+setIdx+',\'reps\',this.value,this)" onfocus="if(!this.value&&this.placeholder!==\'—\')this.value=this.placeholder;"/></td>'
-        +'<td><input class="rpe-input" type="number" inputmode="numeric" value="'+(set.rpe||'')+'" placeholder="'+(set.prevRpe||'—')+'" min="0" max="10" oninput="updateRPE('+exIdx+','+setIdx+',this)" style="color:'+rpeColor+'"/></td>'
-        +'<td><button class="complete-btn'+(set.done?' done':'')+'" onclick="toggleSetDone('+exIdx+','+setIdx+')">✓</button></td>';
-    }
+    // Placeholder is a genuine progression TARGET (double progression), not just a copy of last time
+    const target=getSetTarget(ex.exId,ex,setIdx,exData);
+    const phWeight=target?target.weight:(set.prevWeight||null);
+    const phReps=target?target.reps:(set.prevReps||null);
+    const phRepsL=target?target.repsL:(set.prevRepsL||null);
+    const phRepsR=target?target.repsR:(set.prevRepsR||null);
+    const trend=set.done?getSetTrend(ex.exId,ex,setIdx):null;
+    const prevTxt=isUni?
+      (ps?(isBW?(ps.repsL||0)+'/'+(ps.repsR||0)+'r':(ps.weight||0)+'kg\n'+(ps.repsL||0)+'/'+(ps.repsR||0)+'r')
+        :((set.prevRepsL||set.prevRepsR)?(isBW?(set.prevRepsL||0)+'/'+(set.prevRepsR||0)+'r':(set.prevWeight||0)+'kg\n'+(set.prevRepsL||0)+'/'+(set.prevRepsR||0)+'r'):'—'))
+      :(ps?(isBW?ps.reps+'r':(ps.weight||0)+'kg\n'+(ps.reps||0)+'r')
+        :(set.prevWeight||set.prevReps?(isBW?(set.prevReps||0)+'r':(set.prevWeight||0)+'kg\n'+(set.prevReps||0)+'r'):'—'));
+    const weightCellHtml=isBW?'':'<td><input class="set-input'+(isPR?' pr-input':'')+'" type="number" inputmode="decimal" value="'+(set.weight||'')+'" placeholder="'+(phWeight||'—')+'" onchange="updateSet('+exIdx+','+setIdx+',\'weight\',this.value,this)" onfocus="this.select()"/></td>';
+    const repsCellHtml=isUni?
+      ('<td><input class="set-input'+(isPR?' pr-input':'')+'" type="number" inputmode="numeric" value="'+(set.repsL||'')+'" placeholder="'+(phRepsL||'—')+'" onchange="updateSet('+exIdx+','+setIdx+',\'repsL\',this.value,this)" onfocus="this.select()" style="width:48px"/></td>'
+      +'<td><input class="set-input'+(isPR?' pr-input':'')+'" type="number" inputmode="numeric" value="'+(set.repsR||'')+'" placeholder="'+(phRepsR||'—')+'" onchange="updateSet('+exIdx+','+setIdx+',\'repsR\',this.value,this)" onfocus="this.select()" style="width:48px"/></td>')
+      :('<td><input class="set-input'+(isPR?' pr-input':'')+'" type="number" inputmode="numeric" value="'+(set.reps||'')+'" placeholder="'+(phReps||'—')+'" onchange="updateSet('+exIdx+','+setIdx+',\'reps\',this.value,this)" onfocus="this.select()" style="'+(isBW?'width:52px':'')+'"/></td>');
+    tr.innerHTML='<td><span class="set-num">'+(setIdx+1)+'</span></td>'
+      +'<td><button class="btn btn-sm set-type-btn '+t.badgeClass+'" onclick="openSetTypeModal('+exIdx+','+setIdx+')">'+t.label+'</button></td>'
+      +'<td><div class="prev-cell">'+escHtml(prevTxt)+'</div></td>'
+      +weightCellHtml
+      +repsCellHtml
+      +'<td><input class="rpe-input" type="number" inputmode="numeric" value="'+(set.rpe!=null?set.rpe:'')+'" placeholder="'+(set.prevRpe!=null?set.prevRpe:'—')+'" min="0" max="10" oninput="updateRPE('+exIdx+','+setIdx+',this)" style="color:'+rpeColor+'"/></td>'
+      +'<td><button class="complete-btn'+(set.done?' done':'')+'" onclick="toggleSetDone('+exIdx+','+setIdx+')">✓</button></td>'
+      +'<td>'+(trend?TREND_ICONS[trend]:'')+'</td>';
     tbody.appendChild(tr);
     tr.ontouchstart=(e)=>setSwipeStart(e,tr,exIdx,setIdx);
     tr.ontouchmove=(e)=>setSwipeMove(e);
@@ -2820,29 +3488,46 @@ function removeSetAt(exIdx,setIdx){
 function updateSet(exIdx,setIdx,field,value,inputEl){
   let v=parseFloat(value)||0;
   if(v<0){v=0;if(inputEl)inputEl.value=0;}
-  activeWorkout.exercises[exIdx].sets[setIdx][field]=v;
+  const set=activeWorkout.exercises[exIdx].sets[setIdx];
+  set[field]=v;
+  if(field==='repsL'||field==='repsR'){
+    // Keep an aggregate 'reps' in sync so PR/volume/history logic (which reads set.reps) still works for unilateral sets
+    set.reps=(set.repsL||0)+(set.repsR||0);
+  }
   if(field==='rpe')renderSets(exIdx);
   updateWorkoutStats();
 }
 function updateRPE(exIdx,setIdx,input){
-  let v=parseInt(input.value)||0;
-  if(v>10){v=10;input.value=10;}
-  if(v<0&&input.value!==''){v=0;input.value=0;}
+  let v=input.value===''?null:parseInt(input.value);
+  if(v!=null&&isNaN(v))v=null;
+  if(v!=null&&v>10){v=10;input.value=10;}
+  if(v!=null&&v<0){v=0;input.value=0;}
   activeWorkout.exercises[exIdx].sets[setIdx].rpe=v;
   // Update colour live
   const useRIR=!!activeWorkout.exercises[exIdx].useRIR;
-  const color=useRIR?(v<=1?'#ff4757':v<=3?'#ff8c00':'#2ed573'):(v<=5?'#2ed573':v<=7?'#ff8c00':'#ff4757');
-  input.style.color=v?color:'var(--text3)';
+  const color=v==null?'var(--text3)':(useRIR?(v<=1?'#ff4757':v<=3?'#ff8c00':'#2ed573'):(v<=5?'#2ed573':v<=7?'#ff8c00':'#ff4757'));
+  input.style.color=color;
   updateWorkoutStats();
 }
 
 function toggleSetDone(exIdx,setIdx){
   const set=activeWorkout.exercises[exIdx].sets[setIdx];
   const row=document.getElementById('set-row-'+exIdx+'-'+setIdx);
+  const exData2=getExercise(activeWorkout.exercises[exIdx].exId)||{};
+  const isUni2=!!exData2.uni;
+  const isBW2=exData2.bw==='bw';
   const inputs=row.querySelectorAll('.set-input');
   // Auto-fill from placeholder if blank
-  if(inputs[0]&&!set.weight&&inputs[0].placeholder&&inputs[0].placeholder!=='—'){set.weight=parseFloat(inputs[0].placeholder)||0;inputs[0].value=set.weight;}
-  if(inputs[1]&&!set.reps&&inputs[1].placeholder&&inputs[1].placeholder!=='—'){set.reps=parseFloat(inputs[1].placeholder)||0;inputs[1].value=set.reps;}
+  if(isUni2){
+    const lIdx=isBW2?0:1,rIdx=isBW2?1:2;
+    if(inputs[lIdx]&&!set.repsL&&inputs[lIdx].placeholder&&inputs[lIdx].placeholder!=='—'){set.repsL=parseFloat(inputs[lIdx].placeholder)||0;inputs[lIdx].value=set.repsL;}
+    if(inputs[rIdx]&&!set.repsR&&inputs[rIdx].placeholder&&inputs[rIdx].placeholder!=='—'){set.repsR=parseFloat(inputs[rIdx].placeholder)||0;inputs[rIdx].value=set.repsR;}
+    if(!isBW2&&inputs[0]&&!set.weight&&inputs[0].placeholder&&inputs[0].placeholder!=='—'){set.weight=parseFloat(inputs[0].placeholder)||0;inputs[0].value=set.weight;}
+    set.reps=(set.repsL||0)+(set.repsR||0);
+  }else{
+    if(inputs[0]&&!set.weight&&inputs[0].placeholder&&inputs[0].placeholder!=='—'){set.weight=parseFloat(inputs[0].placeholder)||0;inputs[0].value=set.weight;}
+    if(inputs[1]&&!set.reps&&inputs[1].placeholder&&inputs[1].placeholder!=='—'){set.reps=parseFloat(inputs[1].placeholder)||0;inputs[1].value=set.reps;}
+  }
   set.done=!set.done;
   const btn=row.querySelector('.complete-btn');
   row.classList.toggle('completed',set.done);btn.classList.toggle('done',set.done);
@@ -2853,7 +3538,11 @@ function toggleSetDone(exIdx,setIdx){
       const next=ex.sets[setIdx+1];
       if(!next.weight&&!next.prevWeight&&set.weight){next.prevWeight=set.weight;}
       if(!next.reps&&!next.prevReps&&set.reps){next.prevReps=set.reps;}
-      if(!next.rpe&&!next.prevRpe&&set.rpe){next.prevRpe=set.rpe;}
+      if(isUni2){
+        if(!next.repsL&&!next.prevRepsL&&set.repsL){next.prevRepsL=set.repsL;}
+        if(!next.repsR&&!next.prevRepsR&&set.repsR){next.prevRepsR=set.repsR;}
+      }
+      if(next.rpe==null&&next.prevRpe==null&&set.rpe!=null){next.prevRpe=set.rpe;}
       renderSets(exIdx);
     }
     // PR check
@@ -2918,22 +3607,29 @@ function addSet(exIdx){
   const setAbove=ex.sets[newSetIdx-1];
 
   // Decide what to populate with
-  let pw=0,pr=0,rpe=0,type=last?last.type:'normal';
+  const exData=getExercise(ex.exId)||{};
+  const isUni=!!exData.uni;
+  let pw=0,pr=0,prL=0,prR=0,rpe=null,type=last?last.type:'normal';
   if(prevSlot){
     // Exact same set number from last time
-    pw=prevSlot.weight||0; pr=prevSlot.reps||0; rpe=prevSlot.rpe||0;
-  } else if(setAbove&&(setAbove.weight||setAbove.reps)){
+    pw=prevSlot.weight||0; pr=prevSlot.reps||0; prL=prevSlot.repsL||0; prR=prevSlot.repsR||0; rpe=prevSlot.rpe!=null?prevSlot.rpe:null;
+  } else if(setAbove&&(setAbove.weight||setAbove.reps||setAbove.repsL||setAbove.repsR)){
     // Copy from the set above (either from this session if filled, or its prev values)
     pw=setAbove.weight||setAbove.prevWeight||0;
     pr=setAbove.reps||setAbove.prevReps||0;
-    rpe=setAbove.rpe||0;
+    prL=setAbove.repsL||setAbove.prevRepsL||0;
+    prR=setAbove.repsR||setAbove.prevRepsR||0;
+    rpe=setAbove.rpe!=null?setAbove.rpe:null;
   } else if(prevFallback){
     // Use last set from previous session as fallback
-    pw=prevFallback.weight||0; pr=prevFallback.reps||0; rpe=prevFallback.rpe||0;
+    pw=prevFallback.weight||0; pr=prevFallback.reps||0; prL=prevFallback.repsL||0; prR=prevFallback.repsR||0; rpe=prevFallback.rpe!=null?prevFallback.rpe:null;
   }
 
-  ex.sets.push({
-    type, weight:0, reps:0, rpe:0, done:false,
+  ex.sets.push(isUni?{
+    type, weight:0, repsL:0, repsR:0, reps:0, rpe:null, done:false,
+    prevWeight:pw, prevRepsL:prL, prevRepsR:prR, prevRpe:rpe,
+  }:{
+    type, weight:0, reps:0, rpe:null, done:false,
     prevWeight:pw, prevReps:pr, prevRpe:rpe,
   });
   renderSets(exIdx);updateWorkoutStats();updateWorkoutEstimate();
@@ -3156,37 +3852,15 @@ function saveEditedExercise(){
   closeModal('modal-edit-exercise');renderActiveWorkout();
 }
 
-// ── EXERCISE REORDER DURING WORKOUT ──
+// ── EXERCISE REORDER DURING WORKOUT (long-press on an exercise's header to drag the whole card) ──
 function initWorkoutReorder(){
   const container=document.getElementById('exercises-container');if(!container)return;
-  // The container persists across every renderActiveWorkout() call (only its children are
-  // rebuilt), so these listeners must be attached once, not re-added on every set logged.
-  if(container.dataset.reorderInit==='1')return;
-  container.dataset.reorderInit='1';
-  let dragEl=null;
-  container.addEventListener('touchstart',e=>{
-    const handle=e.target.closest('.ex-drag-handle');if(!handle)return;
-    workoutReorderDragIdx=parseInt(handle.getAttribute('data-ex-idx'));
-    dragEl=handle.closest('.exercise-card');if(dragEl)dragEl.style.opacity='0.5';e.preventDefault();
-  },{passive:false});
-  container.addEventListener('touchmove',e=>{
-    if(workoutReorderDragIdx===null)return;e.preventDefault();
-    const touch=e.touches[0];
-    document.querySelectorAll('.exercise-card[data-ex-idx]').forEach(c=>{
-      c.style.borderTop='';const r=c.getBoundingClientRect();
-      if(touch.clientY>=r.top&&touch.clientY<=r.bottom&&parseInt(c.getAttribute('data-ex-idx'))!==workoutReorderDragIdx)c.style.borderTop='2px solid var(--accent)';
-    });
-  },{passive:false});
-  container.addEventListener('touchend',e=>{
-    if(workoutReorderDragIdx===null)return;
-    const touch=e.changedTouches[0];let targetIdx=workoutReorderDragIdx;
-    document.querySelectorAll('.exercise-card[data-ex-idx]').forEach(c=>{
-      c.style.borderTop='';if(dragEl)dragEl.style.opacity='';const r=c.getBoundingClientRect();
-      if(touch.clientY>=r.top&&touch.clientY<=r.bottom)targetIdx=parseInt(c.getAttribute('data-ex-idx'));
-    });
-    if(targetIdx!==workoutReorderDragIdx){const moved=activeWorkout.exercises.splice(workoutReorderDragIdx,1)[0];activeWorkout.exercises.splice(targetIdx,0,moved);renderActiveWorkout();}
-    workoutReorderDragIdx=null;dragEl=null;
-  });
+  initLongPressDragSort(container,'.exercise-card[data-ex-idx]','data-ex-idx','button',(fromIdx,toIdx)=>{
+    fromIdx=parseInt(fromIdx);toIdx=parseInt(toIdx);
+    const moved=activeWorkout.exercises.splice(fromIdx,1)[0];
+    activeWorkout.exercises.splice(toIdx,0,moved);
+    renderActiveWorkout();
+  },'.exercise-header');
 }
 
 function openSupersetModal(){
@@ -3221,8 +3895,9 @@ function ungroupSuperset(gid){
 }
 
 // ── ADD EXERCISE ──
-function openAddExerciseModal(){
+function openAddExerciseModal(dest){
   fromWorkout=true;
+  pickerDestination=dest||'workout';
   pickerState={step:0,muscle:null,exDef:null,equipment:null,position:null,grip:null,isUni:false,modifier:null,modifierCustomMode:false,attachment:null,customValues:{},addingField:null,cablePosition:null,benchBack:null,benchSeat:null,showBenchSetup:false,usedLastConfig:false};
   renderPickerStep();
   openModal('modal-add-exercise');
@@ -3475,8 +4150,14 @@ function pickerUpdatePreview(){
 function pickerAddExercise(){
   if(!pickerState.exDef)return;
   const resolved=resolveExercise(pickerState.muscle,pickerState.exDef.name,pickerState.equipment,pickerState.position,pickerState.grip,pickerState.isUni,pickerState.modifier,pickerState.attachment,pickerState.customValues,pickerSettings());
-  addExerciseToWorkout(resolved.id);
-  closeModal('modal-add-exercise');
+  if(pickerDestination==='routine'){
+    if(!editingRoutineExIds.includes(resolved.id))editingRoutineExIds.push(resolved.id);
+    closeModal('modal-add-exercise');
+    renderEditRoutineExList();
+  }else{
+    addExerciseToWorkout(resolved.id);
+    closeModal('modal-add-exercise');
+  }
 }
 
 function openNewExerciseModal(){openNewExerciseModalFromWorkout();}
@@ -3490,7 +4171,7 @@ function openNewExerciseModalFromWorkout(){
     openModal('modal-new-exercise');
   },300);
 }
-function closeNewExerciseModal(){closeModal('modal-new-exercise');if(fromWorkout)setTimeout(()=>openAddExerciseModal(),300);}
+function closeNewExerciseModal(){closeModal('modal-new-exercise');if(fromWorkout)setTimeout(()=>openAddExerciseModal(pickerDestination),300);}
 function saveNewExercise(){
   const baseName=document.getElementById('new-ex-name').value.trim();if(!baseName)return;
   const modifier=document.getElementById('new-ex-modifier').value.trim();
@@ -3500,7 +4181,7 @@ function saveNewExercise(){
   if(editingExId){const ex=getExercise(editingExId);if(ex)Object.assign(ex,data);}
   else state.exercises.push({id:uid(),generated:false,...data});
   save();renderExerciseDB();closeModal('modal-new-exercise');
-  if(fromWorkout)setTimeout(()=>openAddExerciseModal(),300);
+  if(fromWorkout)setTimeout(()=>openAddExerciseModal(pickerDestination),300);
   if(activeWorkout)renderActiveWorkout();
 }
 
@@ -3534,7 +4215,31 @@ function buildTimerPresets(){
 }
 function openTimerModal(){openModal('modal-timer');}
 function startCustomTimer(){const v=parseInt(document.getElementById('custom-timer-input').value);if(v>0){startRestTimer(v);closeModal('modal-timer');}}
+// Simple offline beep (three ascending tones) for timer completion — no network/asset needed.
+let sharedAudioCtx=null;
+function playTimerSound(){
+  try{
+    if(!sharedAudioCtx)sharedAudioCtx=new(window.AudioContext||window.webkitAudioContext)();
+    if(sharedAudioCtx.state==='suspended')sharedAudioCtx.resume();
+    const now=sharedAudioCtx.currentTime;
+    [880,1046.5,1318.5].forEach((freq,i)=>{
+      const osc=sharedAudioCtx.createOscillator();
+      const gain=sharedAudioCtx.createGain();
+      osc.type='sine';osc.frequency.value=freq;
+      const t=now+i*0.15;
+      gain.gain.setValueAtTime(0,t);
+      gain.gain.linearRampToValueAtTime(0.35,t+0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001,t+0.28);
+      osc.connect(gain);gain.connect(sharedAudioCtx.destination);
+      osc.start(t);osc.stop(t+0.3);
+    });
+  }catch(e){/* audio not available — vibration still fires */}
+}
 function startRestTimer(seconds,label){
+  try{
+    if(!sharedAudioCtx)sharedAudioCtx=new(window.AudioContext||window.webkitAudioContext)();
+    if(sharedAudioCtx.state==='suspended')sharedAudioCtx.resume();
+  }catch(e){/* audio not available — vibration still fires */}
   if(restTimer)clearInterval(restTimer);
   restRemaining=seconds;
   document.getElementById('timer-bar-label').textContent=label||'Rest Timer';
@@ -3544,7 +4249,7 @@ function startRestTimer(seconds,label){
   // Force reflow so transition plays
   bar.getBoundingClientRect();
   bar.classList.add('visible');
-  restTimer=setInterval(()=>{restRemaining--;if(restRemaining<=0){stopTimer();if(navigator.vibrate)navigator.vibrate([200,100,200]);}else updateTimerDisplay();},1000);
+  restTimer=setInterval(()=>{restRemaining--;if(restRemaining<=0){stopTimer();playTimerSound();if(navigator.vibrate)navigator.vibrate([200,100,200]);}else updateTimerDisplay();},1000);
 }
 function updateTimerDisplay(){
   const m=Math.floor(restRemaining/60),s=restRemaining%60;
@@ -3686,7 +4391,7 @@ function finishWorkout(){
   const diffHtml=diffLines.length?'<div style="font-size:12px;color:var(--text2);margin:5px 0 8px;line-height:1.7">'+diffLines.join(', ')+'</div>':'';
   const workoutNameVal=document.getElementById('active-workout-name').value||'My Routine';
   const mkOpt=(val,checked,title,sub,extra)=>'<label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;padding:10px;background:var(--bg3);border-radius:10px;border:2px solid var(--border);margin-bottom:8px">'
-    +'<input type="radio" name="finish-save-mode" value="'+val+'" style="margin-top:3px;accent-color:var(--accent);flex-shrink:0"'+(checked?' checked':'')+'>'
+    +'<input type="radio" name="finish-save-mode" value="'+val+'" style="width:18px;height:18px;margin-top:3px;accent-color:var(--accent);flex-shrink:0"'+(checked?' checked':'')+'>'
     +'<div style="flex:1"><div style="font-weight:700;font-size:13px">'+title+'</div>'
     +'<div class="small text2">'+sub+'</div>'+(extra||'')+'</div></label>';
   let html='<div class="input-label mt16">Save Options</div>';
@@ -3708,12 +4413,19 @@ function confirmFinishWorkout(){
 
   // Fill any unfilled sets with prev values before saving
   const cleanExercises=activeWorkout.exercises.map(ex=>{
+    const exData=getExercise(ex.exId)||{};
+    const isUni=!!exData.uni;
     const sets=ex.sets.map(s=>{
       const w=s.weight||(!s.done&&s.prevWeight?s.prevWeight:0);
+      if(isUni){
+        const rL=s.repsL||(!s.done&&s.prevRepsL?s.prevRepsL:0);
+        const rR=s.repsR||(!s.done&&s.prevRepsR?s.prevRepsR:0);
+        return{...s,weight:w,repsL:rL,repsR:rR,reps:rL+rR};
+      }
       const r=s.reps||(!s.done&&s.prevReps?s.prevReps:0);
       return{...s,weight:w,reps:r};
     });
-    return{exId:ex.exId,sets,supersetGroup:ex.supersetGroup};
+    return{exId:ex.exId,sets,supersetGroup:ex.supersetGroup,useRIR:!!ex.useRIR};
   });
 
   const workout={id:uid(),name,date:new Date().toISOString(),
@@ -3743,7 +4455,29 @@ function confirmFinishWorkout(){
   // Advance mesocycle progress if this workout was started from one
   if(activeMesoContext){
     const m=state.mesocycles[activeMesoContext.mesoIdx];
-    if(m){advanceMesoPos(m);if(!m.startedAt)m.startedAt=new Date().toISOString();m.completedWorkouts=(m.completedWorkouts||0)+1;}
+    if(m){
+      const wasTrainingBefore=m.phase==='training';
+      const rotNumBefore=(m.rotationsDone||0)+1;
+      const totalBefore=m.rotationsPerMeso||1;
+      advanceMesoProgress(m,cleanExercises);
+      if(!m.startedAt)m.startedAt=new Date().toISOString();
+      m.completedWorkouts=(m.completedWorkouts||0)+1;
+      // Only worth checking if we were mid-pass and didn't just naturally hit deload/finished —
+      // no point suggesting an "early" deload on the same workout that triggers it on schedule.
+      if(wasTrainingBefore&&m.phase==='training'&&m.deloadEnabled&&rotNumBefore<totalBefore){
+        const signal=checkEarlyDeloadSignals(m,activeWorkout.exercises);
+        if(signal){
+          if(m.earlyDeloadDetection==='auto'){
+            enterDeloadPhase(m);
+          }else if(m.earlyDeloadDetection==='suggest'){
+            forgeConfirm('Early Deload Suggested',signal.reasons.join(' ')+' Start the deload rotation now instead of continuing training?',()=>{
+              enterDeloadPhase(m);
+              save();renderMesocycles();
+            },{okLabel:'Deload Now',cancelLabel:'Keep Training',danger:false});
+          }
+        }
+      }
+    }
     activeMesoContext=null;
     save();
   }
@@ -4159,33 +4893,35 @@ function openHistoryDetail(id){
   document.getElementById('history-detail-title').textContent=w.name;
   let html='<div class="small text2" style="margin-bottom:10px">'+d.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'})+'</div>';
   if(w.notes)html+='<div class="small" style="color:var(--accent2);margin-bottom:10px">📝 '+escHtml(w.notes)+'</div>';
-  let allRPE=[];
+  let allEff=[]; // canonical RIR-equivalent, so mixed RIR/RPE exercises still average meaningfully
   w.exercises.forEach(ex=>{
     const exData=getExercise(ex.exId);
+    const useRIR=!!ex.useRIR;
     html+='<div class="bold mt12">'+(exData?escHtml(exData.name):'Unknown')+'</div>';
     if(exData)html+='<div class="small text3">'+[exData.muscle,exData.machine].filter(Boolean).join(' · ')+'</div>';
     ex.sets.forEach((s,i)=>{
       if(s.done){
         const t=SET_TYPES.find(x=>x.id===s.type)||SET_TYPES[0];
-        const rpe=s.rpe?'<span style="color:var(--orange)"> · RPE '+s.rpe+'</span>':'';
+        const rpe=s.rpe!=null?'<span style="color:var(--orange)"> · '+(useRIR?'RIR ':'RPE ')+s.rpe+'</span>':'';
         html+='<div class="small text2" style="padding:3px 0">Set '+(i+1)+' <span class="badge '+t.badgeClass+'">'+t.label+'</span> — '+(s.weight||'BW')+'kg x '+s.reps+' reps'+rpe+'</div>';
-        if(s.rpe)allRPE.push(s.rpe);
+        if(s.rpe!=null)allEff.push(useRIR?(10-s.rpe):s.rpe);
       }
     });
   });
-  if(allRPE.length)html+='<div class="mt12 small" style="color:var(--orange)">Avg RPE: '+(allRPE.reduce((a,b)=>a+b,0)/allRPE.length).toFixed(1)+'</div>';
+  if(allEff.length)html+='<div class="mt12 small" style="color:var(--orange)">Avg effort (RPE-equivalent): '+(allEff.reduce((a,b)=>a+b,0)/allEff.length).toFixed(1)+'</div>';
   document.getElementById('history-detail-body').innerHTML=html;
   document.getElementById('history-delete-btn').onclick=()=>{if(confirm('Delete this workout?')){state.history=state.history.filter(h=>h.id!==id);invalidatePRCache();save();renderHistory();closeModal('modal-history-detail');}};
   openModal('modal-history-detail');
 }
 function exportHistory(){
   if(!state.history.length){alert('No workout history to export.');return;}
-  const rows=[['Date','Workout','Exercise','Set','Type','Weight(kg)','Reps','RPE','Volume','Notes']];
+  const rows=[['Date','Workout','Exercise','Set','Type','Weight(kg)','Reps','Effort','Mode','Volume','Notes']];
   state.history.forEach(w=>{
     const date=new Date(w.date).toLocaleDateString('en-GB');
     w.exercises.forEach(ex=>{
       const exData=getExercise(ex.exId);
-      ex.sets.forEach((s,i)=>{if(s.done)rows.push([date,w.name,exData?exData.name:'?',i+1,s.type||'normal',s.weight||0,s.reps||0,s.rpe||'',((s.weight||0)*(s.reps||0)).toFixed(0),w.notes||'']);});
+      const modeLbl=ex.useRIR?'RIR':'RPE';
+      ex.sets.forEach((s,i)=>{if(s.done)rows.push([date,w.name,exData?exData.name:'?',i+1,s.type||'normal',s.weight||0,s.reps||0,s.rpe!=null?s.rpe:'',s.rpe!=null?modeLbl:'',((s.weight||0)*(s.reps||0)).toFixed(0),w.notes||'']);});
     });
   });
   const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
@@ -4206,24 +4942,24 @@ function renderReview(){
     if(exData.secondary)exData.secondary.split(',').forEach(sm=>{const t=sm.trim();if(t&&ms[t]!==undefined)ms[t]=(ms[t]||0)+Math.ceil(done*0.5);});
   }));
   let vol=0,sets=0,rpeAll=[];const days=new Set();let consec=0;
-  ww.forEach(w=>{days.add(new Date(w.date).toDateString());w.exercises.forEach(ex=>ex.sets.forEach(s=>{if(s.done){sets++;vol+=(s.weight||0)*(s.reps||0);if(s.rpe)rpeAll.push(s.rpe);}}));});
+  ww.forEach(w=>{days.add(new Date(w.date).toDateString());w.exercises.forEach(ex=>{const useRIR=!!ex.useRIR;ex.sets.forEach(s=>{if(s.done){sets++;vol+=(s.weight||0)*(s.reps||0);if(s.rpe!=null)rpeAll.push(useRIR?(10-s.rpe):s.rpe);}});});});
   for(let i=0;i<7;i++){const d=new Date(now-i*864e5);if(days.has(d.toDateString()))consec++;else break;}
   const avgRPE=rpeAll.length?(rpeAll.reduce((a,b)=>a+b,0)/rpeAll.length).toFixed(1):'—';
   const recentWW=state.history.slice(0,14);
-  const highRPECount=recentWW.filter(w=>{const rpes=[];w.exercises.forEach(ex=>ex.sets.forEach(s=>{if(s.done&&s.rpe)rpes.push(s.rpe);}));return rpes.length&&rpes.reduce((a,b)=>a+b,0)/rpes.length>7.5;}).length;
+  const highRPECount=recentWW.filter(w=>{const rpes=[];w.exercises.forEach(ex=>{const useRIR=!!ex.useRIR;ex.sets.forEach(s=>{if(s.done&&s.rpe!=null)rpes.push(useRIR?(10-s.rpe):s.rpe);});});return rpes.length&&rpes.reduce((a,b)=>a+b,0)/rpes.length>7.5;}).length;
   const needsDeload=highRPECount>=3;
   const statsHtml='<div class="week-stat-row" style="padding:14px 16px 0">'
     +'<div class="week-stat"><div class="week-stat-val">'+ww.length+'</div><div class="week-stat-lbl">Workouts</div></div>'
     +'<div class="week-stat"><div class="week-stat-val">'+sets+'</div><div class="week-stat-lbl">Sets</div></div>'
     +'<div class="week-stat"><div class="week-stat-val">'+(vol/1000).toFixed(1)+'t</div><div class="week-stat-lbl">Volume</div></div>'
-    +'<div class="week-stat"><div class="week-stat-val" style="color:var(--orange)">'+avgRPE+'</div><div class="week-stat-lbl">Avg RPE</div></div></div>';
+    +'<div class="week-stat"><div class="week-stat-val" style="color:var(--orange)">'+avgRPE+'</div><div class="week-stat-lbl">Avg Effort</div></div></div>';
   const maxS=Math.max(...Object.values(ms),1);
   const barsHtml=MUSCLE_GROUPS.filter(m=>ms[m]>0).sort((a,b)=>ms[b]-ms[a]).map(m=>'<div class="muscle-bar-wrap"><div class="muscle-bar-label"><span style="font-weight:600">'+m+'</span><span class="text3 small">'+ms[m]+' sets</span></div><div class="muscle-bar-track"><div class="muscle-bar-fill" style="width:'+Math.round(ms[m]/maxS*100)+'%;background:'+(MUSCLE_COLORS[m]||'#aaa')+'"></div></div></div>').join('');
   const untrained=MUSCLE_GROUPS.filter(m=>!ms[m]&&m!=='Full Body');
   const sugg=[];
   if(!ww.length){sugg.push({i:'💪',t:'No workouts this week yet. Start a session to begin tracking!'});}
   else{
-    if(needsDeload)sugg.push({i:'😮‍💨',t:'RPE has been high for '+highRPECount+' sessions. Consider a deload week — reduce weights by 40-50% and focus on form and recovery.'});
+    if(needsDeload)sugg.push({i:'😮‍💨',t:'Effort has been high for '+highRPECount+' sessions. Consider a deload week — reduce weights by 40-50% and focus on form and recovery.'});
     Object.entries(MUSCLE_PAIRS).forEach(([a,b])=>{
       const ra=ms[a]||0,rb=ms[b]||0;
       if(ra>0&&rb===0)sugg.push({i:'⚖️',t:'Trained '+a+' but skipped '+b+' this week. Balancing these reduces injury risk.'});
@@ -4277,7 +5013,7 @@ function calcPlates(){
   const achieved=bar+(perSide-rem)*2;
   res.textContent=rem<0.01?target+'kg':'~'+achieved.toFixed(1)+'kg';
   res.style.color=rem<0.01?'var(--accent)':'var(--orange)';
-  const PC={25:'#ff4757',20:'#ff8c00',15:'#e8ff47',10:'#2ed573',5:'#47c8ff',2.5:'#cc44ff',1.25:'#aaaaaa'};
+  const PC={25:'#ff4757',20:'#ff8c00',15:'#e8ff47',10:'#2ed573',5:'#47c8ff',2.5:'#cc44ff',1.25:'#aaaaaa',0.75:'#8e8e93',0.5:'#6c7a89',0.25:'#4a5568'};
   bd.innerHTML='<div class="small text2" style="text-align:center;margin-bottom:10px">Each side of the bar</div>'
     +used.map(p=>'<div class="plate-row"><div style="display:flex;align-items:center;gap:10px"><div class="plate-circle" style="color:'+(PC[p.kg]||'#aaa')+';border-color:'+(PC[p.kg]||'#aaa')+';background:'+(PC[p.kg]||'#aaa')+'22">'+p.kg+'</div><span class="bold">'+p.kg+'kg</span></div><span class="mono bold" style="color:var(--accent)">x '+p.count+'</span></div>').join('')
     +(rem>=0.01?'<div class="small" style="color:var(--red);margin-top:7px">Short by '+rem.toFixed(2)+'kg per side</div>':'');
@@ -4288,7 +5024,7 @@ function saveBarbellWeight(v){const n=parseFloat(v);state.barbellWeight=(isNaN(n
 function buildPlateInventoryUI(){
   const sec=document.getElementById('plate-inventory-section');if(!sec)return;
   sec.innerHTML='<div class="small text2" style="margin-bottom:9px">How many of each plate do you own?</div>';
-  [1.25,2.5,5,10,15,20,25].forEach(kg=>{
+  DEFAULT_PLATES.forEach(kg=>{
     const row=document.createElement('div');
     row.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)';
     row.innerHTML='<span class="bold">'+kg+'kg plates</span><input type="number" inputmode="numeric" value="'+(state.plates[kg]||0)+'" min="0" max="20" style="width:68px;text-align:center" onchange="updatePlateCount('+kg+',this.value)"/>';
@@ -4536,35 +5272,110 @@ function maybeAutoSync(){
 }
 
 
-// ── BODY WEIGHT ──
-function openBWTracker(){document.getElementById('bw-input').value='';renderBWList();setTimeout(renderBWChart,50);openModal('modal-bw');}
+// ── BODY MEASUREMENTS ──
+const MEASUREMENT_FIELDS=[
+  {key:'weight',label:'Weight',unit:'kg'},
+  {key:'neck',label:'Neck',unit:'cm'},
+  {key:'shoulders',label:'Shoulders',unit:'cm'},
+  {key:'chest',label:'Chest',unit:'cm'},
+  {key:'waist',label:'Waist',unit:'cm'},
+  {key:'hips',label:'Hips',unit:'cm'},
+  {key:'bicepL',label:'Bicep L',unit:'cm'},
+  {key:'bicepR',label:'Bicep R',unit:'cm'},
+  {key:'forearmL',label:'Forearm L',unit:'cm'},
+  {key:'forearmR',label:'Forearm R',unit:'cm'},
+  {key:'thighL',label:'Thigh L',unit:'cm'},
+  {key:'thighR',label:'Thigh R',unit:'cm'},
+  {key:'calfL',label:'Calf L',unit:'cm'},
+  {key:'calfR',label:'Calf R',unit:'cm'},
+];
+function todayKey(){return new Date().toISOString().slice(0,10);}
+function openBWTracker(){
+  document.getElementById('bw-input').value='';
+  document.getElementById('measurements-form').style.display='none';
+  document.getElementById('measurements-toggle-label').textContent='Add Body Measurements';
+  const sel=document.getElementById('bw-metric-select');
+  sel.innerHTML=MEASUREMENT_FIELDS.map(f=>'<option value="'+f.key+'">'+f.label+'</option>').join('');
+  sel.value='weight';
+  renderMeasurementsGrid();
+  renderBWList();
+  setTimeout(renderBWChart,50);
+  openModal('modal-bw');
+}
+function toggleMeasurementsForm(){
+  const form=document.getElementById('measurements-form');
+  const open=form.style.display!=='none';
+  form.style.display=open?'none':'block';
+  document.getElementById('measurements-toggle-label').textContent=open?'Add Body Measurements':'Hide Measurements';
+}
+function renderMeasurementsGrid(){
+  const grid=document.getElementById('measurements-grid');
+  grid.innerHTML=MEASUREMENT_FIELDS.filter(f=>f.key!=='weight').map(f=>
+    '<input type="number" inputmode="decimal" id="meas-'+f.key+'" placeholder="'+f.label+' (cm)">'
+  ).join('');
+}
 function logBodyWeight(){
   const v=parseFloat(document.getElementById('bw-input').value);if(!v||v<0)return;
-  if(!state.bodyWeights)state.bodyWeights=[];
-  state.bodyWeights.unshift({date:new Date().toISOString(),weight:v});
-  state.bodyWeights=state.bodyWeights.slice(0,90);
-  save();document.getElementById('bw-input').value='';renderBWList();renderBWChart();
+  upsertMeasurementEntry({weight:v});
+  document.getElementById('bw-input').value='';
+  renderBWList();renderBWChart();
+}
+function saveMeasurements(){
+  const vals={};
+  MEASUREMENT_FIELDS.forEach(f=>{
+    if(f.key==='weight')return;
+    const el=document.getElementById('meas-'+f.key);
+    const v=el?parseFloat(el.value):NaN;
+    if(!isNaN(v)&&v>0)vals[f.key]=v;
+  });
+  if(!Object.keys(vals).length)return;
+  upsertMeasurementEntry(vals);
+  MEASUREMENT_FIELDS.forEach(f=>{if(f.key!=='weight'){const el=document.getElementById('meas-'+f.key);if(el)el.value='';}});
+  renderBWList();renderBWChart();
+}
+// Merge new values into today's entry if one already exists, so logging weight in the morning
+// and measurements later the same day land as one dated entry rather than two.
+function upsertMeasurementEntry(vals){
+  if(!state.bodyMeasurements)state.bodyMeasurements=[];
+  const key=todayKey();
+  let entry=state.bodyMeasurements.find(m=>(m.date||'').slice(0,10)===key);
+  if(!entry){entry={date:new Date().toISOString()};state.bodyMeasurements.unshift(entry);}
+  Object.assign(entry,vals);
+  state.bodyMeasurements.sort((a,b)=>new Date(b.date)-new Date(a.date));
+  state.bodyMeasurements=state.bodyMeasurements.slice(0,180);
+  save();
 }
 function renderBWList(){
   const list=document.getElementById('bw-list');
-  if(!state.bodyWeights||!state.bodyWeights.length){list.innerHTML='<div class="small text2" style="text-align:center;padding:10px 0">No entries yet</div>';return;}
-  list.innerHTML=state.bodyWeights.slice(0,10).map(e=>{
+  const entries=state.bodyMeasurements||[];
+  if(!entries.length){list.innerHTML='<div class="small text2" style="text-align:center;padding:10px 0">No entries yet</div>';return;}
+  list.innerHTML=entries.slice(0,10).map(e=>{
     const d=new Date(e.date);
-    return'<div class="bw-entry"><span class="small text2">'+d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})+'</span><span class="bold mono" style="color:var(--accent2)">'+e.weight+' kg</span></div>';
+    const otherChips=MEASUREMENT_FIELDS.filter(f=>f.key!=='weight'&&e[f.key]!=null).map(f=>f.label+' '+e[f.key]+f.unit).join(' · ');
+    return'<div class="bw-entry" style="flex-direction:column;align-items:flex-start;gap:2px">'
+      +'<div style="display:flex;justify-content:space-between;width:100%">'
+      +'<span class="small text2">'+d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})+'</span>'
+      +(e.weight!=null?'<span class="bold mono" style="color:var(--accent2)">'+e.weight+' kg</span>':'')
+      +'</div>'
+      +(otherChips?'<span class="small text2">'+escHtml(otherChips)+'</span>':'')
+      +'</div>';
   }).join('');
 }
 function renderBWChart(){
   const canvas=document.getElementById('bw-canvas');if(!canvas)return;
+  const sel=document.getElementById('bw-metric-select');
+  const metric=sel?sel.value:'weight';
+  const field=MEASUREMENT_FIELDS.find(f=>f.key===metric)||MEASUREMENT_FIELDS[0];
   const ctx=canvas.getContext('2d');
   const wrap=canvas.parentElement;
   canvas.width=wrap.clientWidth||300;canvas.height=wrap.clientHeight||120;
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  if(!state.bodyWeights||state.bodyWeights.length<2){
+  const pts=[...(state.bodyMeasurements||[])].filter(e=>e[metric]!=null).reverse().slice(-30);
+  if(pts.length<2){
     ctx.fillStyle='rgba(136,136,170,0.5)';ctx.font='12px DM Sans';ctx.textAlign='center';
-    ctx.fillText('Log at least 2 entries to see chart',canvas.width/2,canvas.height/2);return;
+    ctx.fillText('Log at least 2 '+field.label.toLowerCase()+' entries to see chart',canvas.width/2,canvas.height/2);return;
   }
-  const pts=[...state.bodyWeights].reverse().slice(-30);
-  const vals=pts.map(p=>p.weight);
+  const vals=pts.map(p=>p[metric]);
   const mn=Math.min(...vals)-0.5,mx=Math.max(...vals)+0.5;
   const pad={t:10,r:10,b:20,l:36};
   const w=canvas.width-pad.l-pad.r,h=canvas.height-pad.t-pad.b;
@@ -4572,9 +5383,9 @@ function renderBWChart(){
   for(let i=0;i<=3;i++){const y=pad.t+h*i/3;ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(pad.l+w,y);ctx.stroke();ctx.fillStyle='rgba(136,136,170,0.5)';ctx.font='9px DM Mono';ctx.textAlign='right';ctx.fillText((mx-(mx-mn)*i/3).toFixed(1),pad.l-3,y+3);}
   const xS=pts.length>1?w/(pts.length-1):w;
   ctx.beginPath();ctx.strokeStyle='#47c8ff';ctx.lineWidth=2;
-  pts.forEach((p,i)=>{const x=pad.l+i*xS;const y=pad.t+h-(h*(p.weight-mn)/(mx-mn));if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);});
+  pts.forEach((p,i)=>{const x=pad.l+i*xS;const y=pad.t+h-(h*(p[metric]-mn)/(mx-mn));if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);});
   ctx.stroke();
-  pts.forEach((p,i)=>{const x=pad.l+i*xS;const y=pad.t+h-(h*(p.weight-mn)/(mx-mn));ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fillStyle='#47c8ff';ctx.fill();});
+  pts.forEach((p,i)=>{const x=pad.l+i*xS;const y=pad.t+h-(h*(p[metric]-mn)/(mx-mn));ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fillStyle='#47c8ff';ctx.fill();});
 }
 
 // ── MODAL HELPERS ──
