@@ -30,7 +30,7 @@ if('serviceWorker' in navigator){
 <style>
 :root{
   --bg:#0F1117;--bg2:#1A1D24;--bg3:#22252F;--bg4:#2C3040;
-  --accent:#D7FF2F;--accent2:#47c8ff;--red:#FF4757;--green:#22C55E;--orange:#F97316;--purple:#A855F7;--blue:#3B82F6;
+  --accent:#D97757;--accent-rgb:217,119,87;--accent-dark:#b8654a;--accent2:#47c8ff;--red:#FF4757;--green:#22C55E;--orange:#F97316;--purple:#A855F7;--blue:#3B82F6;
   --text:#FFFFFF;--text2:#A8AFBD;--text3:#6F7787;--border:#2C3040;
   --radius:16px;--radius-sm:10px;
   --shadow:0 8px 24px rgba(0,0,0,0.35);
@@ -53,7 +53,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'DM San
 .scroll::-webkit-scrollbar{display:none;}
 .card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);margin:0 16px 12px;overflow:hidden;box-shadow:var(--shadow);}
 .btn{display:flex;align-items:center;justify-content:center;gap:6px;padding:11px 18px;border-radius:var(--radius-sm);font-family:'DM Sans',sans-serif;font-size:14px;font-weight:600;cursor:pointer;border:none;transition:all 0.15s;letter-spacing:0.3px;}
-.btn-primary{background:var(--accent);color:#0a0a0f;}.btn-primary:active{background:#d4e83e;transform:scale(0.98);}
+.btn-primary{background:var(--accent);color:#0a0a0f;}.btn-primary:active{background:var(--accent-dark);transform:scale(0.98);}
 .btn-ghost{background:transparent;color:var(--text2);border:1px solid var(--border);}.btn-ghost:active{background:var(--bg3);}
 .btn-danger{background:transparent;color:var(--red);border:1px solid #ff475733;}.btn-danger:active{background:#ff475722;}
 .btn-accent2{background:#47c8ff22;color:var(--accent2);border:1px solid #47c8ff44;}
@@ -61,17 +61,17 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'DM San
 .btn-sm{padding:6px 11px;font-size:12px;border-radius:7px;}.btn-full{width:100%;}
 input,textarea,select{background:var(--bg3);border:1px solid var(--border);border-radius:10px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:14px;padding:11px 14px;outline:none;transition:border-color 0.15s;width:100%;}
 input[type="radio"],input[type="checkbox"]{width:auto;padding:0;background:none;border:1px solid var(--border);}
-input:focus,textarea:focus,select:focus{border-color:#e8ff4788;}
+input:focus,textarea:focus,select:focus{border-color:rgba(var(--accent-rgb),0.53);}
 select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .input-label{font-size:12px;color:var(--text2);margin-bottom:5px;font-weight:500;letter-spacing:0.4px;text-transform:uppercase;}
 .badge{font-size:11px;font-weight:600;padding:3px 8px;border-radius:20px;letter-spacing:0.5px;text-transform:uppercase;}
 .badge-normal{background:var(--bg4);color:var(--text2);}.badge-warmup{background:#ff880022;color:#ff8800;border:1px solid #ff880044;}
 .badge-dropset{background:#ff475722;color:var(--red);border:1px solid #ff475744;}.badge-myo{background:#47c8ff22;color:var(--accent2);border:1px solid #47c8ff44;}
 .badge-failure{background:#ff003322;color:#ff3366;border:1px solid #ff336644;}.badge-feeder{background:#88ff4422;color:#88ff44;border:1px solid #88ff4444;}
-.badge-back{background:#cc44ff22;color:#cc44ff;border:1px solid #cc44ff44;}.badge-1rm{background:#e8ff4722;color:var(--accent);border:1px solid #e8ff4744;}
+.badge-back{background:#cc44ff22;color:#cc44ff;border:1px solid #cc44ff44;}.badge-1rm{background:rgba(var(--accent-rgb),0.13);color:var(--accent);border:1px solid rgba(var(--accent-rgb),0.27);}
 .equip-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 16px;}
 .equip-item{background:var(--bg3);border:2px solid var(--border);border-radius:var(--radius);padding:12px;cursor:pointer;transition:all 0.15s;text-align:center;}
-.equip-item.selected{border-color:var(--accent);background:#e8ff4712;}.equip-item:active{transform:scale(0.97);}
+.equip-item.selected{border-color:var(--accent);background:rgba(var(--accent-rgb),0.07);}.equip-item:active{transform:scale(0.97);}
 .equip-icon{font-size:26px;margin-bottom:5px;}.equip-name{font-size:13px;font-weight:600;}.equip-desc{font-size:11px;color:var(--text2);margin-top:1px;}
 .routine-item{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);transition:background 0.1s;}
 .routine-item:last-child{border-bottom:none;}.routine-item:active{background:var(--bg3);}
@@ -116,7 +116,7 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .meso-progress-fill{height:100%;background:var(--accent);border-radius:3px;}
 .meso-next-row{display:flex;align-items:center;gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);}
 /* TODAY CARD */
-.today-card{background:var(--bg2);border-radius:var(--radius);margin:0 16px 16px;padding:20px;box-shadow:0 0 0 1px var(--accent)44,0 8px 32px rgba(215,255,47,0.12);position:relative;overflow:hidden;}
+.today-card{background:var(--bg2);border-radius:var(--radius);margin:0 16px 16px;padding:20px;box-shadow:0 0 0 1px rgba(var(--accent-rgb),0.27),0 8px 32px rgba(var(--accent-rgb),0.12);position:relative;overflow:hidden;}
 .today-label{font-size:11px;font-weight:700;letter-spacing:1.5px;color:var(--accent);text-transform:uppercase;margin-bottom:10px;}
 .today-name{font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:1px;color:var(--text);}
 .today-desc{font-size:13px;color:var(--text2);margin-top:2px;}
@@ -132,7 +132,7 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .qs-icon{font-size:24px;margin-bottom:6px;}
 .qs-label{font-size:12px;font-weight:600;color:var(--text2);}
 /* FAB */
-.fab{width:52px;height:52px;border-radius:16px;background:var(--accent);border:none;color:#0F1117;font-size:26px;font-weight:300;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 16px rgba(215,255,47,0.4);transition:transform 0.15s;}
+.fab{width:52px;height:52px;border-radius:16px;background:var(--accent);border:none;color:#0F1117;font-size:26px;font-weight:300;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 16px rgba(var(--accent-rgb),0.4);transition:transform 0.15s;}
 .fab:active{transform:scale(0.92);}
 /* SECTION HEADER */
 .sec-hdr{display:flex;align-items:center;justify-content:space-between;padding:16px 20px 8px;}
@@ -166,12 +166,12 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .set-row.swipe-armed{background:rgba(255,71,87,0.18);}
 .set-row td{padding:6px 5px;text-align:center;vertical-align:middle;}
 .set-row td:first-child{padding-left:14px;text-align:left;}.set-row td:last-child{padding-right:14px;}
-.set-row.completed{background:#2ed57318;}.set-row.pr-row{background:#e8ff4710;}.set-row.completed.pr-row{background:#2ed57322;}
+.set-row.completed{background:#2ed57318;}.set-row.pr-row{background:rgba(var(--accent-rgb),0.06);}.set-row.completed.pr-row{background:#2ed57322;}
 .set-num{font-size:12px;color:var(--text2);font-family:'DM Mono',monospace;min-width:20px;}
 .set-type-btn{font-size:9px;font-weight:600;padding:3px 4px;border-radius:5px;cursor:pointer;border:none;max-width:58px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .prev-cell{font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;line-height:1.4;min-width:36px;white-space:pre-line;}
 .set-input{width:46px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;font-weight:600;font-family:'DM Mono',monospace;padding:5px 2px;text-align:center;outline:none;transition:border-color 0.15s;}
-.set-input:focus{border-color:#e8ff4788;}.set-input.pr-input{border-color:#e8ff4766;color:var(--accent);}
+.set-input:focus{border-color:rgba(var(--accent-rgb),0.53);}.set-input.pr-input{border-color:rgba(var(--accent-rgb),0.4);color:var(--accent);}
 .rpe-input{width:36px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;font-size:12px;font-weight:600;font-family:'DM Mono',monospace;padding:5px 2px;text-align:center;outline:none;}
 .complete-btn{width:26px;height:26px;border-radius:7px;border:2px solid var(--border);background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s;color:transparent;font-size:12px;flex-shrink:0;}
 .complete-btn.done{background:var(--green);border-color:var(--green);color:#fff;}
@@ -195,7 +195,7 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .modal-body{padding:12px 20px 20px;}.modal-actions{display:flex;gap:10px;padding:0 20px 8px;}
 .set-type-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
 .set-type-option{padding:12px;border-radius:var(--radius-sm);border:2px solid var(--border);cursor:pointer;transition:all 0.15s;text-align:center;}
-.set-type-option.selected{border-color:var(--accent);background:#e8ff4715;}
+.set-type-option.selected{border-color:var(--accent);background:rgba(var(--accent-rgb),0.08);}
 .set-type-option .type-name{font-weight:700;font-size:13px;}.set-type-option .type-desc{font-size:11px;color:var(--text2);margin-top:2px;}
 .timer-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;}
 .timer-preset{padding:11px 4px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg3);text-align:center;cursor:pointer;transition:all 0.15s;font-family:'DM Mono',monospace;font-weight:500;font-size:13px;}
@@ -238,7 +238,7 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .edit-ex-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);}
 .edit-ex-row:last-child{border-bottom:none;}
 @keyframes prPop{0%{transform:translate(-50%,-20px);opacity:0;}60%{transform:translate(-50%,4px);}100%{transform:translate(-50%,0);opacity:1;}}
-.pr-toast{position:fixed;top:80px;left:50%;transform:translateX(-50%);background:var(--accent);color:#0a0a0f;font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:2px;padding:10px 24px;border-radius:30px;z-index:300;animation:prPop 0.4s ease forwards;box-shadow:0 4px 20px #e8ff4766;white-space:nowrap;}
+.pr-toast{position:fixed;top:80px;left:50%;transform:translateX(-50%);background:var(--accent);color:#0a0a0f;font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:2px;padding:10px 24px;border-radius:30px;z-index:300;animation:prPop 0.4s ease forwards;box-shadow:0 4px 20px rgba(var(--accent-rgb),0.4);white-space:nowrap;}
 .section-label{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:1.2px;padding:16px 20px 8px;font-weight:700;}
 .empty-state{text-align:center;padding:45px 28px;}
 .empty-icon{font-size:44px;margin-bottom:14px;opacity:0.4;}
@@ -413,7 +413,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div class="sort-chip" data-sort="frequent" onclick="setSort('frequent',this)">Most Used</div>
     <div class="sort-chip" data-sort="alpha" onclick="setSort('alpha',this)">A–Z</div>
   </div>
-  <div id="equip-filter-banner" style="display:none;padding:5px 16px;background:#e8ff4714;border-bottom:1px solid #e8ff4733">
+  <div id="equip-filter-banner" style="display:none;padding:5px 16px;background:rgba(var(--accent-rgb),0.078);border-bottom:1px solid rgba(var(--accent-rgb),0.2)">
     <span style="font-size:12px;color:var(--accent);font-weight:600">🏠 My equipment only</span>
   </div>
   <div class="scroll pb" id="exercise-db-list"></div>
@@ -452,7 +452,14 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     </div>
     <div class="section-label">Warmup</div>
     <div class="section-label">Display</div>
-    <div style="padding:0 16px 14px"><button class="btn btn-ghost btn-full" onclick="toggleTheme()">🌙 Toggle Dark / Light Mode</button></div>
+    <div style="padding:0 16px 14px">
+      <button class="btn btn-ghost btn-full" onclick="toggleTheme()">🌙 Toggle Dark / Light Mode</button>
+      <div class="input-label mt12">Accent Color</div>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:4px">
+        <input type="color" id="accent-color-input" value="#D97757" oninput="saveAccentColor(this.value)" style="width:52px;height:40px;padding:2px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);cursor:pointer"/>
+        <button class="btn btn-ghost flex-1" onclick="saveAccentColor('#D97757')">Reset to Claude Orange</button>
+      </div>
+    </div>
     <div class="section-label">Backup &amp; Restore</div>
     <div style="padding:0 16px 8px">
       <div class="small text2" style="margin-bottom:10px;line-height:1.6">Save a copy of all your routines, history and settings as a file. Restore it anytime — on this phone or another.</div>
@@ -831,6 +838,20 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
   </div>
 </div>
 
+<!-- Name the independent copy created when the same routine is added to a mesocycle twice -->
+<div class="modal-overlay" id="modal-name-duplicate-routine">
+  <div class="modal"><div class="modal-handle"></div><div class="modal-title">Name This Copy</div>
+    <div class="modal-body">
+      <div class="input-label">Name</div>
+      <input id="duplicate-routine-name" placeholder="e.g. Push — High Reps"/>
+      <div class="small text2 mt12" style="line-height:1.6">This copy has its own exercises and tracking — nothing here affects the original routine. Something like "High Reps" or "Strength" can help distinguish it from the original at a glance.</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary btn-full" onclick="saveDuplicateRoutineName()">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- Mesocycle Detail -->
 <div class="modal-overlay" id="modal-mesocycle-detail">
   <div class="modal"><div class="modal-handle"></div>
@@ -939,6 +960,23 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div class="modal-actions">
       <button class="btn btn-ghost flex-1" onclick="closeModal('modal-meso-settings')">Cancel</button>
       <button class="btn btn-primary flex-1" onclick="saveMesoSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Per-slot rep ranges: set target reps for each exercise in one mesocycle sequence position,
+     ahead of time, so the same routine can run at different rep ranges depending on where in
+     the mesocycle it falls (even if it's used more than once in the same sequence). -->
+<div class="modal-overlay" id="modal-slot-rep-ranges">
+  <div class="modal"><div class="modal-handle"></div>
+    <div class="modal-title" id="slot-rep-ranges-title">Rep Ranges</div>
+    <div class="modal-body">
+      <div class="small text2" style="margin-bottom:12px">Only applies to this position in this mesocycle's sequence — the routine's own default (used everywhere else) is unaffected.</div>
+      <div id="slot-rep-ranges-list"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost flex-1" onclick="closeModal('modal-slot-rep-ranges')">Close</button>
+      <button class="btn btn-primary flex-1" onclick="saveSlotRepRanges()">Save</button>
     </div>
   </div>
 </div>
@@ -1169,12 +1207,40 @@ function runMigrations(){
   }
   state.schemaVersion=CURRENT_SCHEMA_VERSION;
 }
+function hexToRgb(hex){
+  hex=(hex||'').replace('#','');
+  if(hex.length===3)hex=hex.split('').map(c=>c+c).join('');
+  const num=parseInt(hex,16);
+  if(isNaN(num))return{r:217,g:119,b:87};
+  return{r:(num>>16)&255,g:(num>>8)&255,b:num&255};
+}
+function shadeColor(hex,factor){
+  const{r,g,b}=hexToRgb(hex);
+  const clamp=v=>Math.max(0,Math.min(255,Math.round(v)));
+  return'#'+[r,g,b].map(v=>clamp(v*factor).toString(16).padStart(2,'0')).join('');
+}
+// Applies the chosen accent color to the whole app by setting CSS custom properties on the root
+// element — --accent-rgb (for rgba()-based tints/glows throughout the stylesheet) and
+// --accent-dark (a darkened variant for :active press states) are derived from it, so every
+// themed element updates together rather than only the handful of places using var(--accent)
+// directly. Also persisted to state so it survives reload.
+function applyAccentColor(hex){
+  if(!hex)hex='#D97757';
+  const{r,g,b}=hexToRgb(hex);
+  const root=document.documentElement.style;
+  root.setProperty('--accent',hex);
+  root.setProperty('--accent-rgb',r+','+g+','+b);
+  root.setProperty('--accent-dark',shadeColor(hex,0.82));
+  state.accentColor=hex;
+}
 function load(){
   try{const s=localStorage.getItem('forge_v4')||localStorage.getItem('forge_v3');if(s){const p=JSON.parse(s);state={...state,...p};}}catch(e){}
   // Purge old hardcoded exercises (IDs like e1, ex2, ebi3 etc.) — replaced by new catalogue system
   state.exercises=(state.exercises||[]).filter(e=>e.id&&(e.id.startsWith('gx')||(!e.id.match(/^e[a-z]?\d+$/))));
   state.exercises=state.exercises.map(e=>({secondary:'',machine:'',bw:'no',...e}));
   runMigrations();
+  if(!state.accentColor)state.accentColor='#D97757';
+  applyAccentColor(state.accentColor);
   if(!state.routines||!state.routines.length){
     const built=buildDefaultRoutineExercises();
     state.routines=DEFAULT_ROUTINES_META.map(r=>({...r,exerciseIds:built[r.id]||[]}));
@@ -1209,6 +1275,7 @@ function load(){
     if(!m.earlyDeloadDetection)m.earlyDeloadDetection='suggest'; // 'off' | 'suggest' | 'auto'
     if(m.earlyDeloadDeclineCount==null)m.earlyDeloadDeclineCount=2;
     if(!m.deloadMethod)m.deloadMethod='weight'; // 'weight' | 'sets'
+    if(!m.slotRepRanges)m.slotRepRanges={}; // keyed by sequence position (index) -> {exId:{min,max}} override
     if(!m.deloadSetMode)m.deloadSetMode='flat'; // 'flat' | 'relative'
     if(m.deloadSetValue==null)m.deloadSetValue=1;
     if(m.deloadTargetRIR==null)m.deloadTargetRIR=4;
@@ -1766,10 +1833,17 @@ document.getElementById('barbell-weight-input').value=state.barbellWeight||20;
 document.getElementById('prog-inc-dumbbell').value=state.progressionIncrements.Dumbbell;
 document.getElementById('prog-inc-cable').value=state.progressionIncrements.Cable;
 document.getElementById('prog-inc-other').value=state.progressionIncrements.Other;
+document.getElementById('accent-color-input').value=state.accentColor||'#D97757';
 function saveProgressionIncrement(kind,val){
   const v=parseFloat(val);
   state.progressionIncrements[kind]=isNaN(v)||v<=0?state.progressionIncrements[kind]:v;
   save();
+}
+function saveAccentColor(hex){
+  applyAccentColor(hex);
+  document.getElementById('accent-color-input').value=state.accentColor;
+  save();
+  renderProgressChart(); // live-refresh the chart's line color if it's currently on screen
 }
 document.getElementById('theme-btn').textContent=state.lightMode?'☀️':'🌙';
 
@@ -2659,7 +2733,7 @@ function saveNewMesocycle(){
   state.mesocycles.push({id:uid(),name,routineIds:[],currentPos:0,startedAt:null,completedWorkouts:0,
     rotationsPerMeso:4,mesoRepeats:1,deloadEnabled:true,deloadPercent:40,deloadSetsDrop:0,resetMode:'preDeload',resetRotationNumber:1,resetFallbackNote:null,
     rirRampEnabled:true,rirEnd:0,rirStartCap:4,earlyDeloadDetection:'suggest',earlyDeloadDeclineCount:2,
-    deloadMethod:'weight',deloadSetMode:'flat',deloadSetValue:1,deloadTargetRIR:4,
+    deloadMethod:'weight',deloadSetMode:'flat',deloadSetValue:1,deloadTargetRIR:4,slotRepRanges:{},
     rotationsDone:0,repeatsDone:0,phase:'training',passWorkoutCount:0,rotationWorkoutCount:0,baselines:{},rotationBaselines:{},preDeloadBaselines:{},pendingResetBaseline:null});
   save();renderMesocycles();closeModal('modal-new-mesocycle');
 }
@@ -2764,6 +2838,67 @@ function saveMesoSettings(){
   openMesocycleDetail(viewingMesoIdx);
   renderMesocycles();
 }
+let slotRepRangeEditingIdx=null;
+// Opens the "Rep Ranges" editor for one position in a mesocycle's sequence, listing every
+// exercise in that slot's routine with its current effective rep range (a per-slot override if
+// one's been set, otherwise the routine's own default) so it can be configured ahead of time
+// rather than mid-workout — and, crucially, independently per occurrence if the same routine
+// appears more than once in the sequence.
+function openSlotRepRangeEditor(slotIdx){
+  if(viewingMesoIdx===null)return;
+  const m=state.mesocycles[viewingMesoIdx];
+  const rid=m.routineIds[slotIdx];
+  const r=getRoutine(rid);
+  if(!r)return;
+  slotRepRangeEditingIdx=slotIdx;
+  document.getElementById('slot-rep-ranges-title').textContent='Rep Ranges — '+r.name+' (Position '+(slotIdx+1)+')';
+  const overrides=(m.slotRepRanges&&m.slotRepRanges[slotIdx])||{};
+  const list=document.getElementById('slot-rep-ranges-list');
+  if(!r.exerciseIds||!r.exerciseIds.length){
+    list.innerHTML='<div class="small text2" style="text-align:center;padding:10px 0">This routine has no exercises yet.</div>';
+  }else{
+    list.innerHTML=r.exerciseIds.map(exId=>{
+      const ex=getExercise(exId);if(!ex)return'';
+      const override=overrides[exId];
+      const fallback=resolveRepRangeForRoutine(r,exId);
+      const shown=override||fallback;
+      return'<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">'
+        +'<div style="flex:1;min-width:0"><div class="bold" style="font-size:13px">'+escHtml(ex.name)+'</div>'
+        +(override?'<div class="small" style="color:var(--accent)">Custom for this position</div>':'<div class="small text3">Using routine default</div>')
+        +'</div>'
+        +'<input type="number" inputmode="numeric" data-slot-rep-min="'+exId+'" value="'+(shown&&shown.min?shown.min:'')+'" placeholder="min" style="width:60px"/>'
+        +'<input type="number" inputmode="numeric" data-slot-rep-max="'+exId+'" value="'+(shown&&shown.max?shown.max:'')+'" placeholder="max" style="width:60px"/>'
+        +'</div>';
+    }).join('');
+  }
+  openModal('modal-slot-rep-ranges');
+}
+function saveSlotRepRanges(){
+  if(viewingMesoIdx===null||slotRepRangeEditingIdx===null)return;
+  const m=state.mesocycles[viewingMesoIdx];
+  const slotIdx=slotRepRangeEditingIdx;
+  const rid=m.routineIds[slotIdx];
+  const r=getRoutine(rid);
+  if(!r){closeModal('modal-slot-rep-ranges');return;}
+  if(!m.slotRepRanges)m.slotRepRanges={};
+  const overrideMap={};
+  (r.exerciseIds||[]).forEach(exId=>{
+    const minEl=document.querySelector('[data-slot-rep-min="'+exId+'"]');
+    const maxEl=document.querySelector('[data-slot-rep-max="'+exId+'"]');
+    const min=minEl?parseInt(minEl.value):NaN;
+    const max=maxEl?parseInt(maxEl.value):NaN;
+    // Leaving both fields blank clears any override for that exercise — it falls back to the
+    // routine's own default rather than being saved as an explicit (and meaningless) empty range.
+    if(!isNaN(min)||!isNaN(max)){
+      overrideMap[exId]={min:!isNaN(min)?min:max,max:!isNaN(max)?max:min};
+    }
+  });
+  if(Object.keys(overrideMap).length)m.slotRepRanges[slotIdx]=overrideMap;
+  else delete m.slotRepRanges[slotIdx];
+  save();
+  closeModal('modal-slot-rep-ranges');
+  openMesocycleDetail(viewingMesoIdx);
+}
 function openMesocycleDetail(mi){
   viewingMesoIdx=mi;
   const m=state.mesocycles[mi];
@@ -2782,22 +2917,26 @@ function openMesocycleDetail(mi){
       const muscat=getRoutineMuscleCategory(r);
       const isNext=idx===nextIdx;
       const n=(r.exerciseIds||[]).length;
+      const hasCustomReps=!!(m.slotRepRanges&&m.slotRepRanges[idx]&&Object.keys(m.slotRepRanges[idx]).length);
+      const repsBadge=hasCustomReps?'<span class="tight-badge" style="background:rgba(var(--accent-rgb),0.13);color:var(--accent);margin-left:6px">CUSTOM REPS</span>':'';
       if(isNext){
         return '<div data-meso-pos="'+idx+'" style="display:flex;align-items:center;gap:10px;background:linear-gradient(90deg,var(--accent)16,var(--accent)05);border:1px solid var(--accent)44;border-radius:14px;padding:14px;margin:6px 0">'
           +'<div style="width:32px;height:32px;border-radius:10px;background:var(--accent);color:#0F1117;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;flex-shrink:0">'+(idx+1)+'</div>'
           +'<div style="width:38px;height:38px;border-radius:11px;background:'+col+'20;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+getCategoryIconSVG(muscat,18,col)+'</div>'
           +'<div style="flex:1;min-width:0">'
           +'<div style="font-size:10px;font-weight:800;letter-spacing:1px;color:var(--accent);text-transform:uppercase;margin-bottom:2px">Up Next</div>'
-          +'<div class="bold" style="font-size:15px;line-height:1.2">'+escHtml(r.name)+'</div>'
+          +'<div class="bold" style="font-size:15px;line-height:1.2">'+escHtml(r.name)+repsBadge+'</div>'
           +'<div class="small text2" style="margin-top:2px">'+n+' exercise'+(n!==1?'s':'')+'</div>'
           +'</div>'
+          +'<button class="btn btn-ghost btn-sm" onclick="openSlotRepRangeEditor('+idx+')" style="padding:6px 10px;flex-shrink:0;white-space:nowrap">Reps</button>'
           +'<button class="btn btn-danger btn-sm" onclick="removeRoutineFromMeso('+idx+')" style="padding:6px 10px;flex-shrink:0">&#10005;</button>'
           +'</div>';
       }
       return '<div class="edit-ex-row" data-meso-pos="'+idx+'">'
         +'<div style="width:24px;height:24px;border-radius:6px;background:var(--bg4);color:var(--text2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">'+(idx+1)+'</div>'
         +'<div style="width:28px;height:28px;border-radius:8px;background:'+col+'18;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+getCategoryIconSVG(muscat,14,col)+'</div>'
-        +'<div style="flex:1"><div class="bold" style="font-size:13px">'+escHtml(r.name)+'</div><div class="small text2">'+n+' exercise'+(n!==1?'s':'')+'</div></div>'
+        +'<div style="flex:1"><div class="bold" style="font-size:13px">'+escHtml(r.name)+repsBadge+'</div><div class="small text2">'+n+' exercise'+(n!==1?'s':'')+'</div></div>'
+        +'<button class="btn btn-ghost btn-sm" onclick="openSlotRepRangeEditor('+idx+')" style="padding:4px 8px">Reps</button>'
         +'<button class="btn btn-danger btn-sm" onclick="removeRoutineFromMeso('+idx+')" style="padding:4px 8px">&#10005;</button>'
         +'</div>';
     }).join('');
@@ -2808,12 +2947,44 @@ function openMesocycleDetail(mi){
 }
 
 // ── MESOCYCLE ROUTINE SEQUENCE REORDER (long-press anywhere on a row to drag it) ──
+// Keeps m.slotRepRanges (keyed by sequence position) aligned with routineIds after a reorder —
+// without this, an override configured for "position 4" would silently apply to whatever
+// routine ends up in position 4 afterward, not the one it was actually set for.
+function reindexSlotRepRangesOnMove(m,fromPos,toPos){
+  if(!m.slotRepRanges||!Object.keys(m.slotRepRanges).length)return;
+  const n=(m.routineIds||[]).length;
+  const indices=Array.from({length:n},(_,i)=>i);
+  const movedIdx=indices.splice(fromPos,1)[0];
+  indices.splice(toPos,0,movedIdx);
+  const map=new Map();
+  indices.forEach((oldPos,newPos)=>map.set(oldPos,newPos));
+  const next={};
+  Object.keys(m.slotRepRanges).forEach(oldIdxStr=>{
+    const oldIdx=parseInt(oldIdxStr);
+    const newIdx=map.has(oldIdx)?map.get(oldIdx):oldIdx;
+    next[newIdx]=m.slotRepRanges[oldIdxStr];
+  });
+  m.slotRepRanges=next;
+}
+// Same, for removing a slot outright — its own override is dropped with it, everything after shifts down
+function reindexSlotRepRangesOnRemove(m,removedIdx){
+  if(!m.slotRepRanges||!Object.keys(m.slotRepRanges).length)return;
+  const next={};
+  Object.keys(m.slotRepRanges).forEach(oldIdxStr=>{
+    const oldIdx=parseInt(oldIdxStr);
+    if(oldIdx===removedIdx)return;
+    const newIdx=oldIdx>removedIdx?oldIdx-1:oldIdx;
+    next[newIdx]=m.slotRepRanges[oldIdxStr];
+  });
+  m.slotRepRanges=next;
+}
 function initMesoDragSort(){
   const body=document.getElementById('meso-detail-body');
   initLongPressDragSort(body,'[data-meso-pos]','data-meso-pos','button',(fromPos,toPos)=>{
     fromPos=parseInt(fromPos);toPos=parseInt(toPos);
     if(viewingMesoIdx===null)return;
     const m=state.mesocycles[viewingMesoIdx];
+    reindexSlotRepRangesOnMove(m,fromPos,toPos);
     const moved=m.routineIds.splice(fromPos,1)[0];
     m.routineIds.splice(toPos,0,moved);
     save();
@@ -2824,7 +2995,9 @@ function initMesoDragSort(){
 }
 function removeRoutineFromMeso(idx){
   if(viewingMesoIdx===null)return;
-  state.mesocycles[viewingMesoIdx].routineIds.splice(idx,1);
+  const m=state.mesocycles[viewingMesoIdx];
+  reindexSlotRepRangesOnRemove(m,idx);
+  m.routineIds.splice(idx,1);
   save();openMesocycleDetail(viewingMesoIdx);renderMesocycles();
 }
 function openAddRoutineToActiveMeso(){
@@ -2854,13 +3027,78 @@ function addRoutineToActiveMeso(routineIdx){
   if(viewingMesoIdx===null)return;
   const routine=state.routines[routineIdx];
   const m=state.mesocycles[viewingMesoIdx];
-  // Mesocycles are sequences, so the same routine can appear more than once
-  // (e.g. Push, Pull, Legs, Push) — always add rather than de-duplicating.
+  const alreadyInMeso=m.routineIds.includes(routine.id);
+  if(alreadyInMeso){
+    forgeConfirm(
+      'Already In This Mesocycle',
+      '"'+routine.name+'" is already in this sequence. Every occurrence of the same routine shares the same weight history, rep ranges, and sets, since they\'re tracked as one routine underneath. Make this occurrence an independent copy — with its own exercises, name, and tracking — so it can run at a different rep range or intensity without affecting the original?',
+      ()=>{ beginDuplicateRoutineForMeso(routine); },
+      {okLabel:'Make Independent Copy',cancelLabel:'Keep Linked',danger:false,onCancel:()=>{
+        m.routineIds.push(routine.id);
+        save();
+        openAddRoutineToActiveMeso();
+        openMesocycleDetail(viewingMesoIdx);
+        renderMesocycles();
+      }}
+    );
+    return;
+  }
   m.routineIds.push(routine.id);
   save();
   openAddRoutineToActiveMeso(); // refresh the "x in cycle" counts and keep picker open
   openMesocycleDetail(viewingMesoIdx);
   renderMesocycles();
+}
+// Clones a routine into a genuinely independent one: a new routine record, PLUS a fresh
+// exercise record (new ID) for every exercise it contains — not just a new routine object
+// pointing at the same exercise IDs, which would still share weight/rep/PR history underneath
+// even with a different name. repRanges/rirModes/supersetGroups are remapped onto the new
+// exercise IDs so per-exercise settings carry over correctly.
+let pendingDuplicateRoutine=null;
+function duplicateRoutineForMeso(routine){
+  const baseName=routine.name.replace(/ [A-Z]$/,''); // strip a trailing " A"/" B" if this is already a variant
+  const existingNames=new Set(state.routines.map(r=>r.name));
+  let suffixCode=65; // 'A'
+  let newName=baseName+' A';
+  while(existingNames.has(newName)){suffixCode++;newName=baseName+' '+String.fromCharCode(suffixCode);}
+
+  const idMap={};
+  const newExerciseIds=(routine.exerciseIds||[]).map(oldId=>{
+    const oldEx=getExercise(oldId);
+    if(!oldEx)return oldId;
+    const newId=uid();
+    state.exercises.push({...oldEx,id:newId});
+    idMap[oldId]=newId;
+    return newId;
+  });
+  const newRepRanges={};
+  Object.keys(routine.repRanges||{}).forEach(oldId=>{if(idMap[oldId])newRepRanges[idMap[oldId]]=routine.repRanges[oldId];});
+  const newRirModes={};
+  Object.keys(routine.rirModes||{}).forEach(oldId=>{if(idMap[oldId])newRirModes[idMap[oldId]]=routine.rirModes[oldId];});
+
+  const newRoutine={...routine,id:uid(),name:newName,exerciseIds:newExerciseIds,repRanges:newRepRanges,rirModes:newRirModes};
+  if(routine.supersetGroups)newRoutine.supersetGroups=[...routine.supersetGroups]; // indexed by position, order preserved
+  state.routines.push(newRoutine);
+  return newRoutine;
+}
+function beginDuplicateRoutineForMeso(routine){
+  pendingDuplicateRoutine=duplicateRoutineForMeso(routine);
+  document.getElementById('duplicate-routine-name').value=pendingDuplicateRoutine.name;
+  openModal('modal-name-duplicate-routine');
+}
+function saveDuplicateRoutineName(){
+  if(!pendingDuplicateRoutine||viewingMesoIdx===null)return;
+  const name=document.getElementById('duplicate-routine-name').value.trim();
+  if(name)pendingDuplicateRoutine.name=name;
+  const m=state.mesocycles[viewingMesoIdx];
+  m.routineIds.push(pendingDuplicateRoutine.id);
+  pendingDuplicateRoutine=null;
+  save();
+  closeModal('modal-name-duplicate-routine');
+  openAddRoutineToActiveMeso();
+  openMesocycleDetail(viewingMesoIdx);
+  renderMesocycles();
+  renderRoutinesList();
 }
 function deleteMesocycle(mi){
   if(confirm('Delete "'+state.mesocycles[mi].name+'"? Routines themselves are not affected.')){
@@ -3072,7 +3310,9 @@ function startRoutineWorkout(i){
     const prev=getLastSets(id);
     // Restore saved superset group from routine
     const sg=(r.supersetGroups&&r.supersetGroups[idx])||null;
-    const repRange=resolveRepRangeForRoutine(r,id);
+    const slotOverride=(activeMesoContext&&activeMeso&&activeMeso.slotRepRanges&&activeMeso.slotRepRanges[activeMesoContext.routinePos])
+      ?activeMeso.slotRepRanges[activeMesoContext.routinePos][id]:null;
+    const repRange=slotOverride||resolveRepRangeForRoutine(r,id);
     const useRIR=!!(r.rirModes&&r.rirModes[id]);
     let sets=prev.length?prev.map(s=>({...s,done:false})):[newSet()];
     const adjArr=activeMeso?getMesoSetAdjustments(activeMeso,id):null;
@@ -4332,18 +4572,20 @@ function renderProgressChart(){
     ctx.fillStyle='rgba(136,136,170,0.6)';ctx.font='9px DM Mono';ctx.textAlign='right';
     ctx.fillText((mn+(mx-mn)*i/4).toFixed(1),pad.l-3,y+3);
   }
-  ctx.beginPath();ctx.strokeStyle='#e8ff47';ctx.lineWidth=2;ctx.lineJoin='round';
+  const accentRgb=(getComputedStyle(document.documentElement).getPropertyValue('--accent-rgb')||'217,119,87').trim();
+  const accentSolid='rgb('+accentRgb+')';
+  ctx.beginPath();ctx.strokeStyle=accentSolid;ctx.lineWidth=2;ctx.lineJoin='round';
   points.forEach((p,i)=>{const x=pad.l+i*xS;const y=pad.t+h-(mx===mn?h/2:h*(p.val-mn)/(mx-mn));if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);});
   ctx.stroke();
   ctx.beginPath();
   points.forEach((p,i)=>{const x=pad.l+i*xS;const y=pad.t+h-(mx===mn?h/2:h*(p.val-mn)/(mx-mn));if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);});
   ctx.lineTo(pad.l+(points.length-1)*xS,pad.t+h);ctx.lineTo(pad.l,pad.t+h);ctx.closePath();
   const grad=ctx.createLinearGradient(0,pad.t,0,pad.t+h);
-  grad.addColorStop(0,'rgba(232,255,71,0.2)');grad.addColorStop(1,'rgba(232,255,71,0)');
+  grad.addColorStop(0,'rgba('+accentRgb+',0.2)');grad.addColorStop(1,'rgba('+accentRgb+',0)');
   ctx.fillStyle=grad;ctx.fill();
   points.forEach((p,i)=>{
     const x=pad.l+i*xS;const y=pad.t+h-(mx===mn?h/2:h*(p.val-mn)/(mx-mn));
-    ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fillStyle='#e8ff47';ctx.fill();
+    ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fillStyle=accentSolid;ctx.fill();
     if(i===0||i===points.length-1||points.length<=6){ctx.fillStyle='rgba(136,136,170,0.6)';ctx.font='9px DM Sans';ctx.textAlign='center';ctx.fillText(p.label,x,pad.t+h+18);}
   });
   const best=Math.max(...vals);
