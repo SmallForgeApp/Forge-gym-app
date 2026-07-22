@@ -364,6 +364,8 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div id="workout-est-time" style="margin-top:4px;font-size:11px;color:var(--accent2)"></div>
     <div id="workout-meso-note" style="margin-top:4px;font-size:11px;color:#ff8c00;display:none"></div>
     <div id="workout-rir-note" style="margin-top:4px;font-size:11px;color:var(--accent);font-weight:700;display:none"></div>
+    <div id="workout-volume-note" style="margin-top:4px;font-size:11px;color:#2ed573;display:none"></div>
+    <div id="workout-review-note" style="margin-top:4px;font-size:11px;color:var(--text2);display:none;cursor:pointer;text-decoration:underline"></div>
     <input id="workout-notes" placeholder="Session notes..." style="margin-top:6px;font-size:12px;padding:6px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px"/>
   </div>
   <div class="scroll pb" id="exercises-container"><div style="height:10px"></div></div>
@@ -863,6 +865,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <div id="meso-progress-summary"></div>
       <div id="meso-detail-body"></div>
       <button class="btn btn-ghost btn-full mt12" onclick="openAddRoutineToActiveMeso()">＋ Add Routine to This Mesocycle</button>
+      <button class="btn btn-ghost btn-full mt12" id="meso-review-btn">📈 Review Progress</button>
       <button class="btn btn-ghost btn-full mt12" id="meso-settings-btn">⚙ Cycle Settings</button>
     </div>
     <div class="modal-actions">
@@ -946,6 +949,16 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
         <div class="input-label mt12">Starting RIR cap</div>
         <input id="meso-set-rir-cap" type="number" inputmode="numeric" min="0" max="8"/>
         <div class="small text3 mt4" style="line-height:1.5">Rotation 1 starts at this RIR (or lower, if the mesocycle is short) and ramps down evenly each rotation to your last-rotation target. Shown at the top of each meso-linked workout.</div>
+
+        <div class="input-label mt12" style="display:flex;align-items:center;justify-content:space-between">
+          <span>Anchor targets to a real weight</span>
+          <input id="meso-set-rir-weight-enabled" type="checkbox" style="width:auto"/>
+        </div>
+        <div id="meso-rir-weight-fields">
+          <div class="input-label mt12">Weight drop per RIR (%)</div>
+          <input id="meso-set-rir-weight-pct" type="number" inputmode="numeric" min="1" max="15" step="0.5"/>
+          <div class="small text3 mt4" style="line-height:1.5">Instead of just reminding you what RIR to aim for, this works out an actual weight for it — anchored to the real weight you hit true 0 RIR at on the last rotation before your last deload, then reduced by this % for every RIR of your current target. Needs at least one completed mesocycle pass to have an anchor to work from; until then it has no effect. Default (4%) is a standard RPE-to-%1RM estimate — adjust it if the prescribed weight consistently feels lighter or heavier than the RIR it's meant to be.</div>
+        </div>
       </div>
 
       <div class="input-label mt12">Early deload detection</div>
@@ -980,6 +993,17 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div class="modal-actions">
       <button class="btn btn-ghost flex-1" onclick="closeModal('modal-slot-rep-ranges')">Close</button>
       <button class="btn btn-primary flex-1" onclick="saveSlotRepRanges()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Mesocycle Review: per-exercise and per-muscle progress across this mesocycle's history -->
+<div class="modal-overlay" id="modal-meso-review">
+  <div class="modal"><div class="modal-handle"></div>
+    <div class="modal-title" id="meso-review-title">Progress Review</div>
+    <div class="modal-body" id="meso-review-body"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary btn-full" onclick="closeModal('modal-meso-review')">Close</button>
     </div>
   </div>
 </div>
@@ -1282,6 +1306,9 @@ function load(){
     if(!m.deloadSetMode)m.deloadSetMode='flat'; // 'flat' | 'relative'
     if(m.deloadSetValue==null)m.deloadSetValue=1;
     if(m.deloadTargetRIR==null)m.deloadTargetRIR=4;
+    if(m.rirWeightPrescriptionEnabled==null)m.rirWeightPrescriptionEnabled=false; // opt-in: needs a completed pass before it has an anchor to work from
+    if(m.rirWeightPct==null)m.rirWeightPct=4; // % weight drop per RIR step, per Helms/Zourdos RPE-%1RM research
+    if(!m.trueFailureAnchor)m.trueFailureAnchor={};
     if(!m.resetMode)m.resetMode='preDeload'; // 'deload' | 'preDeload' | 'mesoStart' | 'rotation'
     if(m.resetRotationNumber==null)m.resetRotationNumber=1;
     if(m.rotationsDone==null)m.rotationsDone=0;
@@ -2582,6 +2609,11 @@ function resolvePendingResetBaseline(m){
 // pendingResetBaseline null or stale from a previous pass.
 function enterDeloadPhase(m){
   m.preDeloadBaselines=snapshotPreDeloadBaselines(m);
+  // Freeze this pass's true-failure reference (final rotation, smoothed against its neighbor
+  // and outlier-checked the same way a chosen reset rotation is) before rotationBaselines gets
+  // cleared — used by the RIR-anchored weight prescription to convert "aim for N RIR" into an
+  // actual weight for the whole NEXT pass, not just this transition.
+  m.trueFailureAnchor=getSmoothedRotationBaseline(m,m.rotationsPerMeso||1);
   m.phase='deload';
   // Both deload methods perform the deload at the SAME weight/reps the next mesocycle pass
   // will resume at (per resetMode — e.g. a specific mid-pack rotation), not the heaviest,
@@ -2590,6 +2622,28 @@ function enterDeloadPhase(m){
   const resolved=resolvePendingResetBaseline(m);
   const hasData=resolved&&Object.keys(resolved).length;
   m.pendingResetBaseline=hasData?resolved:(m.preDeloadBaselines||{});
+}
+// Converts a target RIR into an actual weight, anchored to this exercise's true-failure
+// reference (the smoothed final-rotation weight from the pass before deload) rather than
+// leaving "aim for N RIR" as a pure guess. Uses a configurable %-weight-drop-per-RIR (default
+// 4%, per Helms/Zourdos RPE-to-%1RM research — RPE10→9→8→7 ≈ 100%→96%→92%→86%), since the
+// true conversion varies by lift and by lifter and isn't a fixed universal constant.
+function getRIRAnchoredWeight(m,exId,targetRIR,isBW){
+  const anchor=(m.trueFailureAnchor||{})[exId];
+  if(!anchor||!anchor.length||targetRIR==null)return null;
+  const pct=(m.rirWeightPct!=null?m.rirWeightPct:4)/100;
+  const factor=1-targetRIR*pct;
+  return anchor.map(s=>{
+    if(isBW){
+      // Weight is 0 (or near it) for bodyweight work, so scaling weight does nothing — cut reps
+      // by the same % instead, same lever used for bodyweight exercises during a deload.
+      return{weight:s.weight,reps:Math.max(1,Math.round((s.reps||0)*factor)),
+        repsL:s.repsL!=null?Math.max(1,Math.round(s.repsL*factor)):undefined,
+        repsR:s.repsR!=null?Math.max(1,Math.round(s.repsR*factor)):undefined};
+    }
+    const dW=s.weight!=null?Math.round(s.weight*factor*2)/2:s.weight;
+    return{weight:dW,reps:s.reps,repsL:s.repsL,repsR:s.repsR};
+  });
 }
 // Returns an array of {weight,reps,repsL,repsR} — one per set — to seed this exercise's sets
 // with when starting a meso-linked workout, or null when normal history-based progression
@@ -2628,8 +2682,22 @@ function getMesoSetAdjustments(m,exId){
       return{weight:dW,reps:s.reps,repsL:s.repsL,repsR:s.repsR};
     });
   }
-  if(m.phase==='training'&&(m.passWorkoutCount||0)===0&&m.pendingResetBaseline&&m.pendingResetBaseline[exId]){
-    return m.pendingResetBaseline[exId];
+  if(m.phase==='training'){
+    // RIR-anchored prescription takes priority when enabled — it's a more precise "what weight
+    // should this rotation's target RIR actually be" than the reset-baseline override, which
+    // only answers "what to resume the first workout of a pass at". Falls through to the
+    // reset-baseline override (or null, i.e. normal history-based progression) if disabled,
+    // or if there's no anchor yet (e.g. this mesocycle hasn't completed a pass yet).
+    if(m.rirRampEnabled&&m.rirWeightPrescriptionEnabled){
+      const rirInfo=getMesoTargetRIR(m);
+      if(rirInfo&&!rirInfo.deload){
+        const anchored=getRIRAnchoredWeight(m,exId,rirInfo.rir,isBW);
+        if(anchored)return anchored;
+      }
+    }
+    if((m.passWorkoutCount||0)===0&&m.pendingResetBaseline&&m.pendingResetBaseline[exId]){
+      return m.pendingResetBaseline[exId];
+    }
   }
   return null;
 }
@@ -2669,6 +2737,71 @@ function getPriorNormalTopSets(exId,count){
     if(normalSets.length)out.push({...normalSets[0],useRIR:!!ex.useRIR});
   }
   return out;
+}
+// Same idea as getPriorNormalTopSets, but starting from the MOST RECENT session (index 0) —
+// used when checking trend ahead of a workout that hasn't happened yet, rather than after one
+// was just logged (getPriorNormalTopSets deliberately skips index 0 for that reason).
+function getRecentNormalTopSets(exId,count){
+  const out=[];
+  for(let i=0;i<state.history.length&&out.length<count;i++){
+    const ex=(state.history[i].exercises||[]).find(e=>e.exId===exId);
+    if(!ex)continue;
+    const normalSets=(ex.sets||[]).filter(s=>s.done&&(!s.type||s.type==='normal'));
+    if(normalSets.length)out.push({...normalSets[0],useRIR:!!ex.useRIR});
+  }
+  return out;
+}
+// For the final 1-2 rotations of a training pass, looks at how each muscle group used in this
+// routine has been trending across its exercises' recent sessions, and suggests adding a set to
+// muscles still improving (rather than blanket-adding to everything) — a muscle that's flat or
+// declining is more likely already at its ceiling for this pass, and more volume there would
+// just add fatigue without payoff. Purely a suggestion shown at workout start; never changes
+// the routine itself.
+function getMesoVolumeSuggestions(m,routineId){
+  if(!m||m.phase!=='training')return null;
+  const total=m.rotationsPerMeso||1;
+  const rotNum=(m.rotationsDone||0)+1;
+  if(total<2||rotNum<total-1)return null; // only relevant in the final 2 rotations of a pass
+  const r=getRoutine(routineId);
+  if(!r)return null;
+  const groups={};
+  (r.exerciseIds||[]).forEach(exId=>{
+    const exData=getExercise(exId);
+    if(!exData)return;
+    const muscle=exData.muscle||'Other';
+    const recent=getRecentNormalTopSets(exId,3);
+    if(recent.length<2)return; // not enough logged history to judge a trend yet
+    const isUni=!!exData.uni;
+    const points=[...recent].reverse(); // oldest → newest
+    let up=0,down=0;
+    for(let i=1;i<points.length;i++){
+      const c=comparePerf(points[i-1],points[i],isUni);
+      if(c>0)up++;else if(c<0)down++;
+    }
+    if(!groups[muscle])groups[muscle]={up:0,down:0,flat:0,names:[]};
+    if(up>down)groups[muscle].up++;
+    else if(down>up)groups[muscle].down++;
+    else groups[muscle].flat++;
+    groups[muscle].names.push(exData.name);
+  });
+  const suggestions=[];
+  Object.keys(groups).forEach(muscle=>{
+    const g=groups[muscle];
+    const n=g.up+g.down+g.flat;
+    if(!n)return;
+    if(g.up>g.down&&g.up>=Math.ceil(n/2))suggestions.push({muscle,action:'add_set',exerciseNames:g.names});
+    else if(g.down>=g.up&&g.down>0)suggestions.push({muscle,action:'hold',exerciseNames:g.names});
+  });
+  return suggestions.length?suggestions:null;
+}
+function formatMesoVolumeNote(suggestions){
+  if(!suggestions||!suggestions.length)return null;
+  const adds=suggestions.filter(s=>s.action==='add_set').map(s=>s.muscle);
+  const holds=suggestions.filter(s=>s.action==='hold').map(s=>s.muscle);
+  const parts=[];
+  if(adds.length)parts.push(adds.join(' & ')+' still trending up — consider adding a set.');
+  if(holds.length)parts.push(holds.join(' & ')+' flat/declining — hold steady.');
+  return parts.length?parts.join(' '):null;
 }
 // Looks for two independent early-warning signs that a mesocycle's remaining training
 // rotations may be more than the user can currently recover from: (1) effort is already at or
@@ -2737,6 +2870,7 @@ function saveNewMesocycle(){
     rotationsPerMeso:4,mesoRepeats:1,deloadEnabled:true,deloadPercent:40,deloadSetsDrop:0,resetMode:'preDeload',resetRotationNumber:1,resetFallbackNote:null,
     rirRampEnabled:true,rirEnd:0,rirStartCap:4,earlyDeloadDetection:'suggest',earlyDeloadDeclineCount:2,
     deloadMethod:'weight',deloadSetMode:'flat',deloadSetValue:1,deloadTargetRIR:4,slotRepRanges:{},
+    rirWeightPrescriptionEnabled:false,rirWeightPct:4,trueFailureAnchor:{},
     rotationsDone:0,repeatsDone:0,phase:'training',passWorkoutCount:0,rotationWorkoutCount:0,baselines:{},rotationBaselines:{},preDeloadBaselines:{},pendingResetBaseline:null});
   save();renderMesocycles();closeModal('modal-new-mesocycle');
 }
@@ -2782,6 +2916,9 @@ function openMesoSettingsModal(){
   document.getElementById('meso-set-rir-end').value=m.rirEnd!=null?m.rirEnd:0;
   document.getElementById('meso-set-rir-cap').value=m.rirStartCap!=null?m.rirStartCap:4;
   document.getElementById('meso-rir-fields').style.display=m.rirRampEnabled?'':'none';
+  document.getElementById('meso-set-rir-weight-enabled').checked=!!m.rirWeightPrescriptionEnabled;
+  document.getElementById('meso-set-rir-weight-pct').value=m.rirWeightPct!=null?m.rirWeightPct:4;
+  document.getElementById('meso-rir-weight-fields').style.display=m.rirWeightPrescriptionEnabled?'':'none';
   document.getElementById('meso-set-early-deload').value=m.earlyDeloadDetection||'suggest';
   document.getElementById('meso-set-decline-count').value=m.earlyDeloadDeclineCount||2;
   document.getElementById('meso-early-deload-fields').style.display=(m.earlyDeloadDetection==='off')?'none':'';
@@ -2800,6 +2937,9 @@ document.getElementById('meso-set-reset-mode').onchange=function(){
 };
 document.getElementById('meso-set-rir-enabled').onchange=function(){
   document.getElementById('meso-rir-fields').style.display=this.checked?'':'none';
+};
+document.getElementById('meso-set-rir-weight-enabled').onchange=function(){
+  document.getElementById('meso-rir-weight-fields').style.display=this.checked?'':'none';
 };
 document.getElementById('meso-set-early-deload').onchange=function(){
   document.getElementById('meso-early-deload-fields').style.display=(this.value==='off')?'none':'';
@@ -2830,6 +2970,9 @@ function saveMesoSettings(){
   m.rirEnd=(!isNaN(rirEnd)&&rirEnd>=0)?rirEnd:0;
   const rirCap=parseInt(document.getElementById('meso-set-rir-cap').value);
   m.rirStartCap=(!isNaN(rirCap)&&rirCap>=m.rirEnd)?rirCap:Math.max(m.rirEnd,4);
+  m.rirWeightPrescriptionEnabled=document.getElementById('meso-set-rir-weight-enabled').checked;
+  const rirWeightPct=parseFloat(document.getElementById('meso-set-rir-weight-pct').value);
+  m.rirWeightPct=(!isNaN(rirWeightPct)&&rirWeightPct>0)?rirWeightPct:4;
   m.earlyDeloadDetection=document.getElementById('meso-set-early-deload').value||'suggest';
   const declineCount=parseInt(document.getElementById('meso-set-decline-count').value);
   m.earlyDeloadDeclineCount=(!isNaN(declineCount)&&declineCount>=1)?declineCount:2;
@@ -2902,12 +3045,89 @@ function saveSlotRepRanges(){
   closeModal('modal-slot-rep-ranges');
   openMesocycleDetail(viewingMesoIdx);
 }
+// Pulls every workout tagged to this mesocycle (across every pass, repeat, and deload it's been
+// through so far) and summarizes per-exercise and per-muscle direction — first logged session
+// vs most recent — so "am I actually improving in this mesocycle" has a real answer instead of
+// having to page back through history by hand.
+function getMesoReviewData(m){
+  const workouts=(state.history||[]).filter(w=>w.mesoId===m.id);
+  if(!workouts.length)return null;
+  const chronological=[...workouts].reverse(); // oldest first
+  const exerciseData={};
+  chronological.forEach(w=>{
+    (w.exercises||[]).forEach(ex=>{
+      const exData=getExercise(ex.exId);
+      if(!exData)return;
+      const normalSets=(ex.sets||[]).filter(s=>s.done&&(!s.type||s.type==='normal'));
+      if(!normalSets.length)return;
+      const top=normalSets[0];
+      if(!exerciseData[ex.exId])exerciseData[ex.exId]={name:exData.name,muscle:exData.muscle||'Other',sessions:[]};
+      exerciseData[ex.exId].sessions.push({date:w.date,weight:top.weight,reps:top.reps});
+    });
+  });
+  const exerciseSummaries=Object.keys(exerciseData).map(exId=>{
+    const d=exerciseData[exId];
+    const first=d.sessions[0],last=d.sessions[d.sessions.length-1];
+    const delta=(last.weight||0)-(first.weight||0);
+    return{exId,name:d.name,muscle:d.muscle,sessionCount:d.sessions.length,
+      firstWeight:first.weight,firstReps:first.reps,lastWeight:last.weight,lastReps:last.reps,delta};
+  }).sort((a,b)=>a.muscle.localeCompare(b.muscle)||a.name.localeCompare(b.name));
+  const muscleSummaries={};
+  exerciseSummaries.forEach(s=>{
+    if(!muscleSummaries[s.muscle])muscleSummaries[s.muscle]={up:0,down:0,flat:0,count:0};
+    const g=muscleSummaries[s.muscle];
+    g.count++;
+    if(s.delta>0)g.up++;else if(s.delta<0)g.down++;else g.flat++;
+  });
+  return{exerciseSummaries,muscleSummaries};
+}
+function openMesoReviewFor(mesoIdx){
+  viewingMesoIdx=mesoIdx;
+  openMesoReview();
+}
+function openMesoReview(){
+  if(viewingMesoIdx===null)return;
+  const m=state.mesocycles[viewingMesoIdx];
+  document.getElementById('meso-review-title').textContent=m.name+' — Progress Review';
+  const data=getMesoReviewData(m);
+  const body=document.getElementById('meso-review-body');
+  if(!data){
+    body.innerHTML='<div class="small text2" style="text-align:center;padding:20px 0">No logged workouts for this mesocycle yet — this fills in once you\'ve run a few sessions.</div>';
+    openModal('modal-meso-review');
+    return;
+  }
+  let html='';
+  const muscles=Object.keys(data.muscleSummaries).sort();
+  html+='<div class="section-label">By Muscle</div>';
+  muscles.forEach(muscle=>{
+    const g=data.muscleSummaries[muscle];
+    const col=g.up>g.down?'#2ed573':g.down>g.up?'#ff4757':'var(--text2)';
+    const label=g.up>g.down?'Trending up':g.down>g.up?'Trending down':'Holding steady';
+    html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">'
+      +'<span class="bold" style="font-size:13px">'+escHtml(muscle)+'</span>'
+      +'<span class="small" style="color:'+col+'">'+label+' ('+g.up+'↑ '+g.down+'↓ '+g.flat+'–)</span></div>';
+  });
+  html+='<div class="section-label mt12">By Exercise</div>';
+  data.exerciseSummaries.forEach(s=>{
+    const col=s.delta>0?'#2ed573':s.delta<0?'#ff4757':'var(--text2)';
+    const arrow=s.delta>0?'▲':s.delta<0?'▼':'–';
+    const deltaStr=s.delta!==0?(s.delta>0?'+':'')+s.delta+'kg':'no change';
+    html+='<div style="padding:6px 0;border-bottom:1px solid var(--border)">'
+      +'<div style="display:flex;justify-content:space-between"><span class="bold" style="font-size:13px">'+escHtml(s.name)+'</span>'
+      +'<span class="small" style="color:'+col+'">'+arrow+' '+deltaStr+'</span></div>'
+      +'<div class="small text3">'+s.firstWeight+'kg×'+s.firstReps+' → '+s.lastWeight+'kg×'+s.lastReps+' across '+s.sessionCount+' session'+(s.sessionCount!==1?'s':'')+'</div>'
+      +'</div>';
+  });
+  body.innerHTML=html;
+  openModal('modal-meso-review');
+}
 function openMesocycleDetail(mi){
   viewingMesoIdx=mi;
   const m=state.mesocycles[mi];
   document.getElementById('meso-detail-title').textContent=m.name;
   renderMesoProgressSummary(m);
   document.getElementById('meso-settings-btn').onclick=openMesoSettingsModal;
+  document.getElementById('meso-review-btn').onclick=openMesoReview;
   const nextIdx=getNextMesoRoutineIndex(m);
   const body=document.getElementById('meso-detail-body');
   if(!m.routineIds.length){
@@ -3349,6 +3569,24 @@ function startRoutineWorkout(i){
     const rirText=formatMesoRIRNote(rirInfo);
     if(rirText){rirNoteEl.textContent=rirText;rirNoteEl.style.display='';}
     else rirNoteEl.style.display='none';
+  }
+  const volNoteEl=document.getElementById('workout-volume-note');
+  if(volNoteEl){
+    const volSuggestions=activeMeso?getMesoVolumeSuggestions(activeMeso,r.id):null;
+    const volText=formatMesoVolumeNote(volSuggestions);
+    if(volText){volNoteEl.textContent=volText;volNoteEl.style.display='';}
+    else volNoteEl.style.display='none';
+  }
+  const reviewNoteEl=document.getElementById('workout-review-note');
+  if(reviewNoteEl){
+    if(activeMeso&&(activeMeso.repeatsDone||0)>=1){
+      const mIdx=activeMesoContext.mesoIdx;
+      reviewNoteEl.textContent='You\'ve completed this mesocycle before — view your progress ›';
+      reviewNoteEl.style.display='';
+      reviewNoteEl.onclick=()=>openMesoReviewFor(mIdx);
+    }else{
+      reviewNoteEl.style.display='none';
+    }
   }
 }
 function startEmptyWorkout(){beginWorkout('Workout',[],null,[]);}
