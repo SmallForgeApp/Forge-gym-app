@@ -2628,20 +2628,12 @@ function enterDeloadPhase(m){
 // leaving "aim for N RIR" as a pure guess. Uses a configurable %-weight-drop-per-RIR (default
 // 4%, per Helms/Zourdos RPE-to-%1RM research — RPE10→9→8→7 ≈ 100%→96%→92%→86%), since the
 // true conversion varies by lift and by lifter and isn't a fixed universal constant.
-function getRIRAnchoredWeight(m,exId,targetRIR,isBW){
+function getRIRAnchoredWeight(m,exId,targetRIR){
   const anchor=(m.trueFailureAnchor||{})[exId];
   if(!anchor||!anchor.length||targetRIR==null)return null;
   const pct=(m.rirWeightPct!=null?m.rirWeightPct:4)/100;
-  const factor=1-targetRIR*pct;
   return anchor.map(s=>{
-    if(isBW){
-      // Weight is 0 (or near it) for bodyweight work, so scaling weight does nothing — cut reps
-      // by the same % instead, same lever used for bodyweight exercises during a deload.
-      return{weight:s.weight,reps:Math.max(1,Math.round((s.reps||0)*factor)),
-        repsL:s.repsL!=null?Math.max(1,Math.round(s.repsL*factor)):undefined,
-        repsR:s.repsR!=null?Math.max(1,Math.round(s.repsR*factor)):undefined};
-    }
-    const dW=s.weight!=null?Math.round(s.weight*factor*2)/2:s.weight;
+    const dW=s.weight!=null?Math.round(s.weight*(1-targetRIR*pct)*2)/2:s.weight;
     return{weight:dW,reps:s.reps,repsL:s.repsL,repsR:s.repsR};
   });
 }
@@ -2691,7 +2683,7 @@ function getMesoSetAdjustments(m,exId){
     if(m.rirRampEnabled&&m.rirWeightPrescriptionEnabled){
       const rirInfo=getMesoTargetRIR(m);
       if(rirInfo&&!rirInfo.deload){
-        const anchored=getRIRAnchoredWeight(m,exId,rirInfo.rir,isBW);
+        const anchored=getRIRAnchoredWeight(m,exId,rirInfo.rir);
         if(anchored)return anchored;
       }
     }
