@@ -521,6 +521,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost flex-1" onclick="exportHistory()">📤 Export CSV</button>
       <button class="btn btn-danger flex-1" onclick="resetAllData()">⚠️ Reset All</button>
     </div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3">FORGE build 2026-07-23.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -951,13 +952,11 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
         <div class="small text3 mt4" style="line-height:1.5">Rotation 1 starts at this RIR (or lower, if the mesocycle is short) and ramps down evenly each rotation to your last-rotation target. Shown at the top of each meso-linked workout.</div>
 
         <div class="input-label mt12" style="display:flex;align-items:center;justify-content:space-between">
-          <span>Anchor targets to a real weight</span>
-          <input id="meso-set-rir-weight-enabled" type="checkbox" style="width:auto"/>
+          <span>Predict today's rep target from RIR</span>
+          <input id="meso-set-rir-rep-enabled" type="checkbox" style="width:auto"/>
         </div>
-        <div id="meso-rir-weight-fields">
-          <div class="input-label mt12">Weight drop per RIR (%)</div>
-          <input id="meso-set-rir-weight-pct" type="number" inputmode="numeric" min="1" max="15" step="0.5"/>
-          <div class="small text3 mt4" style="line-height:1.5">Instead of just reminding you what RIR to aim for, this works out an actual weight for it — anchored to the real weight you hit true 0 RIR at on the last rotation before your last deload, then reduced by this % for every RIR of your current target. Needs at least one completed mesocycle pass to have an anchor to work from; until then it has no effect. Default (4%) is a standard RPE-to-%1RM estimate — adjust it if the prescribed weight consistently feels lighter or heavier than the RIR it's meant to be.</div>
+        <div id="meso-rir-rep-fields">
+          <div class="small text3 mt4" style="line-height:1.5">Weight is never touched by this — it stays exactly what normal progression has it at, so you're not re-loading plates or swapping dumbbells just to hit a target RIR. Instead, the pre-filled rep count adjusts: N reps short of the true failure count you hit at this weight last time, where N is today's target RIR (that's the literal definition of RIR). Weight still increases the normal way, whenever you push past your rep ceiling. Needs at least one completed mesocycle pass to have a true-failure reference to work from; until then it has no effect.</div>
         </div>
       </div>
 
@@ -1306,8 +1305,7 @@ function load(){
     if(!m.deloadSetMode)m.deloadSetMode='flat'; // 'flat' | 'relative'
     if(m.deloadSetValue==null)m.deloadSetValue=1;
     if(m.deloadTargetRIR==null)m.deloadTargetRIR=4;
-    if(m.rirWeightPrescriptionEnabled==null)m.rirWeightPrescriptionEnabled=false; // opt-in: needs a completed pass before it has an anchor to work from
-    if(m.rirWeightPct==null)m.rirWeightPct=4; // % weight drop per RIR step, per Helms/Zourdos RPE-%1RM research
+    if(m.rirRepTargetEnabled==null)m.rirRepTargetEnabled=false; // opt-in: needs a completed pass before it has an anchor to work from
     if(!m.trueFailureAnchor)m.trueFailureAnchor={};
     if(!m.resetMode)m.resetMode='preDeload'; // 'deload' | 'preDeload' | 'mesoStart' | 'rotation'
     if(m.resetRotationNumber==null)m.resetRotationNumber=1;
@@ -2623,18 +2621,20 @@ function enterDeloadPhase(m){
   const hasData=resolved&&Object.keys(resolved).length;
   m.pendingResetBaseline=hasData?resolved:(m.preDeloadBaselines||{});
 }
-// Converts a target RIR into an actual weight, anchored to this exercise's true-failure
-// reference (the smoothed final-rotation weight from the pass before deload) rather than
-// leaving "aim for N RIR" as a pure guess. Uses a configurable %-weight-drop-per-RIR (default
-// 4%, per Helms/Zourdos RPE-to-%1RM research — RPE10→9→8→7 ≈ 100%→96%→92%→86%), since the
-// true conversion varies by lift and by lifter and isn't a fixed universal constant.
-function getRIRAnchoredWeight(m,exId,targetRIR){
+// Predicts today's rep target from the target RIR, without touching weight at all — weight
+// stays whatever normal progression already has it at (you control when it changes, e.g. after
+// pushing past your rep ceiling), and only the pre-filled REP count adjusts to reflect "N reps
+// short of the true failure count you hit at this weight last time", which is the literal
+// definition of RIR (reps in reserve) — no calibration constant needed, unlike a weight-based
+// conversion which varies by lift and lifter.
+function getRIRAnchoredReps(m,exId,targetRIR){
   const anchor=(m.trueFailureAnchor||{})[exId];
   if(!anchor||!anchor.length||targetRIR==null)return null;
-  const pct=(m.rirWeightPct!=null?m.rirWeightPct:4)/100;
   return anchor.map(s=>{
-    const dW=s.weight!=null?Math.round(s.weight*(1-targetRIR*pct)*2)/2:s.weight;
-    return{weight:dW,reps:s.reps,repsL:s.repsL,repsR:s.repsR};
+    const reps=s.reps!=null?Math.max(1,Math.round(s.reps-targetRIR)):undefined;
+    const repsL=s.repsL!=null?Math.max(1,Math.round(s.repsL-targetRIR)):undefined;
+    const repsR=s.repsR!=null?Math.max(1,Math.round(s.repsR-targetRIR)):undefined;
+    return{weight:null,reps,repsL,repsR}; // weight:null → passes through to normal progression untouched
   });
 }
 // Returns an array of {weight,reps,repsL,repsR} — one per set — to seed this exercise's sets
@@ -2675,16 +2675,16 @@ function getMesoSetAdjustments(m,exId){
     });
   }
   if(m.phase==='training'){
-    // RIR-anchored prescription takes priority when enabled — it's a more precise "what weight
-    // should this rotation's target RIR actually be" than the reset-baseline override, which
-    // only answers "what to resume the first workout of a pass at". Falls through to the
-    // reset-baseline override (or null, i.e. normal history-based progression) if disabled,
-    // or if there's no anchor yet (e.g. this mesocycle hasn't completed a pass yet).
-    if(m.rirRampEnabled&&m.rirWeightPrescriptionEnabled){
+    // RIR-anchored rep prediction takes priority when enabled — it's a more useful "what rep
+    // count should I aim for today" than the reset-baseline override, which only answers "what
+    // to resume the first workout of a pass at". Falls through to the reset-baseline override
+    // (or null, i.e. normal history-based progression) if disabled, or if there's no anchor yet
+    // (e.g. this mesocycle hasn't completed a pass yet).
+    if(m.rirRampEnabled&&m.rirRepTargetEnabled){
       const rirInfo=getMesoTargetRIR(m);
       if(rirInfo&&!rirInfo.deload){
-        const anchored=getRIRAnchoredWeight(m,exId,rirInfo.rir);
-        if(anchored)return anchored;
+        const predicted=getRIRAnchoredReps(m,exId,rirInfo.rir);
+        if(predicted)return predicted;
       }
     }
     if((m.passWorkoutCount||0)===0&&m.pendingResetBaseline&&m.pendingResetBaseline[exId]){
@@ -2862,7 +2862,7 @@ function saveNewMesocycle(){
     rotationsPerMeso:4,mesoRepeats:1,deloadEnabled:true,deloadPercent:40,deloadSetsDrop:0,resetMode:'preDeload',resetRotationNumber:1,resetFallbackNote:null,
     rirRampEnabled:true,rirEnd:0,rirStartCap:4,earlyDeloadDetection:'suggest',earlyDeloadDeclineCount:2,
     deloadMethod:'weight',deloadSetMode:'flat',deloadSetValue:1,deloadTargetRIR:4,slotRepRanges:{},
-    rirWeightPrescriptionEnabled:false,rirWeightPct:4,trueFailureAnchor:{},
+    rirRepTargetEnabled:false,trueFailureAnchor:{},
     rotationsDone:0,repeatsDone:0,phase:'training',passWorkoutCount:0,rotationWorkoutCount:0,baselines:{},rotationBaselines:{},preDeloadBaselines:{},pendingResetBaseline:null});
   save();renderMesocycles();closeModal('modal-new-mesocycle');
 }
@@ -2908,9 +2908,8 @@ function openMesoSettingsModal(){
   document.getElementById('meso-set-rir-end').value=m.rirEnd!=null?m.rirEnd:0;
   document.getElementById('meso-set-rir-cap').value=m.rirStartCap!=null?m.rirStartCap:4;
   document.getElementById('meso-rir-fields').style.display=m.rirRampEnabled?'':'none';
-  document.getElementById('meso-set-rir-weight-enabled').checked=!!m.rirWeightPrescriptionEnabled;
-  document.getElementById('meso-set-rir-weight-pct').value=m.rirWeightPct!=null?m.rirWeightPct:4;
-  document.getElementById('meso-rir-weight-fields').style.display=m.rirWeightPrescriptionEnabled?'':'none';
+  document.getElementById('meso-set-rir-rep-enabled').checked=!!m.rirRepTargetEnabled;
+  document.getElementById('meso-rir-rep-fields').style.display=m.rirRepTargetEnabled?'':'none';
   document.getElementById('meso-set-early-deload').value=m.earlyDeloadDetection||'suggest';
   document.getElementById('meso-set-decline-count').value=m.earlyDeloadDeclineCount||2;
   document.getElementById('meso-early-deload-fields').style.display=(m.earlyDeloadDetection==='off')?'none':'';
@@ -2930,8 +2929,8 @@ document.getElementById('meso-set-reset-mode').onchange=function(){
 document.getElementById('meso-set-rir-enabled').onchange=function(){
   document.getElementById('meso-rir-fields').style.display=this.checked?'':'none';
 };
-document.getElementById('meso-set-rir-weight-enabled').onchange=function(){
-  document.getElementById('meso-rir-weight-fields').style.display=this.checked?'':'none';
+document.getElementById('meso-set-rir-rep-enabled').onchange=function(){
+  document.getElementById('meso-rir-rep-fields').style.display=this.checked?'':'none';
 };
 document.getElementById('meso-set-early-deload').onchange=function(){
   document.getElementById('meso-early-deload-fields').style.display=(this.value==='off')?'none':'';
@@ -2962,9 +2961,7 @@ function saveMesoSettings(){
   m.rirEnd=(!isNaN(rirEnd)&&rirEnd>=0)?rirEnd:0;
   const rirCap=parseInt(document.getElementById('meso-set-rir-cap').value);
   m.rirStartCap=(!isNaN(rirCap)&&rirCap>=m.rirEnd)?rirCap:Math.max(m.rirEnd,4);
-  m.rirWeightPrescriptionEnabled=document.getElementById('meso-set-rir-weight-enabled').checked;
-  const rirWeightPct=parseFloat(document.getElementById('meso-set-rir-weight-pct').value);
-  m.rirWeightPct=(!isNaN(rirWeightPct)&&rirWeightPct>0)?rirWeightPct:4;
+  m.rirRepTargetEnabled=document.getElementById('meso-set-rir-rep-enabled').checked;
   m.earlyDeloadDetection=document.getElementById('meso-set-early-deload').value||'suggest';
   const declineCount=parseInt(document.getElementById('meso-set-decline-count').value);
   m.earlyDeloadDeclineCount=(!isNaN(declineCount)&&declineCount>=1)?declineCount:2;
@@ -4000,6 +3997,19 @@ function toggleSetDone(exIdx,setIdx){
   }else{
     if(inputs[0]&&!set.weight&&inputs[0].placeholder&&inputs[0].placeholder!=='—'){set.weight=parseFloat(inputs[0].placeholder)||0;inputs[0].value=set.weight;}
     if(inputs[1]&&!set.reps&&inputs[1].placeholder&&inputs[1].placeholder!=='—'){set.reps=parseFloat(inputs[1].placeholder)||0;inputs[1].value=set.reps;}
+  }
+  // RIR/RPE lives in a separate .rpe-input field, not .set-input, so it needs its own auto-fill —
+  // without this, a set completed with only the greyed-out placeholder showing was never actually
+  // recorded (set.rpe stayed null), even though it looked "filled in" on screen.
+  const rpeInput=row.querySelector('.rpe-input');
+  if(rpeInput&&set.rpe==null&&rpeInput.placeholder&&rpeInput.placeholder!=='—'){
+    const v=parseFloat(rpeInput.placeholder);
+    if(!isNaN(v)){
+      set.rpe=v;
+      rpeInput.value=v;
+      const useRIRc=!!activeWorkout.exercises[exIdx].useRIR;
+      rpeInput.style.color=useRIRc?(v<=1?'#ff4757':v<=3?'#ff8c00':'#2ed573'):(v<=5?'#2ed573':v<=7?'#ff8c00':'#ff4757');
+    }
   }
   set.done=!set.done;
   const btn=row.querySelector('.complete-btn');
