@@ -521,7 +521,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost flex-1" onclick="exportHistory()">📤 Export CSV</button>
       <button class="btn btn-danger flex-1" onclick="resetAllData()">⚠️ Reset All</button>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3">FORGE build 2026-07-25.4</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3">FORGE build 2026-07-25.6</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1334,6 +1334,7 @@ function load(){
     if(!m.preDeloadBaselines)m.preDeloadBaselines={};
     if(!m.pendingResetBaseline)m.pendingResetBaseline=null;
     if(m.measurementsPending==null)m.measurementsPending=false; // true right when entering deload — prompts a measurements check-in before the deload's first workout
+    if(!m.skipLog)m.skipLog=[]; // {id,routineId,slotIndex,step,skippedAt} — revisitable until that slot comes up again
   });
   if(!state.customCatalogueFields)state.customCatalogueFields={};
   if(!state.homeEquipment)state.homeEquipment=[];
@@ -2247,13 +2248,23 @@ function renderActiveMesoHero(){
         +(exHtml?'<div id="'+exListId+'" style="display:none;margin-top:8px;padding-top:6px;border-top:1px solid var(--accent)33">'+exHtml+'</div>':'')
         +'</div>';
     }
+    const skipEntry=!isNext?getValidSkipEntry(meso,idx):null;
+    if(skipEntry){
+      return '<div style="display:flex;align-items:center;gap:8px;background:linear-gradient(90deg,#ff8c0014,transparent);border-bottom:1px solid var(--border);border-left:3px solid #ff8c00;padding:8px 4px 8px 7px">'
+        +'<div style="width:19px;text-align:center;font-size:11px;color:#ff8c00;font-weight:700;flex-shrink:0">'+(idx+1)+'</div>'
+        +'<div style="flex:1;min-width:0">'
+        +'<div class="tight-name">'+escHtml(r.name)+'</div>'
+        +'<div class="small" style="color:#ff8c00">Skipped — redo before it comes around again</div>'
+        +'</div>'
+        +'<button class="btn btn-primary btn-sm" onclick="startCatchUpSession('+mesoIdx+',\''+skipEntry.id+'\')" style="flex-shrink:0;font-weight:700">Revisit</button>'
+        +'</div>';
+    }
     return '<div style="display:flex;align-items:center;background:transparent;border-bottom:1px solid var(--border);padding:8px 4px;cursor:pointer" onclick="openGymSetupPreview('+state.routines.indexOf(r)+')">'
       +'<div style="width:3px;background:'+col+';align-self:stretch;border-radius:2px;margin-right:8px;flex-shrink:0"></div>'
       +'<div style="width:22px;text-align:center;font-size:11px;color:var(--text3);font-weight:700;flex-shrink:0">'+(idx+1)+'</div>'
       +'<div style="width:28px;height:28px;border-radius:7px;background:'+col+'18;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin:0 8px">'+getCategoryIconSVG(muscat,14,col)+'</div>'
       +'<div style="flex:1;min-width:0"><div class="tight-name">'+escHtml(r.name)+rirBadge+'</div></div>'
-      +showBtn
-      +'<div id="'+exListId+'" style="display:none"></div>'
+      +'<span class="small text3" style="flex-shrink:0">'+n+' ex</span>'
       +'</div>';
   }).join('');
 
@@ -2499,6 +2510,7 @@ function advanceMesoProgress(m,loggedExercises){
   if(!m.baselines)m.baselines={};
   if(!m.rotationBaselines)m.rotationBaselines={};
   if(!m.preDeloadBaselines)m.preDeloadBaselines={};
+  if(!m.skipLog)m.skipLog=[];
 
   if(m.phase==='training'){
     const effectiveLogged=loggedOrHistoryFallback(loggedExercises,getRoutine(ids[m.currentPos]));
@@ -2534,6 +2546,7 @@ function advanceMesoProgress(m,loggedExercises){
     m.baselines={};
     m.rotationBaselines={};
     m.preDeloadBaselines={};
+    m.skipLog=[]; // a new pass starts — any still-open catch-up window from the last pass no longer applies
     m.phase=(totalRepeats>0&&m.repeatsDone>=totalRepeats)?'finished':'training';
     return;
   }
@@ -2554,6 +2567,7 @@ function advanceMesoProgress(m,loggedExercises){
     m.passWorkoutCount=0;
     m.baselines={};
     m.rotationBaselines={};
+    m.skipLog=[]; // a new pass starts — any still-open catch-up window from the last pass no longer applies
     m.phase=(totalRepeats>0&&m.repeatsDone>=totalRepeats)?'finished':'training';
   }
 }
@@ -2772,6 +2786,24 @@ function formatMesoRIRBadge(m){
   if(info.deload)return '<span class="tight-badge" style="background:#ff8c0022;color:#ff8c00;margin-left:6px">'+info.rir+'+ RIR</span>';
   return '<span class="tight-badge" style="background:rgba(var(--accent-rgb),0.13);color:var(--accent);margin-left:6px">'+info.rir+' RIR</span>';
 }
+// A single ever-increasing counter for "how far through this pass" a mesocycle is — rotation
+// count times sequence length, plus the current slot. Used only to tell whether a skipped
+// slot has come back around again yet (see getValidSkipEntry); resets along with rotationsDone
+// whenever a new pass begins, since skip entries are cleared at the same point.
+function mesoLogicalStep(m){
+  const len=(m.routineIds||[]).length||1;
+  return (m.rotationsDone||0)*len+(m.currentPos||0);
+}
+// Is there still an open catch-up window for this slot? A skip stays revisitable only until
+// the sequence reaches that same slot again — at that point the redo boundary the user asked
+// for ("before doing it again") has passed, so the entry should simply stop being offered.
+function getValidSkipEntry(m,slotIndex){
+  if(!m.skipLog||!m.skipLog.length)return null;
+  const len=(m.routineIds||[]).length||1;
+  const curStep=mesoLogicalStep(m);
+  const matches=m.skipLog.filter(s=>s.slotIndex===slotIndex&&curStep<s.step+len);
+  return matches.length?matches[matches.length-1]:null;
+}
 // Prior normal top sets for an exercise, searching from state.history[1] onward — used right
 // after the just-finished workout has already been unshifted onto state.history[0], so index 0
 // itself is deliberately skipped (comparing "this session" against sessions before it).
@@ -2918,7 +2950,7 @@ function saveNewMesocycle(){
     rirRampEnabled:true,rirEnd:0,rirStartCap:4,earlyDeloadDetection:'suggest',earlyDeloadDeclineCount:2,
     deloadMethod:'weight',deloadSetMode:'flat',deloadSetValue:1,deloadTargetRIR:4,slotRepRanges:{},
     rirRepTargetEnabled:false,trueFailureAnchor:{},
-    rotationsDone:0,repeatsDone:0,phase:'training',passWorkoutCount:0,rotationWorkoutCount:0,baselines:{},rotationBaselines:{},preDeloadBaselines:{},pendingResetBaseline:null,measurementsPending:false});
+    rotationsDone:0,repeatsDone:0,phase:'training',passWorkoutCount:0,rotationWorkoutCount:0,baselines:{},rotationBaselines:{},preDeloadBaselines:{},pendingResetBaseline:null,measurementsPending:false,skipLog:[]});
   save();renderMesocycles();closeModal('modal-new-mesocycle');
 }
 
@@ -3402,16 +3434,33 @@ function startMesoRoutine(mi){
 function skipMesoRoutine(mi){
   forgeConfirm(
     'Skip This Workout?',
-    'The next routine in the sequence will be skipped and the cycle will advance to the following one.',
+    'The next routine in the sequence will be skipped and the cycle will advance to the following one. You can still redo it before it comes up again.',
     ()=>{
       const m=state.mesocycles[mi];
       if(!m)return;
+      const ids=m.routineIds||[];
+      if(ids.length&&m.currentPos!=null){
+        if(!m.skipLog)m.skipLog=[];
+        m.skipLog.push({id:uid(),routineId:ids[m.currentPos],slotIndex:m.currentPos,step:mesoLogicalStep(m),skippedAt:new Date().toISOString()});
+      }
       advanceMesoProgress(m,[]);
       save();
       renderMesocycles();
       renderRoutinesList();
     }
   );
+}
+// Redo a still-open skipped session. Logs like a normal workout (see confirmFinishWorkout's
+// catchUp branch) but deliberately never calls advanceMesoProgress — your place in the
+// mesocycle doesn't move, since this is catching up on something already behind you.
+function startCatchUpSession(mi,skipId){
+  const m=state.mesocycles[mi];if(!m)return;
+  const entry=(m.skipLog||[]).find(s=>s.id===skipId);
+  if(!entry)return;
+  const idx=state.routines.findIndex(r=>r.id===entry.routineId);
+  if(idx===-1){alert('That routine no longer exists. Remove it from the mesocycle and try again.');return;}
+  activeMesoContext={mesoIdx:mi,routinePos:entry.slotIndex,catchUp:true,skipId:entry.id};
+  startRoutineWorkout(idx);
 }
 
 // Pre-deload measurements check-in — shown instead of the next routine while
@@ -5147,7 +5196,18 @@ function confirmFinishWorkout(){
   save();closeModal('modal-finish');
   // Advance mesocycle progress if this workout was started from one — only if something was
   // actually logged; otherwise leave the rotation exactly where it was.
-  if(activeMesoContext&&anySetDone){
+  if(activeMesoContext&&activeMesoContext.catchUp){
+    // A revisited/caught-up skipped session — already logged to history above (tagged with
+    // mesoId) if anything was done, but never advances currentPos/rotation/phase. Just clears
+    // the matching skip-log entry once something was actually performed, so it stops being
+    // offered as revisitable.
+    if(anySetDone){
+      const m=state.mesocycles[activeMesoContext.mesoIdx];
+      if(m&&m.skipLog)m.skipLog=m.skipLog.filter(s=>s.id!==activeMesoContext.skipId);
+    }
+    activeMesoContext=null;
+    save();
+  }else if(activeMesoContext&&anySetDone){
     const m=state.mesocycles[activeMesoContext.mesoIdx];
     if(m){
       const wasTrainingBefore=m.phase==='training';
