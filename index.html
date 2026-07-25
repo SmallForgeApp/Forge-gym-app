@@ -521,7 +521,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost flex-1" onclick="exportHistory()">📤 Export CSV</button>
       <button class="btn btn-danger flex-1" onclick="resetAllData()">⚠️ Reset All</button>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3">FORGE build 2026-07-25.3</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3">FORGE build 2026-07-25.4</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -2200,6 +2200,7 @@ function renderActiveMesoHero(){
   const mesoIdx=state.mesocycles.indexOf(meso);
   const nextIdx=getNextMesoRoutineIndex(meso);
   const measurementsPending=meso.phase==='deload'&&meso.measurementsPending;
+  const rirBadge=formatMesoRIRBadge(meso);
   const measurementsHtml=measurementsPending
     ?'<div style="background:linear-gradient(90deg,var(--accent)18,var(--accent)05);border:1px solid var(--accent)44;border-radius:14px;padding:14px;margin:8px 0">'
       +'<div style="display:flex;align-items:center;gap:10px">'
@@ -2236,7 +2237,7 @@ function renderActiveMesoHero(){
         +'<div style="width:40px;height:40px;border-radius:12px;background:'+col+'20;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+getCategoryIconSVG(muscat,20,col)+'</div>'
         +'<div style="flex:1;min-width:0">'
         +'<div style="font-size:10px;font-weight:800;letter-spacing:1px;color:var(--accent);text-transform:uppercase;margin-bottom:1px">Up Next</div>'
-        +'<div class="bold" style="font-size:15px;line-height:1.2">'+escHtml(r.name)+'</div>'
+        +'<div class="bold" style="font-size:15px;line-height:1.2">'+escHtml(r.name)+rirBadge+'</div>'
         +'<div style="display:flex;align-items:center;gap:6px;margin-top:4px">'+showBtn+'<span class="small text2">'+est+'</span></div>'
         +'</div>'
         +'<div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0">'
@@ -2250,7 +2251,7 @@ function renderActiveMesoHero(){
       +'<div style="width:3px;background:'+col+';align-self:stretch;border-radius:2px;margin-right:8px;flex-shrink:0"></div>'
       +'<div style="width:22px;text-align:center;font-size:11px;color:var(--text3);font-weight:700;flex-shrink:0">'+(idx+1)+'</div>'
       +'<div style="width:28px;height:28px;border-radius:7px;background:'+col+'18;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin:0 8px">'+getCategoryIconSVG(muscat,14,col)+'</div>'
-      +'<div style="flex:1;min-width:0"><div class="tight-name">'+escHtml(r.name)+'</div></div>'
+      +'<div style="flex:1;min-width:0"><div class="tight-name">'+escHtml(r.name)+rirBadge+'</div></div>'
       +showBtn
       +'<div id="'+exListId+'" style="display:none"></div>'
       +'</div>';
@@ -2396,7 +2397,7 @@ function renderMesocycles(){
         nextHtml='<div class="meso-next-row">'
           +'<div style="width:34px;height:34px;border-radius:9px;background:'+col+'18;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+getCategoryIconSVG(muscat,16,col)+'</div>'
           +'<div style="flex:1;min-width:0"><div style="font-size:10px;color:var(--accent);font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Up Next</div>'
-          +'<div style="font-weight:600;font-size:13px">'+escHtml(nextRoutine.name)+'</div></div>'
+          +'<div style="font-weight:600;font-size:13px">'+escHtml(nextRoutine.name)+formatMesoRIRBadge(m)+'</div></div>'
           +'<div style="display:flex;gap:6px">'
           +'<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();skipMesoRoutine('+mi+')" style="color:var(--text3);font-size:11px">Skip</button>'
           +'<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();startMesoRoutine('+mi+')">&#9654; Start</button>'
@@ -2761,6 +2762,15 @@ function formatMesoRIRNote(info){
   if(!info)return null;
   if(info.deload)return 'Deload rotation — keep it light, aim '+info.rir+'+ RIR.';
   return 'Rotation '+info.rotNum+' of '+info.total+' — aim for '+info.rir+' RIR today.';
+}
+// Compact badge version of the same target, for sitting right next to a routine's name in a
+// mesocycle sequence listing (home hero, mesocycles list, sequence editor) — same underlying
+// getMesoTargetRIR() value as the full note, just condensed to fit inline.
+function formatMesoRIRBadge(m){
+  const info=getMesoTargetRIR(m);
+  if(!info)return '';
+  if(info.deload)return '<span class="tight-badge" style="background:#ff8c0022;color:#ff8c00;margin-left:6px">'+info.rir+'+ RIR</span>';
+  return '<span class="tight-badge" style="background:rgba(var(--accent-rgb),0.13);color:var(--accent);margin-left:6px">'+info.rir+' RIR</span>';
 }
 // Prior normal top sets for an exercise, searching from state.history[1] onward — used right
 // after the just-finished workout has already been unshifted onto state.history[0], so index 0
@@ -3173,6 +3183,7 @@ function openMesocycleDetail(mi){
   document.getElementById('meso-settings-btn').onclick=openMesoSettingsModal;
   document.getElementById('meso-review-btn').onclick=openMesoReview;
   const nextIdx=getNextMesoRoutineIndex(m);
+  const rirBadge=formatMesoRIRBadge(m);
   const body=document.getElementById('meso-detail-body');
   if(!m.routineIds.length){
     body.innerHTML='<div class="small text2" style="text-align:center;padding:16px 0">No routines added yet.</div>';
@@ -3192,7 +3203,7 @@ function openMesocycleDetail(mi){
           +'<div style="width:38px;height:38px;border-radius:11px;background:'+col+'20;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+getCategoryIconSVG(muscat,18,col)+'</div>'
           +'<div style="flex:1;min-width:0">'
           +'<div style="font-size:10px;font-weight:800;letter-spacing:1px;color:var(--accent);text-transform:uppercase;margin-bottom:2px">Up Next</div>'
-          +'<div class="bold" style="font-size:15px;line-height:1.2">'+escHtml(r.name)+repsBadge+'</div>'
+          +'<div class="bold" style="font-size:15px;line-height:1.2">'+escHtml(r.name)+repsBadge+rirBadge+'</div>'
           +'<div class="small text2" style="margin-top:2px">'+n+' exercise'+(n!==1?'s':'')+'</div>'
           +'</div>'
           +'<button class="btn btn-ghost btn-sm" onclick="openSlotRepRangeEditor('+idx+')" style="padding:6px 10px;flex-shrink:0;white-space:nowrap">Reps</button>'
@@ -3202,7 +3213,7 @@ function openMesocycleDetail(mi){
       return '<div class="edit-ex-row" data-meso-pos="'+idx+'" onclick="handleMesoRowClick(event,\''+rid+'\')" style="cursor:pointer">'
         +'<div style="width:24px;height:24px;border-radius:6px;background:var(--bg4);color:var(--text2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">'+(idx+1)+'</div>'
         +'<div style="width:28px;height:28px;border-radius:8px;background:'+col+'18;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+getCategoryIconSVG(muscat,14,col)+'</div>'
-        +'<div style="flex:1"><div class="bold" style="font-size:13px">'+escHtml(r.name)+repsBadge+'</div><div class="small text2">'+n+' exercise'+(n!==1?'s':'')+'</div></div>'
+        +'<div style="flex:1"><div class="bold" style="font-size:13px">'+escHtml(r.name)+repsBadge+rirBadge+'</div><div class="small text2">'+n+' exercise'+(n!==1?'s':'')+'</div></div>'
         +'<button class="btn btn-ghost btn-sm" onclick="openSlotRepRangeEditor('+idx+')" style="padding:4px 8px">Reps</button>'
         +'<button class="btn btn-danger btn-sm" onclick="removeRoutineFromMeso('+idx+')" style="padding:4px 8px">&#10005;</button>'
         +'</div>';
