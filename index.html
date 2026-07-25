@@ -521,9 +521,24 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost flex-1" onclick="exportHistory()">📤 Export CSV</button>
       <button class="btn btn-danger flex-1" onclick="resetAllData()">⚠️ Reset All</button>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3">FORGE build 2026-07-23.1</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3">FORGE build 2026-07-25.3</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
+</div>
+
+<!-- Tight, gym-ready preview for a routine reached from a mesocycle sequence — just the
+     exercise order, equipment setup (machine/attachment/cable/bench), last weight, and set
+     count, plus a Start button. Deliberately lighter than modal-routine-detail (no history/PR
+     stats) so it's fast to glance at while walking to the first machine. -->
+<div class="modal-overlay" id="modal-gym-setup">
+  <div class="modal"><div class="modal-handle"></div>
+    <div class="modal-title" id="gym-setup-title"></div>
+    <div class="modal-body" id="gym-setup-body" style="padding-top:6px"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost flex-1" onclick="closeModal('modal-gym-setup')">Close</button>
+      <button class="btn btn-primary flex-1" id="gym-setup-start-btn">▶ Start</button>
+    </div>
+  </div>
 </div>
 
 <!-- MODALS -->
@@ -1318,6 +1333,7 @@ function load(){
     if(!m.rotationBaselines)m.rotationBaselines={};
     if(!m.preDeloadBaselines)m.preDeloadBaselines={};
     if(!m.pendingResetBaseline)m.pendingResetBaseline=null;
+    if(m.measurementsPending==null)m.measurementsPending=false; // true right when entering deload — prompts a measurements check-in before the deload's first workout
   });
   if(!state.customCatalogueFields)state.customCatalogueFields={};
   if(!state.homeEquipment)state.homeEquipment=[];
@@ -2183,11 +2199,26 @@ function renderActiveMesoHero(){
   if(!meso){const started=withRoutines.filter(m=>m.currentPos!=null);meso=started.length?started[started.length-1]:withRoutines[0];}
   const mesoIdx=state.mesocycles.indexOf(meso);
   const nextIdx=getNextMesoRoutineIndex(meso);
+  const measurementsPending=meso.phase==='deload'&&meso.measurementsPending;
+  const measurementsHtml=measurementsPending
+    ?'<div style="background:linear-gradient(90deg,var(--accent)18,var(--accent)05);border:1px solid var(--accent)44;border-radius:14px;padding:14px;margin:8px 0">'
+      +'<div style="display:flex;align-items:center;gap:10px">'
+      +'<div style="width:40px;height:40px;border-radius:12px;background:var(--accent)20;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px">📏</div>'
+      +'<div style="flex:1;min-width:0">'
+      +'<div style="font-size:10px;font-weight:800;letter-spacing:1px;color:var(--accent);text-transform:uppercase;margin-bottom:1px">Up Next</div>'
+      +'<div class="bold" style="font-size:15px;line-height:1.2">Measurements</div>'
+      +'<div class="small text2" style="margin-top:2px">Log weight &amp; measurements before the deload</div>'
+      +'</div>'
+      +'<div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0">'
+      +'<button class="btn btn-primary btn-sm" onclick="startMesoMeasurements('+mesoIdx+')" style="font-weight:800">▶ Start</button>'
+      +'<button class="btn btn-ghost btn-sm" onclick="skipMesoMeasurements('+mesoIdx+')" style="font-size:11px;color:var(--text3)">Skip</button>'
+      +'</div></div></div>'
+    :'';
 
   const rowsHtml=meso.routineIds.map((rid,idx)=>{
     const r=getRoutine(rid);if(!r)return'';
     const col=getRoutineColor(r);const muscat=getRoutineMuscleCategory(r);
-    const n=(r.exerciseIds||[]).length;const isNext=idx===nextIdx;
+    const n=(r.exerciseIds||[]).length;const isNext=idx===nextIdx&&!measurementsPending;
     const exListId='mhex-'+mesoIdx+'-'+idx;
     const exHtml=(r.exerciseIds||[]).map(exId=>{
       const ex=getExercise(exId);if(!ex)return'';
@@ -2215,7 +2246,7 @@ function renderActiveMesoHero(){
         +(exHtml?'<div id="'+exListId+'" style="display:none;margin-top:8px;padding-top:6px;border-top:1px solid var(--accent)33">'+exHtml+'</div>':'')
         +'</div>';
     }
-    return '<div style="display:flex;align-items:center;background:transparent;border-bottom:1px solid var(--border);padding:8px 4px;cursor:pointer" onclick="startRoutineWorkout('+state.routines.indexOf(r)+')">'
+    return '<div style="display:flex;align-items:center;background:transparent;border-bottom:1px solid var(--border);padding:8px 4px;cursor:pointer" onclick="openGymSetupPreview('+state.routines.indexOf(r)+')">'
       +'<div style="width:3px;background:'+col+';align-self:stretch;border-radius:2px;margin-right:8px;flex-shrink:0"></div>'
       +'<div style="width:22px;text-align:center;font-size:11px;color:var(--text3);font-weight:700;flex-shrink:0">'+(idx+1)+'</div>'
       +'<div style="width:28px;height:28px;border-radius:7px;background:'+col+'18;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin:0 8px">'+getCategoryIconSVG(muscat,14,col)+'</div>'
@@ -2233,7 +2264,7 @@ function renderActiveMesoHero(){
     +'<div style="font-size:11px;font-weight:700;letter-spacing:1.2px;color:var(--accent);text-transform:uppercase">'+escHtml(meso.name)+heroPhaseBadge+'</div>'
     +'<div style="font-size:11px;color:var(--text3);cursor:pointer" onclick="openMesocycleDetail('+mesoIdx+')">Manage ›</div>'
     +'</div>'
-    +'<div style="background:var(--bg2);border-radius:var(--radius);padding:8px 10px;border:1px solid var(--border);box-shadow:var(--shadow)">'+rowsHtml+'</div></div>';
+    +'<div style="background:var(--bg2);border-radius:var(--radius);padding:8px 10px;border:1px solid var(--border);box-shadow:var(--shadow)">'+measurementsHtml+rowsHtml+'</div></div>';
 }
 
 function toggleMesoExList(id){
@@ -2346,7 +2377,18 @@ function renderMesocycles(){
 
     // Next up row
     let nextHtml='';
-    if(routineIds.length&&nextIdx!=null){
+    const measurementsPending=m.phase==='deload'&&m.measurementsPending;
+    if(measurementsPending){
+      nextHtml='<div class="meso-next-row">'
+        +'<div style="width:34px;height:34px;border-radius:9px;background:var(--accent)18;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:16px">📏</div>'
+        +'<div style="flex:1;min-width:0"><div style="font-size:10px;color:var(--accent);font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Up Next</div>'
+        +'<div style="font-weight:600;font-size:13px">Measurements</div></div>'
+        +'<div style="display:flex;gap:6px">'
+        +'<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();skipMesoMeasurements('+mi+')" style="color:var(--text3);font-size:11px">Skip</button>'
+        +'<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();startMesoMeasurements('+mi+')">&#9654; Start</button>'
+        +'</div>'
+        +'</div>';
+    }else if(routineIds.length&&nextIdx!=null){
       const nextRoutine=getRoutine(routineIds[nextIdx]);
       if(nextRoutine){
         const col=getRoutineColor(nextRoutine);
@@ -2613,6 +2655,9 @@ function enterDeloadPhase(m){
   // actual weight for the whole NEXT pass, not just this transition.
   m.trueFailureAnchor=getSmoothedRotationBaseline(m,m.rotationsPerMeso||1);
   m.phase='deload';
+  // Prompt a measurements check-in (weight, bicep, etc.) before the deload's first workout —
+  // shown in place of the next routine on home/mesocycles until the user starts or skips it.
+  m.measurementsPending=true;
   // Both deload methods perform the deload at the SAME weight/reps the next mesocycle pass
   // will resume at (per resetMode — e.g. a specific mid-pack rotation), not the heaviest,
   // closest-to-failure numbers from the pass that just finished. resetMode 'deload' has nothing
@@ -2863,7 +2908,7 @@ function saveNewMesocycle(){
     rirRampEnabled:true,rirEnd:0,rirStartCap:4,earlyDeloadDetection:'suggest',earlyDeloadDeclineCount:2,
     deloadMethod:'weight',deloadSetMode:'flat',deloadSetValue:1,deloadTargetRIR:4,slotRepRanges:{},
     rirRepTargetEnabled:false,trueFailureAnchor:{},
-    rotationsDone:0,repeatsDone:0,phase:'training',passWorkoutCount:0,rotationWorkoutCount:0,baselines:{},rotationBaselines:{},preDeloadBaselines:{},pendingResetBaseline:null});
+    rotationsDone:0,repeatsDone:0,phase:'training',passWorkoutCount:0,rotationWorkoutCount:0,baselines:{},rotationBaselines:{},preDeloadBaselines:{},pendingResetBaseline:null,measurementsPending:false});
   save();renderMesocycles();closeModal('modal-new-mesocycle');
 }
 
@@ -3110,6 +3155,16 @@ function openMesoReview(){
   body.innerHTML=html;
   openModal('modal-meso-review');
 }
+// Single-tap preview for a mesocycle sequence row — opens the tight gym-setup preview
+// (exercise order + equipment setup + Start), reached via routine ID (a meso slot) instead
+// of a state.routines index. Guarded against the Reps/remove buttons within the row, same
+// pattern as handleCardClick.
+function handleMesoRowClick(e,rid){
+  if(e.target.closest('button'))return;
+  const idx=state.routines.findIndex(r=>r.id===rid);
+  if(idx===-1)return;
+  openGymSetupPreview(idx);
+}
 function openMesocycleDetail(mi){
   viewingMesoIdx=mi;
   const m=state.mesocycles[mi];
@@ -3127,12 +3182,12 @@ function openMesocycleDetail(mi){
       if(!r)return'';
       const col=getRoutineColor(r);
       const muscat=getRoutineMuscleCategory(r);
-      const isNext=idx===nextIdx;
+      const isNext=idx===nextIdx&&!(m.phase==='deload'&&m.measurementsPending);
       const n=(r.exerciseIds||[]).length;
       const hasCustomReps=!!(m.slotRepRanges&&m.slotRepRanges[idx]&&Object.keys(m.slotRepRanges[idx]).length);
       const repsBadge=hasCustomReps?'<span class="tight-badge" style="background:rgba(var(--accent-rgb),0.13);color:var(--accent);margin-left:6px">CUSTOM REPS</span>':'';
       if(isNext){
-        return '<div data-meso-pos="'+idx+'" style="display:flex;align-items:center;gap:10px;background:linear-gradient(90deg,var(--accent)16,var(--accent)05);border:1px solid var(--accent)44;border-radius:14px;padding:14px;margin:6px 0">'
+        return '<div data-meso-pos="'+idx+'" onclick="handleMesoRowClick(event,\''+rid+'\')" style="cursor:pointer;display:flex;align-items:center;gap:10px;background:linear-gradient(90deg,var(--accent)16,var(--accent)05);border:1px solid var(--accent)44;border-radius:14px;padding:14px;margin:6px 0">'
           +'<div style="width:32px;height:32px;border-radius:10px;background:var(--accent);color:#0F1117;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;flex-shrink:0">'+(idx+1)+'</div>'
           +'<div style="width:38px;height:38px;border-radius:11px;background:'+col+'20;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+getCategoryIconSVG(muscat,18,col)+'</div>'
           +'<div style="flex:1;min-width:0">'
@@ -3144,7 +3199,7 @@ function openMesocycleDetail(mi){
           +'<button class="btn btn-danger btn-sm" onclick="removeRoutineFromMeso('+idx+')" style="padding:6px 10px;flex-shrink:0">&#10005;</button>'
           +'</div>';
       }
-      return '<div class="edit-ex-row" data-meso-pos="'+idx+'">'
+      return '<div class="edit-ex-row" data-meso-pos="'+idx+'" onclick="handleMesoRowClick(event,\''+rid+'\')" style="cursor:pointer">'
         +'<div style="width:24px;height:24px;border-radius:6px;background:var(--bg4);color:var(--text2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">'+(idx+1)+'</div>'
         +'<div style="width:28px;height:28px;border-radius:8px;background:'+col+'18;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+getCategoryIconSVG(muscat,14,col)+'</div>'
         +'<div style="flex:1"><div class="bold" style="font-size:13px">'+escHtml(r.name)+repsBadge+'</div><div class="small text2">'+n+' exercise'+(n!==1?'s':'')+'</div></div>'
@@ -3154,7 +3209,11 @@ function openMesocycleDetail(mi){
     }).join('');
     initMesoDragSort();
   }
-  document.getElementById('meso-start-btn').onclick=()=>{closeModal('modal-mesocycle-detail');startMesoRoutine(mi);};
+  document.getElementById('meso-start-btn').onclick=()=>{
+    closeModal('modal-mesocycle-detail');
+    if(m.phase==='deload'&&m.measurementsPending)startMesoMeasurements(mi);
+    else startMesoRoutine(mi);
+  };
   openModal('modal-mesocycle-detail');
 }
 
@@ -3344,6 +3403,27 @@ function skipMesoRoutine(mi){
   );
 }
 
+// Pre-deload measurements check-in — shown instead of the next routine while
+// m.measurementsPending is true. Doesn't touch currentPos/rotation state since it isn't a
+// real sequence slot; "Start" opens the measurements tracker, "Skip" just clears the prompt.
+function startMesoMeasurements(mi){
+  const m=state.mesocycles[mi];
+  if(!m)return;
+  m.measurementsPending=false;
+  save();
+  renderMesocycles();
+  renderRoutinesList();
+  openBWTracker();
+}
+function skipMesoMeasurements(mi){
+  const m=state.mesocycles[mi];
+  if(!m)return;
+  m.measurementsPending=false;
+  save();
+  renderMesocycles();
+  renderRoutinesList();
+}
+
 function activateMesocycle(mi){
   state.activeMesoId=state.mesocycles[mi].id;
   save();
@@ -3465,6 +3545,56 @@ function saveNewRoutine(){
   const name=document.getElementById('new-routine-name').value.trim();if(!name)return;
   state.routines.push({id:uid(),name,desc:document.getElementById('new-routine-desc').value.trim(),exerciseIds:[]});
   save();renderRoutinesList();closeModal('modal-new-routine');
+}
+// Tight gym-ready preview — exercises in order with equipment setup (machine, attachment,
+// cable position, bench back/seat), last weight used, and set count, plus a Start button.
+// Used wherever a routine is tapped from within a mesocycle sequence, so a single tap on a
+// meso row previews and lets you set up the gym instead of jumping straight into the workout.
+function openGymSetupPreview(i){
+  const r=state.routines[i];if(!r)return;
+  document.getElementById('gym-setup-title').textContent=r.name;
+  const ids=r.exerciseIds||[];
+  const body=document.getElementById('gym-setup-body');
+  if(!ids.length){
+    body.innerHTML='<div class="small text2" style="text-align:center;padding:16px 0">No exercises yet.</div>';
+  }else{
+    body.innerHTML=ids.map((id,idx)=>{
+      const ex=getExercise(id);if(!ex)return'';
+      const color=MUSCLE_COLORS[ex.muscle]||'#aaa';
+      let lastStr='',sc=3;
+      for(let h=state.history.length-1;h>=0;h--){
+        const f=state.history[h].exercises.find(e=>e.exId===id);
+        if(f){
+          const done=f.sets.filter(s=>s.done);
+          if(done.length){const isBW=ex.bw==='bw';lastStr=isBW?Math.max(...done.map(s=>s.reps||0))+' reps':Math.max(...done.map(s=>s.weight||0))+'kg';}
+          sc=done.length||3;
+          break;
+        }
+      }
+      const setupBits=[];
+      if(ex.machine)setupBits.push(ex.machine);
+      if(ex.attachment)setupBits.push(ex.attachment);
+      const s=ex.settings||{};
+      if(s.cablePosition)setupBits.push('Cable @'+s.cablePosition);
+      if(s.benchBack||s.benchSeat){
+        const bb=[];if(s.benchBack)bb.push('Back '+s.benchBack);if(s.benchSeat)bb.push('Seat '+s.benchSeat);
+        setupBits.push('Bench '+bb.join('/'));
+      }
+      const setupStr=setupBits.join(' · ');
+      return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">'
+        +'<div style="width:20px;text-align:center;font-size:11px;color:var(--text3);font-weight:700;flex-shrink:0">'+(idx+1)+'</div>'
+        +'<div style="flex:1;min-width:0">'
+        +'<div style="font-weight:700;font-size:13px;display:flex;align-items:center;gap:6px"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:'+color+';flex-shrink:0"></span>'+escHtml(ex.name)+'</div>'
+        +(setupStr?'<div class="small text2" style="margin-top:1px">'+escHtml(setupStr)+'</div>':'')
+        +'</div>'
+        +'<div style="text-align:right;flex-shrink:0">'
+        +(lastStr?'<div style="font-weight:700;font-size:13px">'+escHtml(lastStr)+'</div>':'')
+        +'<div class="small text3">'+sc+' set'+(sc!==1?'s':'')+'</div>'
+        +'</div></div>';
+    }).join('');
+  }
+  document.getElementById('gym-setup-start-btn').onclick=()=>{closeModal('modal-gym-setup');startRoutineWorkout(i);};
+  openModal('modal-gym-setup');
 }
 function openRoutineDetail(i){
   viewingRoutineIdx=i;const r=state.routines[i];
@@ -4973,11 +5103,18 @@ function confirmFinishWorkout(){
     return{exId:ex.exId,sets,supersetGroup:ex.supersetGroup,useRIR:!!ex.useRIR};
   });
 
-  const workout={id:uid(),name,date:new Date().toISOString(),
-    duration:Math.floor((Date.now()-activeWorkout.startTime)/1000),
-    notes:activeWorkout.notes||'',exercises:cleanExercises,
-    mesoId:activeMesoContext?state.mesocycles[activeMesoContext.mesoIdx]?.id:null};
-  state.history.unshift(workout);invalidatePRCache();
+  // Nothing actually performed (e.g. the workout was only opened to set up equipment, or purely
+  // to edit and save a routine) — don't log a phantom history entry or advance a mesocycle's
+  // rotation for a session where nothing was done. Routine edits below still save if chosen.
+  const anySetDone=cleanExercises.some(ex=>ex.sets.some(s=>s.done));
+
+  if(anySetDone){
+    const workout={id:uid(),name,date:new Date().toISOString(),
+      duration:Math.floor((Date.now()-activeWorkout.startTime)/1000),
+      notes:activeWorkout.notes||'',exercises:cleanExercises,
+      mesoId:activeMesoContext?state.mesocycles[activeMesoContext.mesoIdx]?.id:null};
+    state.history.unshift(workout);invalidatePRCache();
+  }
 
   const ids=activeWorkout.exercises.map(e=>e.exId);
   const supersetData=activeWorkout.exercises.map(e=>e.supersetGroup);
@@ -4997,8 +5134,9 @@ function confirmFinishWorkout(){
   }
 
   save();closeModal('modal-finish');
-  // Advance mesocycle progress if this workout was started from one
-  if(activeMesoContext){
+  // Advance mesocycle progress if this workout was started from one — only if something was
+  // actually logged; otherwise leave the rotation exactly where it was.
+  if(activeMesoContext&&anySetDone){
     const m=state.mesocycles[activeMesoContext.mesoIdx];
     if(m){
       const wasTrainingBefore=m.phase==='training';
@@ -5023,6 +5161,10 @@ function confirmFinishWorkout(){
         }
       }
     }
+    activeMesoContext=null;
+    save();
+  }else if(activeMesoContext){
+    // Nothing logged — clear the meso context without touching rotation/phase at all.
     activeMesoContext=null;
     save();
   }
