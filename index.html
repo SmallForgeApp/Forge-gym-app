@@ -521,7 +521,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost flex-1" onclick="exportHistory()">📤 Export CSV</button>
       <button class="btn btn-danger flex-1" onclick="resetAllData()">⚠️ Reset All</button>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3">FORGE build 2026-07-25.7</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3">FORGE build 2026-07-25.8</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -2201,7 +2201,6 @@ function renderActiveMesoHero(){
   const mesoIdx=state.mesocycles.indexOf(meso);
   const nextIdx=getNextMesoRoutineIndex(meso);
   const measurementsPending=meso.phase==='deload'&&meso.measurementsPending;
-  const rirBadge=formatMesoRIRBadge(meso);
   const measurementsHtml=measurementsPending
     ?'<div style="background:linear-gradient(90deg,var(--accent)18,var(--accent)05);border:1px solid var(--accent)44;border-radius:14px;padding:14px;margin:8px 0">'
       +'<div style="display:flex;align-items:center;gap:10px">'
@@ -2221,14 +2220,27 @@ function renderActiveMesoHero(){
   // routines just done wrapping around above it and the ones still to come below — rather
   // than always rendering in raw sequence order (which put Up Next at the bottom whenever it
   // happened to be the last slot in the sequence).
+  // Reel-style ordering: center the Up Next slot in the middle of the list, with the
+  // routines just done wrapping around above it and the ones still to come below — rather
+  // than always rendering in raw sequence order (which put Up Next at the bottom whenever it
+  // happened to be the last slot in the sequence). Each row also carries the rotation number
+  // its occurrence actually belongs to — rows that wrap past the end of the sequence (visually
+  // below Up Next) are previewing their NEXT time around, one rotation ahead, so they need the
+  // next rotation's RIR target, not the current one.
   const seqLen=meso.routineIds.length;
   const half=Math.floor((seqLen-1)/2);
+  const s0=(meso.rotationsDone||0)*seqLen+nextIdx; // absolute step of the Up Next occurrence
   const displayOrder=[];
-  for(let o=-half;o<=seqLen-1-half;o++)displayOrder.push(((nextIdx+o)%seqLen+seqLen)%seqLen);
+  for(let o=-half;o<=seqLen-1-half;o++){
+    const idx=((nextIdx+o)%seqLen+seqLen)%seqLen;
+    const rotNum=Math.max(1,Math.floor((s0+o)/seqLen)+1);
+    displayOrder.push({idx,rotNum});
+  }
 
-  const rowsHtml=displayOrder.map(idx=>{
+  const rowsHtml=displayOrder.map(({idx,rotNum})=>{
     const rid=meso.routineIds[idx];
     const r=getRoutine(rid);if(!r)return'';
+    const rirBadge=formatMesoRIRBadge(meso,rotNum);
     const col=getRoutineColor(r);const muscat=getRoutineMuscleCategory(r);
     const n=(r.exerciseIds||[]).length;const isNext=idx===nextIdx&&!measurementsPending;
     const exListId='mhex-'+mesoIdx+'-'+idx;
@@ -2769,7 +2781,7 @@ function getMesoSetAdjustments(m,exId){
 // instead of grinding at 0 RIR the whole mesocycle. Deload guidance (deloadTargetRIR) shows
 // regardless of whether the ramp itself is enabled, since it matters for the 'sets' deload
 // method too, not just the ramp feature.
-function getMesoTargetRIR(m){
+function getMesoTargetRIR(m,rotNumOverride){
   if(!m)return null;
   if(m.phase==='finished')return null;
   if(m.phase==='deload')return{deload:true,rir:m.deloadTargetRIR!=null?m.deloadTargetRIR:4};
@@ -2777,7 +2789,7 @@ function getMesoTargetRIR(m){
   const total=m.rotationsPerMeso||1;
   const end=m.rirEnd!=null?m.rirEnd:0;
   const cap=m.rirStartCap!=null?m.rirStartCap:4;
-  const rotNum=Math.min((m.rotationsDone||0)+1,total);
+  const rotNum=Math.min(rotNumOverride!=null?rotNumOverride:(m.rotationsDone||0)+1,total);
   const start=Math.min(cap,end+total-1);
   const rir=total<=1?end:Math.round(start+(end-start)*((rotNum-1)/(total-1)));
   return{rotNum,total,rir};
@@ -2789,9 +2801,11 @@ function formatMesoRIRNote(info){
 }
 // Compact badge version of the same target, for sitting right next to a routine's name in a
 // mesocycle sequence listing (home hero, mesocycles list, sequence editor) — same underlying
-// getMesoTargetRIR() value as the full note, just condensed to fit inline.
-function formatMesoRIRBadge(m){
-  const info=getMesoTargetRIR(m);
+// getMesoTargetRIR() value as the full note, just condensed to fit inline. rotNumOverride lets
+// a specific row (e.g. one wrapped into a future rotation in the home hero's reel view) show
+// the RIR that actually applies to IT rather than the mesocycle's current rotation.
+function formatMesoRIRBadge(m,rotNumOverride){
+  const info=getMesoTargetRIR(m,rotNumOverride);
   if(!info)return '';
   if(info.deload)return '<span class="tight-badge" style="background:#ff8c0022;color:#ff8c00;margin-left:6px">'+info.rir+'+ RIR</span>';
   return '<span class="tight-badge" style="background:rgba(var(--accent-rgb),0.13);color:var(--accent);margin-left:6px">'+info.rir+' RIR</span>';
