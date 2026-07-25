@@ -521,7 +521,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost flex-1" onclick="exportHistory()">📤 Export CSV</button>
       <button class="btn btn-danger flex-1" onclick="resetAllData()">⚠️ Reset All</button>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3">FORGE build 2026-07-25.6</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3">FORGE build 2026-07-25.7</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -2217,7 +2217,17 @@ function renderActiveMesoHero(){
       +'</div></div></div>'
     :'';
 
-  const rowsHtml=meso.routineIds.map((rid,idx)=>{
+  // Reel-style ordering: center the Up Next slot in the middle of the list, with the
+  // routines just done wrapping around above it and the ones still to come below — rather
+  // than always rendering in raw sequence order (which put Up Next at the bottom whenever it
+  // happened to be the last slot in the sequence).
+  const seqLen=meso.routineIds.length;
+  const half=Math.floor((seqLen-1)/2);
+  const displayOrder=[];
+  for(let o=-half;o<=seqLen-1-half;o++)displayOrder.push(((nextIdx+o)%seqLen+seqLen)%seqLen);
+
+  const rowsHtml=displayOrder.map(idx=>{
+    const rid=meso.routineIds[idx];
     const r=getRoutine(rid);if(!r)return'';
     const col=getRoutineColor(r);const muscat=getRoutineMuscleCategory(r);
     const n=(r.exerciseIds||[]).length;const isNext=idx===nextIdx&&!measurementsPending;
