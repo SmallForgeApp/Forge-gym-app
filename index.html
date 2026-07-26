@@ -521,7 +521,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost flex-1" onclick="exportHistory()">📤 Export CSV</button>
       <button class="btn btn-danger flex-1" onclick="resetAllData()">⚠️ Reset All</button>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3">FORGE build 2026-07-25.8</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3">FORGE build 2026-07-26.2</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -819,14 +819,24 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
         <span class="small text2" style="font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Chart</span>
         <select id="bw-metric-select" onchange="renderBWChart()" style="width:auto;padding:6px 10px;font-size:12px"></select>
       </div>
-      <div class="chart-wrap" style="height:120px"><canvas id="bw-canvas"></canvas></div>
+      <div class="chart-wrap" style="height:150px"><canvas id="bw-canvas"></canvas></div>
       <button class="btn btn-ghost btn-full" style="margin-top:14px" onclick="toggleMeasurementsForm()">📏 <span id="measurements-toggle-label">Add Body Measurements</span></button>
-      <div id="measurements-form" style="display:none;margin-top:10px">
-        <div class="small text2" style="margin-bottom:8px">All in cm — fill in whichever you're tracking today.</div>
-        <div id="measurements-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
-        <button class="btn btn-primary btn-full" style="margin-top:10px" onclick="saveMeasurements()">Save Measurements</button>
+      <div id="measurements-form" style="display:none;margin-top:12px">
+        <div class="small text2" style="margin-bottom:10px">All in cm — fill in whichever you're tracking today. Your last logged value shows underneath each field.</div>
+        <div class="small" style="font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text3);margin-bottom:6px">General</div>
+        <div id="measurements-grid-general" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px"></div>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <div class="small" style="flex:1;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text3)">Left</div>
+          <div class="small" style="flex:1;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text3)">Right</div>
+        </div>
+        <div id="measurements-grid-lr" style="display:flex;flex-direction:column;gap:14px"></div>
+        <button class="btn btn-primary btn-full" style="margin-top:16px" onclick="saveMeasurements()">Save Measurements</button>
       </div>
-      <div id="bw-list" style="margin-top:14px;max-height:180px;overflow-y:auto"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:20px;margin-bottom:6px">
+        <span class="small text2" style="font-weight:700;text-transform:uppercase;letter-spacing:0.5px">History</span>
+        <span class="small text3" id="bw-history-count"></span>
+      </div>
+      <div id="bw-list"></div>
     </div>
     <div class="modal-actions"><button class="btn btn-primary btn-full" onclick="closeModal('modal-bw')">Done</button></div>
   </div>
@@ -1187,6 +1197,7 @@ const CURRENT_SCHEMA_VERSION=2;
 let state={schemaVersion:CURRENT_SCHEMA_VERSION,exercises:[],routines:[],history:[],mesocycles:[],activeMesoId:null,equipment:null,barbellWeight:20,plates:{},warmupDone:{},bodyWeights:[],bodyMeasurements:[],exDbSort:'muscle',addExSort:'muscle',filterByEquip:true,addExFilterEquip:true,lightMode:false};
 let activeWorkout=null,workoutTimer=null,restTimer=null,restRemaining=0;
 let activeMesoContext=null;
+let mesoReelExpanded={}; // mesoIdx -> bool, ephemeral UI-only state for the home hero's reel expand/collapse (not persisted)
 let editingNoteExId=null,editingSetTypeInfo=null,pendingSetType=null,fromWorkout=false,editingExId=null,viewingRoutineIdx=null,libRowRegistry=[],exDbMuscleView=null,exDbMachineExpanded={},pickerDestination='workout';
 let progressExId=null,chartMetric='weight';
 
@@ -1335,6 +1346,7 @@ function load(){
     if(!m.pendingResetBaseline)m.pendingResetBaseline=null;
     if(m.measurementsPending==null)m.measurementsPending=false; // true right when entering deload — prompts a measurements check-in before the deload's first workout
     if(!m.skipLog)m.skipLog=[]; // {id,routineId,slotIndex,step,skippedAt} — revisitable until that slot comes up again
+    if(m.undoSkip===undefined)m.undoSkip=null; // one-shot full-undo snapshot for the single most recent skip
   });
   if(!state.customCatalogueFields)state.customCatalogueFields={};
   if(!state.homeEquipment)state.homeEquipment=[];
@@ -2216,10 +2228,18 @@ function renderActiveMesoHero(){
       +'</div></div></div>'
     :'';
 
-  // Reel-style ordering: center the Up Next slot in the middle of the list, with the
-  // routines just done wrapping around above it and the ones still to come below — rather
-  // than always rendering in raw sequence order (which put Up Next at the bottom whenever it
-  // happened to be the last slot in the sequence).
+  const undoSkipHtml=meso.undoSkip
+    ?(()=>{
+      const skipEntry=(meso.skipLog||[]).find(s=>s.id===meso.undoSkip.skipEntryId);
+      const undoneRoutine=getRoutine(skipEntry?skipEntry.routineId:(meso.routineIds||[])[meso.undoSkip.prevCurrentPos]);
+      const label=undoneRoutine?escHtml(undoneRoutine.name):'that routine';
+      return '<div style="display:flex;align-items:center;gap:8px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:8px 10px;margin:8px 0;font-size:12px">'
+        +'<span class="text2" style="flex:1;min-width:0">Skipped '+label+'</span>'
+        +'<button class="btn btn-ghost btn-sm" onclick="undoLastSkip('+mesoIdx+')" style="font-weight:700;color:var(--accent)">Undo</button>'
+        +'</div>';
+    })()
+    :'';
+
   // Reel-style ordering: center the Up Next slot in the middle of the list, with the
   // routines just done wrapping around above it and the ones still to come below — rather
   // than always rendering in raw sequence order (which put Up Next at the bottom whenever it
@@ -2236,8 +2256,24 @@ function renderActiveMesoHero(){
     const rotNum=Math.max(1,Math.floor((s0+o)/seqLen)+1);
     displayOrder.push({idx,rotNum});
   }
+  // For longer sequences, keep the reel tight by default — a couple of rows each side of Up
+  // Next — behind a "Show N more" toggle, rather than always rendering the whole lap. A row
+  // with a still-open Revisit is always forced visible regardless of the cap — hiding it would
+  // silently defeat the point of the catch-up window.
+  const REEL_CAP=2;
+  const isReelExpanded=!!mesoReelExpanded[mesoIdx];
+  let visibleOrder=displayOrder,hiddenCount=0;
+  if(!isReelExpanded&&displayOrder.length>REEL_CAP*2+1){
+    const startPos=Math.max(0,half-REEL_CAP),endPos=Math.min(displayOrder.length-1,half+REEL_CAP);
+    const keepPositions=new Set();
+    displayOrder.forEach((entry,p)=>{
+      if(p>=startPos&&p<=endPos||getValidSkipEntry(meso,entry.idx))keepPositions.add(p);
+    });
+    visibleOrder=Array.from(keepPositions).sort((a,b)=>a-b).map(p=>displayOrder[p]);
+    hiddenCount=displayOrder.length-visibleOrder.length;
+  }
 
-  const rowsHtml=displayOrder.map(({idx,rotNum})=>{
+  const rowsHtml=visibleOrder.map(({idx,rotNum})=>{
     const rid=meso.routineIds[idx];
     const r=getRoutine(rid);if(!r)return'';
     const rirBadge=formatMesoRIRBadge(meso,rotNum);
@@ -2254,7 +2290,7 @@ function renderActiveMesoHero(){
 
     if(isNext){
       const est=estimateRoutineTime(r.exerciseIds||[])||'—';
-      return '<div style="background:linear-gradient(90deg,var(--accent)18,var(--accent)05);border:1px solid var(--accent)44;border-radius:14px;padding:14px;margin:8px 0">'
+      return '<div style="background:linear-gradient(90deg,var(--accent)18,var(--accent)05);border:1px solid var(--accent)44;border-radius:14px;padding:14px;margin:8px 0;cursor:pointer" onclick="openGymSetupPreview('+state.routines.indexOf(r)+')">'
         +'<div style="display:flex;align-items:center;gap:10px">'
         +'<div style="width:32px;height:32px;border-radius:10px;background:var(--accent);color:#0F1117;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;flex-shrink:0">'+(idx+1)+'</div>'
         +'<div style="width:40px;height:40px;border-radius:12px;background:'+col+'20;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+getCategoryIconSVG(muscat,20,col)+'</div>'
@@ -2264,18 +2300,20 @@ function renderActiveMesoHero(){
         +'<div style="display:flex;align-items:center;gap:6px;margin-top:4px">'+showBtn+'<span class="small text2">'+est+'</span></div>'
         +'</div>'
         +'<div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0">'
-        +'<button class="btn btn-primary btn-sm" onclick="startMesoRoutine('+mesoIdx+')" style="font-weight:800">▶ Start</button>'
-        +'<button class="btn btn-ghost btn-sm" onclick="skipMesoRoutine('+mesoIdx+')" style="font-size:11px;color:var(--text3)">Skip</button>'
+        +'<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();startMesoRoutine('+mesoIdx+')" style="font-weight:800">▶ Start</button>'
+        +'<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();skipMesoRoutine('+mesoIdx+')" style="font-size:11px;color:var(--text3)">Skip</button>'
         +'</div></div>'
         +(exHtml?'<div id="'+exListId+'" style="display:none;margin-top:8px;padding-top:6px;border-top:1px solid var(--accent)33">'+exHtml+'</div>':'')
         +'</div>';
     }
     const skipEntry=!isNext?getValidSkipEntry(meso,idx):null;
     if(skipEntry){
+      const skipRotNum=Math.floor(skipEntry.step/seqLen)+1;
+      const skipRirBadge=formatMesoRIRBadge(meso,skipRotNum);
       return '<div style="display:flex;align-items:center;gap:8px;background:linear-gradient(90deg,#ff8c0014,transparent);border-bottom:1px solid var(--border);border-left:3px solid #ff8c00;padding:8px 4px 8px 7px">'
         +'<div style="width:19px;text-align:center;font-size:11px;color:#ff8c00;font-weight:700;flex-shrink:0">'+(idx+1)+'</div>'
         +'<div style="flex:1;min-width:0">'
-        +'<div class="tight-name">'+escHtml(r.name)+'</div>'
+        +'<div class="tight-name">'+escHtml(r.name)+skipRirBadge+'</div>'
         +'<div class="small" style="color:#ff8c00">Skipped — redo before it comes around again</div>'
         +'</div>'
         +'<button class="btn btn-primary btn-sm" onclick="startCatchUpSession('+mesoIdx+',\''+skipEntry.id+'\')" style="flex-shrink:0;font-weight:700">Revisit</button>'
@@ -2289,6 +2327,11 @@ function renderActiveMesoHero(){
       +'<span class="small text3" style="flex-shrink:0">'+n+' ex</span>'
       +'</div>';
   }).join('');
+  const reelToggleHtml=hiddenCount>0
+    ?'<div style="text-align:center;padding:6px 0"><button class="btn btn-ghost btn-sm" onclick="toggleMesoReelExpand('+mesoIdx+')" style="font-size:11px;color:var(--text3)">Show '+hiddenCount+' more ▾</button></div>'
+    :(isReelExpanded&&displayOrder.length>REEL_CAP*2+1
+      ?'<div style="text-align:center;padding:6px 0"><button class="btn btn-ghost btn-sm" onclick="toggleMesoReelExpand('+mesoIdx+')" style="font-size:11px;color:var(--text3)">Show less ▴</button></div>'
+      :'');
 
   const heroPhaseBadge=meso.phase==='deload'
     ?' <span class="tight-badge" style="background:#ff8c0022;color:#ff8c00">DELOAD</span>'
@@ -2298,9 +2341,13 @@ function renderActiveMesoHero(){
     +'<div style="font-size:11px;font-weight:700;letter-spacing:1.2px;color:var(--accent);text-transform:uppercase">'+escHtml(meso.name)+heroPhaseBadge+'</div>'
     +'<div style="font-size:11px;color:var(--text3);cursor:pointer" onclick="openMesocycleDetail('+mesoIdx+')">Manage ›</div>'
     +'</div>'
-    +'<div style="background:var(--bg2);border-radius:var(--radius);padding:8px 10px;border:1px solid var(--border);box-shadow:var(--shadow)">'+measurementsHtml+rowsHtml+'</div></div>';
+    +'<div style="background:var(--bg2);border-radius:var(--radius);padding:8px 10px;border:1px solid var(--border);box-shadow:var(--shadow)">'+measurementsHtml+undoSkipHtml+rowsHtml+reelToggleHtml+'</div></div>';
 }
 
+function toggleMesoReelExpand(mesoIdx){
+  mesoReelExpanded[mesoIdx]=!mesoReelExpanded[mesoIdx];
+  renderActiveMesoHero();
+}
 function toggleMesoExList(id){
   const el=document.getElementById(id);
   if(el)el.style.display=el.style.display==='none'||!el.style.display?'block':'none';
@@ -2409,6 +2456,22 @@ function renderMesocycles(){
       ?'<span class="tight-badge" style="background:#ff8c0022;color:#ff8c00;margin-left:6px">DELOAD</span>'
       :m.phase==='finished'?'<span class="tight-badge" style="background:#2ed57322;color:#2ed573;margin-left:6px">COMPLETE</span>':'';
 
+    // Revisit row — any still-open skip anywhere in the sequence, shown above Up Next
+    let revisitHtml='';
+    const openSkip=getAnyValidSkipEntry(m);
+    if(openSkip){
+      const skippedRoutine=getRoutine(openSkip.routineId);
+      if(skippedRoutine){
+        const skipRotNum=Math.floor(openSkip.step/(routineIds.length||1))+1;
+        revisitHtml='<div class="meso-next-row" style="border-left:3px solid #ff8c00;background:linear-gradient(90deg,#ff8c0014,transparent)">'
+          +'<div style="width:34px;height:34px;border-radius:9px;background:#ff8c0018;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#ff8c00;font-weight:700;font-size:15px">&#8635;</div>'
+          +'<div style="flex:1;min-width:0"><div style="font-size:10px;color:#ff8c00;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Skipped</div>'
+          +'<div style="font-weight:600;font-size:13px">'+escHtml(skippedRoutine.name)+formatMesoRIRBadge(m,skipRotNum)+'</div></div>'
+          +'<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();startCatchUpSession('+mi+',\''+openSkip.id+'\')">Revisit</button>'
+          +'</div>';
+      }
+    }
+
     // Next up row
     let nextHtml='';
     const measurementsPending=m.phase==='deload'&&m.measurementsPending;
@@ -2456,6 +2519,7 @@ function renderMesocycles(){
       +'</div>'
       +'<div class="meso-progress-track" style="margin-top:10px"><div class="meso-progress-fill" style="width:'+cyclesPct+'%"></div></div>'
       +statsHtml
+      +revisitHtml
       +nextHtml
       +'<div class="r-dropdown" id="mdrop-'+mi+'">'
       +(isActive
@@ -2533,6 +2597,10 @@ function advanceMesoProgress(m,loggedExercises){
   if(!m.rotationBaselines)m.rotationBaselines={};
   if(!m.preDeloadBaselines)m.preDeloadBaselines={};
   if(!m.skipLog)m.skipLog=[];
+  // Any further progress (a finished workout, or another skip) invalidates the previous skip's
+  // undo window — undo only ever applies to the single most recent skip, and only until
+  // something else happens to this mesocycle.
+  m.undoSkip=null;
 
   if(m.phase==='training'){
     const effectiveLogged=loggedOrHistoryFallback(loggedExercises,getRoutine(ids[m.currentPos]));
@@ -2695,6 +2763,10 @@ function enterDeloadPhase(m){
   // Prompt a measurements check-in (weight, bicep, etc.) before the deload's first workout —
   // shown in place of the next routine on home/mesocycles until the user starts or skips it.
   m.measurementsPending=true;
+  // Any still-open catch-up window belonged to the training phase that just ended — clear it
+  // rather than carry it into deload, where redoing it would apply deload-reduced weights to
+  // what was actually a full-intensity missed session.
+  m.skipLog=[];
   // Both deload methods perform the deload at the SAME weight/reps the next mesocycle pass
   // will resume at (per resetMode — e.g. a specific mid-pack rotation), not the heaviest,
   // closest-to-failure numbers from the pass that just finished. resetMode 'deload' has nothing
@@ -2827,6 +2899,18 @@ function getValidSkipEntry(m,slotIndex){
   const curStep=mesoLogicalStep(m);
   const matches=m.skipLog.filter(s=>s.slotIndex===slotIndex&&curStep<s.step+len);
   return matches.length?matches[matches.length-1]:null;
+}
+// Same check as getValidSkipEntry but across every slot, for views that show a single "Up
+// Next" summary rather than the full reel (Mesocycles-tab card, sequence editor) — surfaces
+// whichever still-open skip is most recent if more than one happens to be outstanding.
+function getAnyValidSkipEntry(m){
+  const len=(m.routineIds||[]).length;
+  let found=null;
+  for(let i=0;i<len;i++){
+    const e=getValidSkipEntry(m,i);
+    if(e&&(!found||e.step>found.step))found=e;
+  }
+  return found;
 }
 // Prior normal top sets for an exercise, searching from state.history[1] onward — used right
 // after the just-finished workout has already been unshifted onto state.history[0], so index 0
@@ -2974,7 +3058,7 @@ function saveNewMesocycle(){
     rirRampEnabled:true,rirEnd:0,rirStartCap:4,earlyDeloadDetection:'suggest',earlyDeloadDeclineCount:2,
     deloadMethod:'weight',deloadSetMode:'flat',deloadSetValue:1,deloadTargetRIR:4,slotRepRanges:{},
     rirRepTargetEnabled:false,trueFailureAnchor:{},
-    rotationsDone:0,repeatsDone:0,phase:'training',passWorkoutCount:0,rotationWorkoutCount:0,baselines:{},rotationBaselines:{},preDeloadBaselines:{},pendingResetBaseline:null,measurementsPending:false,skipLog:[]});
+    rotationsDone:0,repeatsDone:0,phase:'training',passWorkoutCount:0,rotationWorkoutCount:0,baselines:{},rotationBaselines:{},preDeloadBaselines:{},pendingResetBaseline:null,measurementsPending:false,skipLog:[],undoSkip:null});
   save();renderMesocycles();closeModal('modal-new-mesocycle');
 }
 
@@ -3253,6 +3337,9 @@ function openMesocycleDetail(mi){
       const n=(r.exerciseIds||[]).length;
       const hasCustomReps=!!(m.slotRepRanges&&m.slotRepRanges[idx]&&Object.keys(m.slotRepRanges[idx]).length);
       const repsBadge=hasCustomReps?'<span class="tight-badge" style="background:rgba(var(--accent-rgb),0.13);color:var(--accent);margin-left:6px">CUSTOM REPS</span>':'';
+      const skipEntry=!isNext?getValidSkipEntry(m,idx):null;
+      const revisitBtn=skipEntry?'<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();startCatchUpSession('+mi+',\''+skipEntry.id+'\')" style="padding:4px 8px;flex-shrink:0">Revisit</button>':'';
+      const skippedTag=skipEntry?'<div class="small" style="color:#ff8c00">Skipped — redo before it comes around again</div>':'';
       if(isNext){
         return '<div data-meso-pos="'+idx+'" onclick="handleMesoRowClick(event,\''+rid+'\')" style="cursor:pointer;display:flex;align-items:center;gap:10px;background:linear-gradient(90deg,var(--accent)16,var(--accent)05);border:1px solid var(--accent)44;border-radius:14px;padding:14px;margin:6px 0">'
           +'<div style="width:32px;height:32px;border-radius:10px;background:var(--accent);color:#0F1117;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;flex-shrink:0">'+(idx+1)+'</div>'
@@ -3266,12 +3353,13 @@ function openMesocycleDetail(mi){
           +'<button class="btn btn-danger btn-sm" onclick="removeRoutineFromMeso('+idx+')" style="padding:6px 10px;flex-shrink:0">&#10005;</button>'
           +'</div>';
       }
-      return '<div class="edit-ex-row" data-meso-pos="'+idx+'" onclick="handleMesoRowClick(event,\''+rid+'\')" style="cursor:pointer">'
+      return '<div class="edit-ex-row" data-meso-pos="'+idx+'" onclick="handleMesoRowClick(event,\''+rid+'\')" style="cursor:pointer'+(skipEntry?';border-left:3px solid #ff8c00;background:linear-gradient(90deg,#ff8c0014,transparent)':'')+'">'
         +'<div style="width:24px;height:24px;border-radius:6px;background:var(--bg4);color:var(--text2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">'+(idx+1)+'</div>'
         +'<div style="width:28px;height:28px;border-radius:8px;background:'+col+'18;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+getCategoryIconSVG(muscat,14,col)+'</div>'
-        +'<div style="flex:1"><div class="bold" style="font-size:13px">'+escHtml(r.name)+repsBadge+rirBadge+'</div><div class="small text2">'+n+' exercise'+(n!==1?'s':'')+'</div></div>'
-        +'<button class="btn btn-ghost btn-sm" onclick="openSlotRepRangeEditor('+idx+')" style="padding:4px 8px">Reps</button>'
-        +'<button class="btn btn-danger btn-sm" onclick="removeRoutineFromMeso('+idx+')" style="padding:4px 8px">&#10005;</button>'
+        +'<div style="flex:1"><div class="bold" style="font-size:13px">'+escHtml(r.name)+repsBadge+rirBadge+'</div><div class="small text2">'+n+' exercise'+(n!==1?'s':'')+'</div>'+skippedTag+'</div>'
+        +revisitBtn
+        +'<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openSlotRepRangeEditor('+idx+')" style="padding:4px 8px">Reps</button>'
+        +'<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();removeRoutineFromMeso('+idx+')" style="padding:4px 8px">&#10005;</button>'
         +'</div>';
     }).join('');
     initMesoDragSort();
@@ -3463,11 +3551,20 @@ function skipMesoRoutine(mi){
       const m=state.mesocycles[mi];
       if(!m)return;
       const ids=m.routineIds||[];
+      let skipEntryId=null;
+      const prevCurrentPos=m.currentPos,prevRotationsDone=m.rotationsDone,prevPhase=m.phase;
       if(ids.length&&m.currentPos!=null){
         if(!m.skipLog)m.skipLog=[];
-        m.skipLog.push({id:uid(),routineId:ids[m.currentPos],slotIndex:m.currentPos,step:mesoLogicalStep(m),skippedAt:new Date().toISOString()});
+        skipEntryId=uid();
+        m.skipLog.push({id:skipEntryId,routineId:ids[m.currentPos],slotIndex:m.currentPos,step:mesoLogicalStep(m),skippedAt:new Date().toISOString()});
       }
-      advanceMesoProgress(m,[]);
+      advanceMesoProgress(m,[]); // this also clears any undoSkip left over from a previous action
+      // Offer a one-shot "Undo" for THIS skip specifically — only when it stayed within the
+      // same phase; if it happened to trigger deload entry, that's already snapshotted
+      // baselines and cleared skipLog on its own, too intertwined to safely unwind here.
+      if(skipEntryId&&m.phase===prevPhase){
+        m.undoSkip={prevCurrentPos,prevRotationsDone,skipEntryId};
+      }
       save();
       renderMesocycles();
       renderRoutinesList();
@@ -3485,6 +3582,22 @@ function startCatchUpSession(mi,skipId){
   if(idx===-1){alert('That routine no longer exists. Remove it from the mesocycle and try again.');return;}
   activeMesoContext={mesoIdx:mi,routinePos:entry.slotIndex,catchUp:true,skipId:entry.id};
   startRoutineWorkout(idx);
+}
+// Fully reverses the single most recent Skip — restores currentPos/rotationsDone to what they
+// were before that skip, and removes the skip-log entry entirely (unlike Revisit, which logs
+// a real catch-up session, this pretends the skip never happened at all). Only offered for a
+// short window: it's cleared the moment any further progress happens (see advanceMesoProgress).
+function undoLastSkip(mi){
+  const m=state.mesocycles[mi];
+  if(!m||!m.undoSkip)return;
+  const u=m.undoSkip;
+  m.currentPos=u.prevCurrentPos;
+  m.rotationsDone=u.prevRotationsDone;
+  if(m.skipLog)m.skipLog=m.skipLog.filter(s=>s.id!==u.skipEntryId);
+  m.undoSkip=null;
+  save();
+  renderMesocycles();
+  renderRoutinesList();
 }
 
 // Pre-deload measurements check-in — shown instead of the next routine while
@@ -5228,6 +5341,7 @@ function confirmFinishWorkout(){
     if(anySetDone){
       const m=state.mesocycles[activeMesoContext.mesoIdx];
       if(m&&m.skipLog)m.skipLog=m.skipLog.filter(s=>s.id!==activeMesoContext.skipId);
+      if(m&&m.undoSkip&&m.undoSkip.skipEntryId===activeMesoContext.skipId)m.undoSkip=null;
     }
     activeMesoContext=null;
     save();
@@ -6071,7 +6185,25 @@ const MEASUREMENT_FIELDS=[
   {key:'calfL',label:'Calf L',unit:'cm'},
   {key:'calfR',label:'Calf R',unit:'cm'},
 ];
-function todayKey(){return new Date().toISOString().slice(0,10);}
+// Single-value fields (General section) vs explicit Left/Right pairs — kept apart so the
+// input grid can place L and R in fixed columns rather than however a generic 2-col grid
+// happens to flow an odd-length list (which used to split each pair across two rows).
+const MEASUREMENT_GENERAL_FIELDS=['neck','shoulders','chest','waist','hips'];
+const MEASUREMENT_LR_PAIRS=[
+  {label:'Bicep',l:'bicepL',r:'bicepR'},
+  {label:'Forearm',l:'forearmL',r:'forearmR'},
+  {label:'Thigh',l:'thighL',r:'thighR'},
+  {label:'Calf',l:'calfL',r:'calfR'},
+];
+// Local calendar-day key (YYYY-MM-DD) for a date — NOT toISOString().slice(0,10), which is
+// UTC and drifts a day off local midnight for anyone outside UTC. Used to match "today" (and
+// any stored entry's day) consistently against the device's actual local date.
+function localDateKey(dateInput){
+  const d=dateInput?new Date(dateInput):new Date();
+  if(isNaN(d.getTime()))return'';
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function todayKey(){return localDateKey(new Date());}
 function openBWTracker(){
   document.getElementById('bw-input').value='';
   document.getElementById('measurements-form').style.display='none';
@@ -6090,11 +6222,41 @@ function toggleMeasurementsForm(){
   form.style.display=open?'none':'block';
   document.getElementById('measurements-toggle-label').textContent=open?'Add Body Measurements':'Hide Measurements';
 }
+// Most recent logged value for a field, so today's inputs can show it as a point of
+// reference. excludeToday skips today's own (possibly already-saved) entry, so the hint
+// always reflects the last DIFFERENT day's check-in rather than echoing what's about to
+// be typed.
+function getLastMeasurementValue(key,excludeToday){
+  const entries=state.bodyMeasurements||[];
+  const todayK=todayKey();
+  for(const e of entries){
+    if(excludeToday&&localDateKey(e.date)===todayK)continue;
+    if(e[key]!=null)return e[key];
+  }
+  return null;
+}
 function renderMeasurementsGrid(){
-  const grid=document.getElementById('measurements-grid');
-  grid.innerHTML=MEASUREMENT_FIELDS.filter(f=>f.key!=='weight').map(f=>
-    '<input type="number" inputmode="decimal" id="meas-'+f.key+'" placeholder="'+f.label+' (cm)">'
-  ).join('');
+  const todayEntry=(state.bodyMeasurements||[]).find(m=>localDateKey(m.date)===todayKey());
+  const fieldInputHtml=(key,placeholder)=>{
+    const last=getLastMeasurementValue(key,true);
+    const todayVal=todayEntry&&todayEntry[key]!=null?todayEntry[key]:'';
+    return '<input type="number" inputmode="decimal" id="meas-'+key+'" placeholder="'+placeholder+'" value="'+todayVal+'">'
+      +(last!=null?'<div class="small text3" style="margin-top:3px;padding-left:2px">Last: '+last+' cm</div>':'');
+  };
+  document.getElementById('measurements-grid-general').innerHTML=
+    MEASUREMENT_GENERAL_FIELDS.map(key=>{
+      const f=MEASUREMENT_FIELDS.find(x=>x.key===key);
+      return '<div>'+fieldInputHtml(key,f.label+' (cm)')+'</div>';
+    }).join('');
+  document.getElementById('measurements-grid-lr').innerHTML=
+    MEASUREMENT_LR_PAIRS.map(pair=>
+      '<div>'
+      +'<div class="small text2" style="margin-bottom:4px">'+pair.label+'</div>'
+      +'<div style="display:flex;gap:10px">'
+      +'<div style="flex:1">'+fieldInputHtml(pair.l,'cm')+'</div>'
+      +'<div style="flex:1">'+fieldInputHtml(pair.r,'cm')+'</div>'
+      +'</div></div>'
+    ).join('');
 }
 function logBodyWeight(){
   const v=parseFloat(document.getElementById('bw-input').value);if(!v||v<0)return;
@@ -6112,7 +6274,7 @@ function saveMeasurements(){
   });
   if(!Object.keys(vals).length)return;
   upsertMeasurementEntry(vals);
-  MEASUREMENT_FIELDS.forEach(f=>{if(f.key!=='weight'){const el=document.getElementById('meas-'+f.key);if(el)el.value='';}});
+  renderMeasurementsGrid();
   renderBWList();renderBWChart();
 }
 // Merge new values into today's entry if one already exists, so logging weight in the morning
@@ -6120,7 +6282,7 @@ function saveMeasurements(){
 function upsertMeasurementEntry(vals){
   if(!state.bodyMeasurements)state.bodyMeasurements=[];
   const key=todayKey();
-  let entry=state.bodyMeasurements.find(m=>(m.date||'').slice(0,10)===key);
+  let entry=state.bodyMeasurements.find(m=>localDateKey(m.date)===key);
   if(!entry){entry={date:new Date().toISOString()};state.bodyMeasurements.unshift(entry);}
   Object.assign(entry,vals);
   state.bodyMeasurements.sort((a,b)=>new Date(b.date)-new Date(a.date));
@@ -6130,18 +6292,30 @@ function upsertMeasurementEntry(vals){
 function renderBWList(){
   const list=document.getElementById('bw-list');
   const entries=state.bodyMeasurements||[];
-  if(!entries.length){list.innerHTML='<div class="small text2" style="text-align:center;padding:10px 0">No entries yet</div>';return;}
-  list.innerHTML=entries.slice(0,10).map(e=>{
+  const countEl=document.getElementById('bw-history-count');
+  if(countEl)countEl.textContent=entries.length?entries.length+' entr'+(entries.length!==1?'ies':'y'):'';
+  if(!entries.length){list.innerHTML='<div class="small text2" style="text-align:center;padding:14px 0">No entries yet</div>';return;}
+  list.innerHTML=entries.map(e=>{
     const d=new Date(e.date);
     const otherChips=MEASUREMENT_FIELDS.filter(f=>f.key!=='weight'&&e[f.key]!=null).map(f=>f.label+' '+e[f.key]+f.unit).join(' · ');
-    return'<div class="bw-entry" style="flex-direction:column;align-items:flex-start;gap:2px">'
-      +'<div style="display:flex;justify-content:space-between;width:100%">'
-      +'<span class="small text2">'+d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})+'</span>'
+    return'<div class="bw-entry" style="flex-direction:column;align-items:flex-start;gap:3px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;width:100%">'
+      +'<span class="small text2" style="font-weight:600">'+d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})+'</span>'
+      +'<div style="display:flex;align-items:center;gap:10px">'
       +(e.weight!=null?'<span class="bold mono" style="color:var(--accent2)">'+e.weight+' kg</span>':'')
-      +'</div>'
+      +'<button onclick="deleteMeasurementEntry(\''+e.date+'\')" style="background:transparent;border:none;color:var(--text3);font-size:15px;line-height:1;cursor:pointer;padding:2px 4px" aria-label="Delete entry">&#10005;</button>'
+      +'</div></div>'
       +(otherChips?'<span class="small text2">'+escHtml(otherChips)+'</span>':'')
       +'</div>';
   }).join('');
+}
+function deleteMeasurementEntry(dateStr){
+  forgeConfirm('Delete Entry?','This removes the measurements logged on this date. This can\'t be undone.',()=>{
+    state.bodyMeasurements=(state.bodyMeasurements||[]).filter(m=>m.date!==dateStr);
+    save();
+    renderMeasurementsGrid();
+    renderBWList();renderBWChart();
+  });
 }
 function renderBWChart(){
   const canvas=document.getElementById('bw-canvas');if(!canvas)return;
