@@ -521,7 +521,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost flex-1" onclick="exportHistory()">📤 Export CSV</button>
       <button class="btn btn-danger flex-1" onclick="resetAllData()">⚠️ Reset All</button>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3">FORGE build 2026-07-26.2</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3">FORGE build 2026-07-26.3</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -2041,7 +2041,13 @@ renderRoutinesList();renderExerciseDB();renderHistory();renderReview();
 
 // ── ROUTINES ──
 function daysAgo(dateStr){
-  const d=Math.floor((Date.now()-new Date(dateStr))/(864e5));
+  // Calendar-day difference, not a rolling 24h window — a workout at 11pm checked at 6am the
+  // next morning is only 7 hours apart but IS a different calendar day, and should say
+  // "Yesterday" rather than "Today".
+  const now=new Date(),then=new Date(dateStr);
+  const startOfNow=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+  const startOfThen=new Date(then.getFullYear(),then.getMonth(),then.getDate());
+  const d=Math.round((startOfNow-startOfThen)/864e5);
   if(d===0)return'Today';if(d===1)return'Yesterday';if(d<7)return d+'d ago';if(d<30)return Math.floor(d/7)+'w ago';return Math.floor(d/30)+'mo ago';
 }
 
