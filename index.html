@@ -220,10 +220,6 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .chart-tabs{display:flex;gap:6px;margin-bottom:10px;}
 .chart-tab{padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;border:1px solid var(--border);background:var(--bg4);cursor:pointer;transition:all 0.15s;}
 .chart-tab.active{background:var(--accent);color:#0a0a0f;border-color:var(--accent);}
-.plate-result{font-family:'DM Mono',monospace;font-size:30px;font-weight:500;color:var(--accent);text-align:center;padding:14px 0 6px;}
-.plate-row{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border);}
-.plate-row:last-child{border-bottom:none;}
-.plate-circle{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;border:2px solid;}
 .warmup-item{display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--border);}
 .warmup-item:last-child{border-bottom:none;}
 .warmup-check{width:24px;height:24px;border-radius:7px;border:2px solid var(--border);background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s;color:transparent;font-size:12px;flex-shrink:0;}
@@ -303,9 +299,6 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     </div>
     <div class="home-sec" id="home-sec-startEmpty" data-home-key="startEmpty" style="padding:12px 16px 8px;">
       <button class="btn btn-ghost btn-full" onclick="startEmptyWorkout()" style="border-style:dashed;font-size:13px;border-radius:var(--radius);">⚡ Start Empty Workout</button>
-    </div>
-    <div class="home-sec" id="home-sec-quickAccess" data-home-key="quickAccess" style="padding:0 16px 8px;">
-      <button class="btn btn-ghost btn-full" onclick="openPlateCalc()" style="border-style:dashed;font-size:13px;border-radius:var(--radius);">🏋️ Plate Calculator</button>
     </div>
     <div class="home-sec" id="home-sec-chart" data-home-key="chart">
       <div class="sec-hdr"><span class="sec-hdr-title">Weekly Consistency</span></div>
@@ -521,7 +514,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-27.2</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-27.4</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -794,18 +787,6 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost flex-1" onclick="closeModal('modal-history-detail')">Close</button>
       <button class="btn btn-danger flex-1" id="history-delete-btn">Delete</button>
     </div>
-  </div>
-</div>
-<div class="modal-overlay" id="modal-plate-calc">
-  <div class="modal"><div class="modal-handle"></div><div class="modal-title">Plate Calculator</div>
-    <div class="modal-body">
-      <div class="input-label">Target Weight (kg)</div>
-      <input type="number" id="plate-target" inputmode="decimal" placeholder="e.g. 100" oninput="calcPlates()"/>
-      <div class="plate-result" id="plate-result">—</div>
-      <div id="plate-breakdown"></div>
-      <div class="small text3 mt8" id="plate-barbell-note"></div>
-    </div>
-    <div class="modal-actions"><button class="btn btn-primary btn-full" onclick="closeModal('modal-plate-calc')">Done</button></div>
   </div>
 </div>
 <!-- MEASUREMENTS TAB -->
@@ -1359,7 +1340,7 @@ function load(){
   if(!state.equipmentFilterMode)state.equipmentFilterMode='all';
   if(!state.progressionIncrements)state.progressionIncrements={Dumbbell:2,Cable:5,Other:2.5};
   if(!state.weeklyWorkoutTarget)state.weeklyWorkoutTarget=4;
-  if(!state.homeLayout)state.homeLayout=['meso','startEmpty','quickAccess','chart'];
+  if(!state.homeLayout)state.homeLayout=['meso','startEmpty','chart'];
   if(state.activeMesoId===undefined)state.activeMesoId=null;
   if(state.lightMode)document.body.classList.add('light-mode');
   save();
@@ -1424,13 +1405,16 @@ function getExercise(id){return state.exercises.find(e=>e.id===id);}
 function getRoutine(id){return state.routines.find(r=>r.id===id);}
 function getPR(exId){
   if(prCache[exId])return prCache[exId];
+  const isUni=!!(getExercise(exId)||{}).uni;
+  const repsOf=s=>isUni?Math.min(s.repsL||0,s.repsR||0):(s.reps||0);
   let bw=0,br=0,bo=0;
   state.history.forEach(w=>w.exercises.forEach(ex=>{
     if(ex.exId!==exId)return;
     ex.sets.filter(s=>s.done&&s.type!=='partials').forEach(s=>{
       if((s.weight||0)>bw)bw=s.weight||0;
-      if((s.reps||0)>br)br=s.reps||0;
-      const o=calcORM(s.weight||0,s.reps||0);if(o>bo)bo=o;
+      const r=repsOf(s);
+      if(r>br)br=r;
+      const o=calcORM(s.weight||0,r);if(o>bo)bo=o;
     });
   }));
   const pr={weight:bw,reps:br,orm:bo};
@@ -2383,9 +2367,9 @@ function toggleMesoExList(id){
 }
 
 
-const HOME_SECTION_LABELS={meso:'Active Cycle',startEmpty:'Start Empty Workout',quickAccess:'Plate Calculator',chart:'Weekly Consistency'};
+const HOME_SECTION_LABELS={meso:'Active Cycle',startEmpty:'Start Empty Workout',chart:'Weekly Consistency'};
 function applyHomeLayout(){
-  const order=state.homeLayout||['meso','startEmpty','quickAccess','chart'];
+  const order=state.homeLayout||['meso','startEmpty','chart'];
   order.forEach((key,i)=>{
     const el=document.getElementById('home-sec-'+key);
     if(el)el.style.order=i;
@@ -2395,7 +2379,7 @@ function applyHomeLayout(){
 function initHomeDragSort(){
   const container=document.getElementById('home-scroll');
   initLongPressDragSort(container,'.home-sec','data-home-key',null,(fromKey,toKey)=>{
-    const order=(state.homeLayout||['meso','startEmpty','quickAccess','chart']).slice();
+    const order=(state.homeLayout||['meso','startEmpty','chart']).slice();
     const fromIdx=order.indexOf(fromKey),toIdx=order.indexOf(toKey);
     if(fromIdx>-1&&toIdx>-1){
       const moved=order.splice(fromIdx,1)[0];
@@ -3274,16 +3258,17 @@ function getMesoReviewData(m){
       const normalSets=(ex.sets||[]).filter(s=>s.done&&(!s.type||s.type==='normal'));
       if(!normalSets.length)return;
       const top=normalSets[0];
-      if(!exerciseData[ex.exId])exerciseData[ex.exId]={name:exData.name,muscle:exData.muscle||'Other',sessions:[]};
-      exerciseData[ex.exId].sessions.push({date:w.date,weight:top.weight,reps:top.reps});
+      if(!exerciseData[ex.exId])exerciseData[ex.exId]={name:exData.name,muscle:exData.muscle||'Other',isUni:!!exData.uni,sessions:[]};
+      exerciseData[ex.exId].sessions.push({date:w.date,weight:top.weight,reps:top.reps,repsL:top.repsL,repsR:top.repsR});
     });
   });
   const exerciseSummaries=Object.keys(exerciseData).map(exId=>{
     const d=exerciseData[exId];
     const first=d.sessions[0],last=d.sessions[d.sessions.length-1];
     const delta=(last.weight||0)-(first.weight||0);
-    return{exId,name:d.name,muscle:d.muscle,sessionCount:d.sessions.length,
-      firstWeight:first.weight,firstReps:first.reps,lastWeight:last.weight,lastReps:last.reps,delta};
+    return{exId,name:d.name,muscle:d.muscle,isUni:d.isUni,sessionCount:d.sessions.length,
+      firstWeight:first.weight,firstReps:first.reps,firstRepsL:first.repsL,firstRepsR:first.repsR,
+      lastWeight:last.weight,lastReps:last.reps,lastRepsL:last.repsL,lastRepsR:last.repsR,delta};
   }).sort((a,b)=>a.muscle.localeCompare(b.muscle)||a.name.localeCompare(b.name));
   const muscleSummaries={};
   exerciseSummaries.forEach(s=>{
@@ -3328,7 +3313,7 @@ function openMesoReview(){
     html+='<div style="padding:6px 0;border-bottom:1px solid var(--border)">'
       +'<div style="display:flex;justify-content:space-between"><span class="bold" style="font-size:13px">'+escHtml(s.name)+'</span>'
       +'<span class="small" style="color:'+col+'">'+arrow+' '+deltaStr+'</span></div>'
-      +'<div class="small text3">'+s.firstWeight+'kg×'+s.firstReps+' → '+s.lastWeight+'kg×'+s.lastReps+' across '+s.sessionCount+' session'+(s.sessionCount!==1?'s':'')+'</div>'
+      +'<div class="small text3">'+s.firstWeight+'kg×'+(s.isUni?(s.firstRepsL||0)+'/'+(s.firstRepsR||0):s.firstReps)+' → '+s.lastWeight+'kg×'+(s.isUni?(s.lastRepsL||0)+'/'+(s.lastRepsR||0):s.lastReps)+' across '+s.sessionCount+' session'+(s.sessionCount!==1?'s':'')+'</div>'
       +'</div>';
   });
   body.innerHTML=html;
@@ -3792,7 +3777,7 @@ function openGymSetupPreview(i){
         const f=state.history[h].exercises.find(e=>e.exId===id);
         if(f){
           const done=f.sets.filter(s=>s.done);
-          if(done.length){const isBW=ex.bw==='bw';lastStr=isBW?Math.max(...done.map(s=>s.reps||0))+' reps':Math.max(...done.map(s=>s.weight||0))+'kg';}
+          if(done.length){const isBW=ex.bw==='bw';const isUniP=!!ex.uni;lastStr=isBW?Math.max(...done.map(s=>isUniP?Math.min(s.repsL||0,s.repsR||0):(s.reps||0)))+' reps':Math.max(...done.map(s=>s.weight||0))+'kg';}
           sc=done.length||3;
           break;
         }
@@ -3853,7 +3838,7 @@ function openRoutineDetail(i){
       let lastStr='';
       for(let h=state.history.length-1;h>=0;h--){
         const f=state.history[h].exercises.find(e=>e.exId===id);
-        if(f){const done=f.sets.filter(s=>s.done);if(done.length){const isBW=ex.bw==='bw';lastStr=isBW?Math.max(...done.map(s=>s.reps||0))+' reps':Math.max(...done.map(s=>s.weight||0))+'kg';}break;}
+        if(f){const done=f.sets.filter(s=>s.done);if(done.length){const isBW=ex.bw==='bw';const isUniP=!!ex.uni;lastStr=isBW?Math.max(...done.map(s=>isUniP?Math.min(s.repsL||0,s.repsR||0):(s.reps||0)))+' reps':Math.max(...done.map(s=>s.weight||0))+'kg';}break;}
       }
       const pr=getPR(id);
       return'<div class="rd-ex-row">'
@@ -4050,7 +4035,9 @@ function checkMissedRepRange(exId,repRange){
   if(!repRange||!repRange.min)return null;
   const sessions=getSessionsForExercise(exId,2);
   if(sessions.length<2)return null;
-  const missed=sessions.map(sets=>sets.every(s=>(s.reps||0)<repRange.min));
+  const isUni=!!(getExercise(exId)||{}).uni;
+  const repsOf=s=>isUni?Math.min(s.repsL||0,s.repsR||0):(s.reps||0);
+  const missed=sessions.map(sets=>sets.every(s=>repsOf(s)<repRange.min));
   if(missed[0]&&missed[1]){
     return 'Missed the bottom of your rep range ('+repRange.min+'+) the last 2 sessions \u2014 consider holding this weight or backing off slightly.';
   }
@@ -4164,9 +4151,15 @@ function suggestNextLoad(exId,workoutEx){
   const sets=getLastSets(exId); // each set carries the mode it was actually logged under
   if(!sets||!sets.length)return null;
   const last=sets[sets.length-1];
-  if(!last||(!last.weight&&!last.reps))return null;
+  if(!last||(!last.weight&&!last.reps&&!last.repsL&&!last.repsR))return null;
   const exData=getExercise(exId)||{};
-  const w=last.weight||0,r=last.reps||0;
+  const isUni=!!exData.uni;
+  const w=last.weight||0;
+  // Unilateral sets store reps as the L+R sum (for volume/history purposes) — using that
+  // directly against a per-side rep-range target inflates the count and wrongly suggests
+  // increasing weight. Progress off the weaker side instead, same as getSetTarget/comparePerf.
+  const r=isUni?Math.min(last.repsL||0,last.repsR||0):(last.reps||0);
+  const rDisplay=isUni?((last.repsL||0)+'/'+(last.repsR||0)):String(r);
   const useRIR=!!last.useRIR;
   const raw=last.rpe;
   // Normalize to an RPE-equivalent scale internally regardless of which the person tracks
@@ -4192,7 +4185,7 @@ function suggestNextLoad(exId,workoutEx){
   }else{
     tip=inc?('Try '+(Math.round((w+inc/2)*100)/100)+'kg \u00d7 '+r+', or '+w+'kg \u00d7 '+(r+1)):('Try '+(r+1)+' reps');
   }
-  return {text:tip,w,r,effortLbl};
+  return {text:tip,w,r:rDisplay,effortLbl};
 }
 function buildExerciseCard(exIdx){
   const ex=activeWorkout.exercises[exIdx];
@@ -4241,8 +4234,8 @@ function renderSets(exIdx){
   tbody.innerHTML='';
   ex.sets.forEach((set,setIdx)=>{
     const tr=document.createElement('tr');
-    const totalReps=isUni?(set.repsL||0)+(set.repsR||0):(set.reps||0);
-    const isPR=set.done&&set.weight>0&&checkSetForPR(ex.exId,set.weight||0,totalReps);
+    const prCheckReps=isUni?Math.min(set.repsL||0,set.repsR||0):(set.reps||0);
+    const isPR=set.done&&set.weight>0&&checkSetForPR(ex.exId,set.weight||0,prCheckReps);
     tr.className='set-row'+(set.done?' completed':'')+(isPR?' pr-row':'');
     tr.id='set-row-'+exIdx+'-'+setIdx;
     const t=SET_TYPES.find(x=>x.id===set.type)||SET_TYPES[0];
@@ -4406,7 +4399,8 @@ function toggleSetDone(exIdx,setIdx){
     }
     // PR check
     const exId=activeWorkout.exercises[exIdx].exId;
-    if(set.weight>0&&checkSetForPR(exId,set.weight||0,set.reps||0)){
+    const prCheckReps=isUni2?Math.min(set.repsL||0,set.repsR||0):(set.reps||0);
+    if(set.weight>0&&checkSetForPR(exId,set.weight||0,prCheckReps)){
       showPRToast(getExercise(exId)?.name||'Exercise');
       row.classList.add('pr-row');
     }
@@ -5225,15 +5219,21 @@ function renderProgressChart(){
   const wrap=canvas.parentElement;
   canvas.width=wrap.clientWidth||300;canvas.height=wrap.clientHeight||160;
   ctx.clearRect(0,0,canvas.width,canvas.height);
+  const isUniChart=!!(getExercise(progressExId)||{}).uni;
+  // For 'reps'/'orm' a unilateral set's weaker side is the meaningful per-attempt rep count —
+  // set.reps is the L+R sum (correct for 'volume', which genuinely is total work across both
+  // sides, but wrong here: calcORM expects one real attempt's reps, and a doubled count roughly
+  // doubles the estimated 1RM).
+  const repsOf=s=>isUniChart?Math.min(s.repsL||0,s.repsR||0):(s.reps||0);
   const points=[];
   state.history.slice().reverse().forEach(w=>{
     const found=w.exercises.find(e=>e.exId===progressExId);if(!found)return;
     const done=found.sets.filter(s=>s.done);if(!done.length)return;
     let val=0;
     if(chartMetric==='weight')val=Math.max(...done.map(s=>s.weight||0));
-    else if(chartMetric==='reps')val=Math.max(...done.map(s=>s.reps||0));
+    else if(chartMetric==='reps')val=Math.max(...done.map(s=>repsOf(s)));
     else if(chartMetric==='volume')val=done.reduce((a,s)=>a+(s.weight||0)*(s.reps||0),0);
-    else val=Math.max(...done.map(s=>calcORM(s.weight||0,s.reps||0)));
+    else val=Math.max(...done.map(s=>calcORM(s.weight||0,repsOf(s))));
     if(val>0)points.push({date:new Date(w.date),val,label:new Date(w.date).toLocaleDateString('en-GB',{day:'numeric',month:'short'})});
   });
   const statsEl=document.getElementById('progress-stats');
@@ -5280,7 +5280,7 @@ function renderProgressChart(){
     +'<div class="week-stat" style="flex:1"><div class="week-stat-val">'+points.length+'</div><div class="week-stat-lbl">Sessions</div></div></div>';
   let latestSets=[];
   for(let i=state.history.length-1;i>=0;i--){const f=state.history[i].exercises.find(e=>e.exId===progressExId);if(f){latestSets=f.sets.filter(s=>s.done);break;}}
-  ormEl.innerHTML=latestSets.length?latestSets.map((s,i)=>'<div class="orm-row"><span>Set '+(i+1)+': '+(s.weight||'BW')+'kg x '+s.reps+' reps</span><span style="color:var(--accent);font-family:monospace">~'+calcORM(s.weight||0,s.reps||0)+'kg</span></div>').join(''):'<div class="small text2">No recent data</div>';
+  ormEl.innerHTML=latestSets.length?latestSets.map((s,i)=>'<div class="orm-row"><span>Set '+(i+1)+': '+(s.weight||'BW')+'kg x '+(isUniChart?(s.repsL||0)+'/'+(s.repsR||0):s.reps)+' reps</span><span style="color:var(--accent);font-family:monospace">~'+calcORM(s.weight||0,repsOf(s))+'kg</span></div>').join(''):'<div class="small text2">No recent data</div>';
 }
 
 // ── FINISH WORKOUT ──
@@ -5466,7 +5466,8 @@ function buildLibraryExName(baseName,uni,modifier){
 function renderExRow(r,muscle,list){
   const allSets=r.matchingEx.flatMap(e=>getLastSets(e.id));
   const lastSet=allSets[allSets.length-1];
-  const lastStr=lastSet?(lastSet.weight?(lastSet.weight+'kg \xd7'+(lastSet.reps||0)):(lastSet.reps||0)+'r'):'';
+  const isUniRow=r.matchingEx.length===1&&!!r.matchingEx[0].uni;
+  const lastStr=lastSet?(lastSet.weight?(lastSet.weight+'kg \xd7'+(isUniRow?(lastSet.repsL||0)+'/'+(lastSet.repsR||0):(lastSet.reps||0))):(isUniRow?(lastSet.repsL||0)+'/'+(lastSet.repsR||0):(lastSet.reps||0))+'r'):'';
   const uses=r.uses!==undefined?r.uses:r.matchingEx.reduce((n,e)=>n+state.history.reduce((nn,w)=>nn+(w.exercises||[]).filter(x=>x.exId===e.id).length,0),0);
   const equipStr=r.def&&r.def.equipment?r.def.equipment.slice(0,3).join(' / '):(r.matchingEx[0]&&r.matchingEx[0].machine?r.matchingEx[0].machine:'');
 
@@ -5863,7 +5864,8 @@ function openHistoryDetail(id){
       if(s.done){
         const t=SET_TYPES.find(x=>x.id===s.type)||SET_TYPES[0];
         const rpe=s.rpe!=null?'<span style="color:var(--orange)"> · '+(useRIR?'RIR ':'RPE ')+s.rpe+'</span>':'';
-        html+='<div class="small text2" style="padding:3px 0">Set '+(i+1)+' <span class="badge '+t.badgeClass+'">'+t.label+'</span> — '+(s.weight||'BW')+'kg x '+s.reps+' reps'+rpe+'</div>';
+        const isUniH=!!(exData&&exData.uni);
+        html+='<div class="small text2" style="padding:3px 0">Set '+(i+1)+' <span class="badge '+t.badgeClass+'">'+t.label+'</span> — '+(s.weight||'BW')+'kg x '+(isUniH?(s.repsL||0)+'/'+(s.repsR||0):s.reps)+' reps'+rpe+'</div>';
         if(s.rpe!=null)allEff.push(useRIR?(10-s.rpe):s.rpe);
       }
     });
@@ -5953,32 +5955,6 @@ function renderReview(){
 }
 
 // ── PLATE CALC ──
-function openPlateCalc(){
-  document.getElementById('plate-target').value='';
-  document.getElementById('plate-result').textContent='—';document.getElementById('plate-result').style.color='var(--accent)';
-  document.getElementById('plate-breakdown').innerHTML='';
-  document.getElementById('plate-barbell-note').textContent='Bar: '+(state.barbellWeight||20)+'kg';
-  openModal('modal-plate-calc');
-}
-function calcPlates(){
-  const target=parseFloat(document.getElementById('plate-target').value)||0;
-  const bar=state.barbellWeight||20;
-  const res=document.getElementById('plate-result');const bd=document.getElementById('plate-breakdown');
-  if(!target||target<=bar){res.textContent=target?'Too light for bar':'—';bd.innerHTML='';return;}
-  const perSide=(target-bar)/2;
-  const avail=Object.entries(state.plates).filter(([kg,c])=>parseInt(c)>0).map(([kg,c])=>({kg:parseFloat(kg),count:parseInt(c)})).sort((a,b)=>b.kg-a.kg);
-  let rem=perSide;const used=[];
-  avail.forEach(p=>{const n=Math.min(Math.floor(rem/p.kg),Math.floor(p.count/2));if(n>0){used.push({kg:p.kg,count:n});rem-=n*p.kg;}});
-  rem=Math.round(rem*1000)/1000;
-  const achieved=bar+(perSide-rem)*2;
-  res.textContent=rem<0.01?target+'kg':'~'+achieved.toFixed(1)+'kg';
-  res.style.color=rem<0.01?'var(--accent)':'var(--orange)';
-  const PC={25:'#ff4757',20:'#ff8c00',15:'#e8ff47',10:'#2ed573',5:'#47c8ff',2.5:'#cc44ff',1.25:'#aaaaaa',0.75:'#8e8e93',0.5:'#6c7a89',0.25:'#4a5568'};
-  bd.innerHTML='<div class="small text2" style="text-align:center;margin-bottom:10px">Each side of the bar</div>'
-    +used.map(p=>'<div class="plate-row"><div style="display:flex;align-items:center;gap:10px"><div class="plate-circle" style="color:'+(PC[p.kg]||'#aaa')+';border-color:'+(PC[p.kg]||'#aaa')+';background:'+(PC[p.kg]||'#aaa')+'22">'+p.kg+'</div><span class="bold">'+p.kg+'kg</span></div><span class="mono bold" style="color:var(--accent)">x '+p.count+'</span></div>').join('')
-    +(rem>=0.01?'<div class="small" style="color:var(--red);margin-top:7px">Short by '+rem.toFixed(2)+'kg per side</div>':'');
-}
-
 // ── SETTINGS ──
 function saveBarbellWeight(v){const n=parseFloat(v);state.barbellWeight=(isNaN(n)||n<=0)?state.barbellWeight||20:n;save();}
 function buildPlateInventoryUI(){
