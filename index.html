@@ -70,6 +70,7 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .badge-dropset{background:#ff475722;color:var(--red);border:1px solid #ff475744;}.badge-myo{background:#47c8ff22;color:var(--accent2);border:1px solid #47c8ff44;}
 .badge-failure{background:#ff003322;color:#ff3366;border:1px solid #ff336644;}.badge-feeder{background:#88ff4422;color:#88ff44;border:1px solid #88ff4444;}
 .badge-back{background:#cc44ff22;color:#cc44ff;border:1px solid #cc44ff44;}.badge-1rm{background:rgba(var(--accent-rgb),0.13);color:var(--accent);border:1px solid rgba(var(--accent-rgb),0.27);}
+.badge-partials{background:#ff4d9422;color:#ff4d94;border:1px solid #ff4d9444;}
 .equip-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 16px;}
 .equip-item{background:var(--bg3);border:2px solid var(--border);border-radius:var(--radius);padding:12px;cursor:pointer;transition:all 0.15s;text-align:center;}
 .equip-item.selected{border-color:var(--accent);background:rgba(var(--accent-rgb),0.07);}.equip-item:active{transform:scale(0.97);}
@@ -127,11 +128,6 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .stat-val{font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:1px;color:var(--accent);}
 .stat-lbl{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin-top:2px;line-height:1.3;}
 /* QUICK START CARDS */
-.qs-grid{display:flex;gap:10px;padding:0 16px 16px;}
-.qs-card{flex:1;background:var(--bg2);border-radius:var(--radius);padding:16px 12px;text-align:center;border:1px solid var(--border);box-shadow:var(--shadow);cursor:pointer;transition:background 0.15s;}
-.qs-card:active{background:var(--bg3);}
-.qs-icon{font-size:24px;margin-bottom:6px;}
-.qs-label{font-size:12px;font-weight:600;color:var(--text2);}
 /* FAB */
 .fab{width:52px;height:52px;border-radius:16px;background:var(--accent);border:none;color:#0F1117;font-size:26px;font-weight:300;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 16px rgba(var(--accent-rgb),0.4);transition:transform 0.15s;}
 .fab:active{transform:scale(0.92);}
@@ -308,14 +304,8 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div class="home-sec" id="home-sec-startEmpty" data-home-key="startEmpty" style="padding:12px 16px 8px;">
       <button class="btn btn-ghost btn-full" onclick="startEmptyWorkout()" style="border-style:dashed;font-size:13px;border-radius:var(--radius);">⚡ Start Empty Workout</button>
     </div>
-    <div class="home-sec" id="home-sec-quickAccess" data-home-key="quickAccess">
-      <div class="sec-hdr"><span class="sec-hdr-title">Quick Access</span></div>
-      <div class="qs-grid">
-        <div class="qs-card" onclick="switchTab('routines')"><div class="qs-icon">📋</div><div class="qs-label">Routines</div></div>
-        <div class="qs-card" onclick="openPlateCalc()"><div class="qs-icon">🏋️</div><div class="qs-label">Plates</div></div>
-        <div class="qs-card" onclick="switchTab('measurements')"><div class="qs-icon">📏</div><div class="qs-label">Body Measurements</div></div>
-        <div class="qs-card" onclick="switchTab('settings')"><div class="qs-icon">⚙️</div><div class="qs-label">Settings</div></div>
-      </div>
+    <div class="home-sec" id="home-sec-quickAccess" data-home-key="quickAccess" style="padding:0 16px 8px;">
+      <button class="btn btn-ghost btn-full" onclick="openPlateCalc()" style="border-style:dashed;font-size:13px;border-radius:var(--radius);">🏋️ Plate Calculator</button>
     </div>
     <div class="home-sec" id="home-sec-chart" data-home-key="chart">
       <div class="sec-hdr"><span class="sec-hdr-title">Weekly Consistency</span></div>
@@ -531,7 +521,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-27.1</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-27.2</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1080,6 +1070,7 @@ const SET_TYPES=[
   {id:'feeder',label:'Feeder',desc:'Pump / blood flow set',badgeClass:'badge-feeder'},
   {id:'back',label:'Back-Off',desc:'Lower intensity after heavy',badgeClass:'badge-back'},
   {id:'1rm',label:'1RM',desc:'Max effort single',badgeClass:'badge-1rm'},
+  {id:'partials',label:'Partials',desc:'Beyond-failure partials, pre-deload only',badgeClass:'badge-partials'},
 ];
 const MUSCLE_GROUPS=['Chest','Back','Shoulders','Biceps','Triceps','Quads','Hamstrings','Glutes','Core','Calves','Full Body'];
 const MUSCLE_PAIRS={Chest:'Back',Back:'Chest',Biceps:'Triceps',Triceps:'Biceps',Quads:'Hamstrings',Hamstrings:'Quads'};
@@ -1436,7 +1427,7 @@ function getPR(exId){
   let bw=0,br=0,bo=0;
   state.history.forEach(w=>w.exercises.forEach(ex=>{
     if(ex.exId!==exId)return;
-    ex.sets.filter(s=>s.done).forEach(s=>{
+    ex.sets.filter(s=>s.done&&s.type!=='partials').forEach(s=>{
       if((s.weight||0)>bw)bw=s.weight||0;
       if((s.reps||0)>br)br=s.reps||0;
       const o=calcORM(s.weight||0,s.reps||0);if(o>bo)bo=o;
@@ -1453,6 +1444,20 @@ function getLastSets(exId){
     if(ex&&ex.sets&&ex.sets.length)return ex.sets.map(s=>({...s,useRIR:!!ex.useRIR}));
   }
   return[];
+}
+// Partials sets are auto-added (not part of the routine template) on the last training rotation
+// before a deload, so they don't replay via the normal getLastSets prev-session logic — this
+// looks specifically for the last time THIS exercise had a completed Partials set, so its count
+// can be shown as a placeholder next time around.
+function getLastPartialSet(exId){
+  for(let i=0;i<state.history.length;i++){
+    const w=state.history[i];
+    const ex=(w.exercises||[]).find(e=>e.exId===exId);
+    if(!ex||!ex.sets)continue;
+    const hr=ex.sets.find(s=>s.type==='partials'&&s.done);
+    if(hr)return hr;
+  }
+  return null;
 }
 function newSet(pw=0,pr=0){return{type:'normal',weight:pw||0,reps:pr||0,rpe:null,done:false,prevWeight:pw,prevReps:pr};}
 function checkSetForPR(exId,weight,reps){
@@ -2378,7 +2383,7 @@ function toggleMesoExList(id){
 }
 
 
-const HOME_SECTION_LABELS={meso:'Active Cycle',startEmpty:'Start Empty Workout',quickAccess:'Quick Access',chart:'Weekly Consistency'};
+const HOME_SECTION_LABELS={meso:'Active Cycle',startEmpty:'Start Empty Workout',quickAccess:'Plate Calculator',chart:'Weekly Consistency'};
 function applyHomeLayout(){
   const order=state.homeLayout||['meso','startEmpty','quickAccess','chart'];
   order.forEach((key,i)=>{
@@ -3867,17 +3872,26 @@ function openRoutineDetail(i){
 function startRoutineWorkout(i){
   const r=state.routines[i];
   const activeMeso=activeMesoContext?state.mesocycles[activeMesoContext.mesoIdx]:null;
+  // The Partials set (beyond-failure partials) only ever gets auto-added on the final training
+  // rotation of a pass, right before a deload — never saved to the routine, never carried into
+  // any other rotation. rotationsDone is the count of ALREADY-completed rotations, so the one
+  // about to start is rotationsDone+1; when that equals rotationsPerMeso, this is the last one.
+  const lastCycleBeforeDeload=!!(activeMeso&&activeMeso.phase==='training'&&activeMeso.deloadEnabled
+    &&((activeMeso.rotationsDone||0)+1)>=(activeMeso.rotationsPerMeso||1));
   let mesoNote=null;
   const exercises=(r.exerciseIds||[]).map((id,idx)=>{
     const ex=getExercise(id);if(!ex)return null;
     const prev=getLastSets(id);
     // Restore saved superset group from routine
     const sg=(r.supersetGroups&&r.supersetGroups[idx])||null;
-    const slotOverride=(activeMesoContext&&activeMeso&&activeMeso.slotRepRanges&&activeMeso.slotRepRanges[activeMesoContext.routinePos])
+    const slotOverride=(activeMesoContext&&activeMeso&&activeMeso.slotRepRanges&&activeMesoContext.routinePos!=null&&activeMeso.slotRepRanges[activeMesoContext.routinePos])
       ?activeMeso.slotRepRanges[activeMesoContext.routinePos][id]:null;
     const repRange=slotOverride||resolveRepRangeForRoutine(r,id);
     const useRIR=!!(r.rirModes&&r.rirModes[id]);
-    let sets=prev.length?prev.map(s=>({...s,done:false})):[newSet()];
+    // Strip any Partials set that replayed in from the last logged session for this exercise —
+    // it must never leak into a rotation other than the one it was actually added for.
+    let sets=(prev.length?prev.map(s=>({...s,done:false})):[newSet()]).filter(s=>s.type!=='partials');
+    if(!sets.length)sets=[newSet()];
     const adjArr=activeMeso?getMesoSetAdjustments(activeMeso,id):null;
     if(adjArr&&adjArr.length){
       if(activeMeso.phase==='deload'&&sets.length>adjArr.length)sets=sets.slice(0,adjArr.length);
@@ -3895,8 +3909,18 @@ function startRoutineWorkout(i){
       else if(activeMeso.resetFallbackNote)mesoNote=activeMeso.resetFallbackNote;
       else mesoNote='Resuming this mesocycle at reset baseline weights.';
     }
+    if(lastCycleBeforeDeload&&!ex.excludePartials){
+      const lastPartial=getLastPartialSet(id);
+      sets=[...sets,{type:'partials',weight:0,reps:0,repsL:0,repsR:0,rpe:null,done:false,
+        prevWeight:(lastPartial&&lastPartial.weight)||0,prevReps:(lastPartial&&lastPartial.reps)||0,
+        prevRepsL:(lastPartial&&lastPartial.repsL)||0,prevRepsR:(lastPartial&&lastPartial.repsR)||0}];
+    }
     return{exId:id,sets,supersetGroup:sg,repRange,useRIR};
   }).filter(Boolean);
+  if(lastCycleBeforeDeload){
+    const partialsMsg='Final rotation before deload — Partials added to push past failure.';
+    mesoNote=mesoNote?mesoNote+' '+partialsMsg:partialsMsg;
+  }
   beginWorkout(r.name,exercises,r.id,[...(r.exerciseIds||[])]);
   const noteEl=document.getElementById('workout-meso-note');
   if(noteEl){
@@ -5448,7 +5472,8 @@ function renderExRow(r,muscle,list){
 
   const rowIdx=libRowRegistry.length;
   const customEx=r.def?null:r.matchingEx[0];
-  libRowRegistry.push({muscle,name:r.name,def:r.def,exId:customEx?customEx.id:null});
+  const soloEx=r.matchingEx.length===1?r.matchingEx[0]:null;
+  libRowRegistry.push({muscle,name:r.name,def:r.def,exId:customEx?customEx.id:null,soloExId:soloEx?soloEx.id:null});
 
   const div=document.createElement('div');div.className='ex-item';
   let dropdownItems='';
@@ -5462,6 +5487,11 @@ function renderExRow(r,muscle,list){
       dropdownItems='<div class="r-dropdown-item" onclick="event.stopPropagation();addExerciseToWorkout(\''+customEx.id+'\');closeAllDropdowns()">'+uiIcon('play',15,'currentColor')+' Add to Workout</div>'+dropdownItems;
     }
   }
+  if(soloEx){
+    const excluded=!!soloEx.excludePartials;
+    dropdownItems+='<div class="r-dropdown-item" onclick="event.stopPropagation();toggleExcludePartials(\''+soloEx.id+'\');closeAllDropdowns()">'+(excluded?'☑':'☐')+' Exclude from Partials (pre-deload)</div>';
+  }
+
 
   div.innerHTML='<div style="flex:1;min-width:0">'
     +'<div class="bold">'+escHtml(r.name)+'</div>'
@@ -5700,6 +5730,11 @@ function customizeLibraryVariant(rowIdx){
   closeAllDropdowns();
   openLibraryEditModal(r.muscle,r.name,null);
 }
+function toggleExcludePartials(exId){
+  const ex=getExercise(exId);if(!ex)return;
+  ex.excludePartials=!ex.excludePartials;
+  save();renderExerciseDB();
+}
 function editLibraryExercise(rowIdx){
   const r=libRowRegistry[rowIdx];if(!r||!r.exId)return;
   closeAllDropdowns();
@@ -5862,16 +5897,16 @@ function renderReview(){
   const ms={};MUSCLE_GROUPS.forEach(m=>ms[m]=0);
   ww.forEach(w=>w.exercises.forEach(ex=>{
     const exData=getExercise(ex.exId);if(!exData)return;
-    const done=ex.sets.filter(s=>s.done).length;
+    const done=ex.sets.filter(s=>s.done&&s.type!=='partials').length;
     if(exData.muscle)ms[exData.muscle]=(ms[exData.muscle]||0)+done;
     if(exData.secondary)exData.secondary.split(',').forEach(sm=>{const t=sm.trim();if(t&&ms[t]!==undefined)ms[t]=(ms[t]||0)+Math.ceil(done*0.5);});
   }));
   let vol=0,sets=0,rpeAll=[];const days=new Set();let consec=0;
-  ww.forEach(w=>{days.add(new Date(w.date).toDateString());w.exercises.forEach(ex=>{const useRIR=!!ex.useRIR;ex.sets.forEach(s=>{if(s.done){sets++;vol+=(s.weight||0)*(s.reps||0);if(s.rpe!=null)rpeAll.push(useRIR?(10-s.rpe):s.rpe);}});});});
+  ww.forEach(w=>{days.add(new Date(w.date).toDateString());w.exercises.forEach(ex=>{const useRIR=!!ex.useRIR;ex.sets.forEach(s=>{if(s.done&&s.type!=='partials'){sets++;vol+=(s.weight||0)*(s.reps||0);if(s.rpe!=null)rpeAll.push(useRIR?(10-s.rpe):s.rpe);}});});});
   for(let i=0;i<7;i++){const d=new Date(now-i*864e5);if(days.has(d.toDateString()))consec++;else break;}
   const avgRPE=rpeAll.length?(rpeAll.reduce((a,b)=>a+b,0)/rpeAll.length).toFixed(1):'—';
   const recentWW=state.history.slice(0,14);
-  const highRPECount=recentWW.filter(w=>{const rpes=[];w.exercises.forEach(ex=>{const useRIR=!!ex.useRIR;ex.sets.forEach(s=>{if(s.done&&s.rpe!=null)rpes.push(useRIR?(10-s.rpe):s.rpe);});});return rpes.length&&rpes.reduce((a,b)=>a+b,0)/rpes.length>7.5;}).length;
+  const highRPECount=recentWW.filter(w=>{const rpes=[];w.exercises.forEach(ex=>{const useRIR=!!ex.useRIR;ex.sets.forEach(s=>{if(s.done&&s.type!=='partials'&&s.rpe!=null)rpes.push(useRIR?(10-s.rpe):s.rpe);});});return rpes.length&&rpes.reduce((a,b)=>a+b,0)/rpes.length>7.5;}).length;
   const needsDeload=highRPECount>=3;
   const statsHtml='<div class="week-stat-row" style="padding:14px 16px 0">'
     +'<div class="week-stat"><div class="week-stat-val">'+ww.length+'</div><div class="week-stat-lbl">Workouts</div></div>'
