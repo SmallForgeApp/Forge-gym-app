@@ -39,7 +39,8 @@ if('serviceWorker' in navigator){
 button,input,select,textarea{font-family:inherit;color:inherit;}
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;overflow:hidden;}
 .screen{position:absolute;inset:0;display:none;flex-direction:column;overflow:hidden;}
-.screen.active{display:flex;}
+.screen.active{display:flex;animation:screenFadeIn 0.22s ease;}
+@keyframes screenFadeIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
 .topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 20px 10px;background:var(--bg);border-bottom:1px solid var(--border);flex-shrink:0;}
 .topbar-title{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:3px;color:var(--accent);}
 .topbar-sub{font-size:13px;color:var(--text2);margin-top:2px;}
@@ -240,6 +241,9 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 @keyframes prPop{0%{transform:translate(-50%,-20px);opacity:0;}60%{transform:translate(-50%,4px);}100%{transform:translate(-50%,0);opacity:1;}}
 .pr-toast{position:fixed;top:80px;left:50%;transform:translateX(-50%);background:var(--accent);color:#0a0a0f;font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:2px;padding:10px 24px;border-radius:30px;z-index:300;animation:prPop 0.4s ease forwards;box-shadow:0 4px 20px rgba(var(--accent-rgb),0.4);white-space:nowrap;max-width:calc(100vw - 48px);overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;}
 .section-label{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:1.2px;padding:16px 20px 8px;font-weight:700;}
+.spinner{display:inline-block;width:13px;height:13px;border:2px solid rgba(var(--accent-rgb),0.25);border-top-color:var(--accent);border-radius:50%;animation:spin 0.7s linear infinite;vertical-align:-2px;margin-right:6px;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.btn:disabled{opacity:0.55;cursor:default;}
 .empty-state{text-align:center;padding:45px 28px;}
 .empty-icon{font-size:44px;margin-bottom:14px;opacity:0.4;}
 .empty-title{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1px;color:var(--text2);}
@@ -382,6 +386,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
 <!-- TIMER BAR -->
 <div class="timer-bar" id="timer-bar" style="display:none">
   <div><div class="timer-label" id="timer-bar-label">Rest Timer</div><div class="timer-display" id="timer-display">0:00</div></div>
+  <button class="btn btn-ghost btn-sm" onclick="addTimer(-30)">-30s</button>
   <button class="btn btn-ghost btn-sm" onclick="addTimer(30)">+30s</button>
   <button class="btn btn-ghost btn-sm" onclick="stopTimer()">Skip</button>
 </div>
@@ -506,8 +511,8 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
         </div>
         <div class="small text3 mb8" id="sync-last-synced">Never synced</div>
         <div style="display:flex;gap:10px">
-          <button class="btn btn-primary flex-1" onclick="syncToDrive()">⬆ Backup to Drive</button>
-          <button class="btn btn-ghost flex-1" onclick="syncFromDrive()">⬇ Restore from Drive</button>
+          <button class="btn btn-primary flex-1" id="sync-backup-btn" onclick="syncToDrive()">⬆ Backup to Drive</button>
+          <button class="btn btn-ghost flex-1" id="sync-restore-btn" onclick="syncFromDrive()">⬇ Restore from Drive</button>
         </div>
         <label style="display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer">
           <input type="checkbox" id="auto-sync-toggle" onchange="toggleAutoSync(this.checked)" style="width:16px;height:16px;accent-color:var(--accent)"/>
@@ -521,7 +526,12 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost flex-1" onclick="exportHistory()">📤 Export CSV</button>
       <button class="btn btn-danger flex-1" onclick="resetAllData()">⚠️ Reset All</button>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3">FORGE build 2026-07-26.5</div>
+    <div class="section-label">About</div>
+    <div style="padding:0 16px 20px">
+      <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
+      <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
+    </div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-27.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1450,6 +1460,7 @@ function checkSetForPR(exId,weight,reps){
   return weight>pr.weight||reps>pr.reps||calcORM(weight,reps)>pr.orm;
 }
 function showPRToast(name){
+  if(navigator.vibrate)navigator.vibrate([15,60,15]);
   const t=document.createElement('div');t.className='pr-toast';t.textContent='PR! '+name;
   document.body.appendChild(t);setTimeout(()=>t.remove(),2500);
 }
@@ -4352,6 +4363,7 @@ function toggleSetDone(exIdx,setIdx){
     }
   }
   set.done=!set.done;
+  if(navigator.vibrate)navigator.vibrate(set.done?12:8);
   const btn=row.querySelector('.complete-btn');
   row.classList.toggle('completed',set.done);btn.classList.toggle('done',set.done);
   if(set.done){
@@ -5139,7 +5151,11 @@ function updateTimerDisplay(){
   document.getElementById('timer-display').textContent=m+':'+String(s).padStart(2,'0');
   document.getElementById('timer-display').style.color=restRemaining<=10?'var(--red)':'var(--accent)';
 }
-function addTimer(s){restRemaining+=s;updateTimerDisplay();}
+function addTimer(s){
+  restRemaining+=s;
+  if(restRemaining<=0){stopTimer();playTimerSound();if(navigator.vibrate)navigator.vibrate([200,100,200]);}
+  else{updateTimerDisplay();}
+}
 function stopTimer(){
   if(restTimer){clearInterval(restTimer);restTimer=null;}
   const bar=document.getElementById('timer-bar');
@@ -6105,10 +6121,16 @@ async function findDriveBackupFile(){
   return null;
 }
 
+function setSyncButtonsBusy(busy){
+  const b=document.getElementById('sync-backup-btn'),r=document.getElementById('sync-restore-btn');
+  if(b)b.disabled=busy;
+  if(r)r.disabled=busy;
+}
 async function syncToDrive(){
   if(!gAccessToken){alert('Please sign in with Google first.');return;}
   const statusEl=document.getElementById('sync-status-text');
-  statusEl.textContent='Backing up...';
+  setSyncButtonsBusy(true);
+  statusEl.innerHTML='<span class="spinner"></span>Backing up...';
   try{
     if(!gDriveFileId)await findDriveBackupFile();
     const metadata={name:DRIVE_FILENAME,mimeType:'application/json'};
@@ -6142,17 +6164,21 @@ async function syncToDrive(){
   }catch(e){
     console.error(e);
     statusEl.textContent='Backup failed: '+e.message;
+  }finally{
+    setSyncButtonsBusy(false);
   }
 }
 
 async function syncFromDrive(){
   if(!gAccessToken){alert('Please sign in with Google first.');return;}
   const statusEl=document.getElementById('sync-status-text');
-  statusEl.textContent='Checking Google Drive...';
+  setSyncButtonsBusy(true);
+  statusEl.innerHTML='<span class="spinner"></span>Checking Google Drive...';
   try{
     const file=await findDriveBackupFile();
     if(!file){statusEl.textContent='No backup found in Google Drive yet. Tap "Backup to Drive" first.';return;}
     if(!confirm('Restore data from Google Drive backup (from '+new Date(file.modifiedTime).toLocaleString()+')? This will replace your current data on this device.'))return;
+    statusEl.innerHTML='<span class="spinner"></span>Restoring...';
     const r=await fetch('https://www.googleapis.com/drive/v3/files/'+file.id+'?alt=media',{
       headers:{Authorization:'Bearer '+gAccessToken}
     });
@@ -6163,12 +6189,41 @@ async function syncFromDrive(){
     localStorage.setItem('forge_last_sync',now);
     statusEl.textContent='✓ Restored from Google Drive. Reloading...';
     setTimeout(()=>location.reload(),800);
+    return;
   }catch(e){
     console.error(e);
     statusEl.textContent='Restore failed: '+e.message;
+  }finally{
+    setSyncButtonsBusy(false);
   }
 }
 
+async function checkForUpdate(){
+  const statusEl=document.getElementById('check-update-status');
+  const btn=document.getElementById('check-update-btn');
+  btn.disabled=true;
+  statusEl.innerHTML='<span class="spinner"></span>Checking for updates...';
+  try{
+    const r=await fetch(location.pathname+'?_check='+Date.now(),{cache:'no-store'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const html=await r.text();
+    const remoteMatch=html.match(/FORGE build ([\d.\-]+)/);
+    const localMatch=document.getElementById('build-stamp').textContent.match(/FORGE build ([\d.\-]+)/);
+    const remote=remoteMatch?remoteMatch[1]:null;
+    const local=localMatch?localMatch[1]:null;
+    if(remote&&local&&remote!==local){
+      statusEl.textContent='A newer build ('+remote+') is available — reloading...';
+      setTimeout(()=>{location.href=location.pathname+'?_v='+Date.now();},900);
+    }else{
+      statusEl.textContent="✓ You're on the latest build.";
+      btn.disabled=false;
+    }
+  }catch(e){
+    console.error(e);
+    statusEl.textContent='Could not check for updates — check your connection.';
+    btn.disabled=false;
+  }
+}
 function toggleAutoSync(checked){
   localStorage.setItem('forge_auto_sync',checked?'1':'0');
 }
@@ -6217,45 +6272,19 @@ function localDateKey(dateInput){
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
 function todayKey(){return localDateKey(new Date());}
-// Small inline SVG trend line for the summary card — up to the last 14 weigh-ins, oldest to
-// newest. Hand-rolled (not canvas) since it just needs to sit inline next to a number; uses
-// style attributes (not presentation attributes) for stop-color/stroke/fill so the CSS custom
-// properties actually resolve inside inline SVG.
-function buildWeightSparklineSVG(entriesAsc){
-  if(entriesAsc.length<2)return'';
-  const w=104,h=40,pad=4;
-  const values=entriesAsc.map(e=>e.weight);
-  const min=Math.min(...values),max=Math.max(...values);
-  const range=max-min||1;
-  const stepX=(w-pad*2)/(entriesAsc.length-1);
-  const pts=entriesAsc.map((e,i)=>[pad+i*stepX,pad+(h-pad*2)*(1-(e.weight-min)/range)]);
-  const line=pts.map((p,i)=>(i===0?'M':'L')+p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
-  const area=line+' L'+pts[pts.length-1][0].toFixed(1)+','+(h-pad)+' L'+pts[0][0].toFixed(1)+','+(h-pad)+' Z';
-  const last=pts[pts.length-1];
-  const gid='sprk'+Math.random().toString(36).slice(2,8);
-  return '<svg viewBox="0 0 '+w+' '+h+'" width="'+w+'" height="'+h+'" style="display:block;flex-shrink:0">'
-    +'<defs><linearGradient id="'+gid+'" x1="0" y1="0" x2="0" y2="1">'
-    +'<stop offset="0%" style="stop-color:var(--accent2);stop-opacity:0.35"/>'
-    +'<stop offset="100%" style="stop-color:var(--accent2);stop-opacity:0"/>'
-    +'</linearGradient></defs>'
-    +'<path d="'+area+'" style="fill:url(#'+gid+');stroke:none"/>'
-    +'<path d="'+line+'" style="fill:none;stroke:var(--accent2);stroke-width:2;stroke-linecap:round;stroke-linejoin:round"/>'
-    +'<circle cx="'+last[0].toFixed(1)+'" cy="'+last[1].toFixed(1)+'" r="2.6" style="fill:var(--accent2)"/>'
-    +'</svg>';
-}
 // Most recent weight entry plus the one before it, for the summary card's "since last
 // check-in" delta. Relies on state.bodyMeasurements already being kept sorted newest-first
 // (upsertMeasurementEntry re-sorts on every save).
 function getWeightSummary(){
   const withWeight=(state.bodyMeasurements||[]).filter(e=>e.weight!=null);
   if(!withWeight.length)return null;
-  return{latest:withWeight[0].weight,latestDate:withWeight[0].date,prev:withWeight.length>1?withWeight[1].weight:null,recentAsc:withWeight.slice(0,14).reverse()};
+  return{latest:withWeight[0].weight,latestDate:withWeight[0].date,prev:withWeight.length>1?withWeight[1].weight:null};
 }
 function renderMeasurementsSummary(){
   const card=document.getElementById('meas-summary-card');
   const s=getWeightSummary();
   if(!s){
-    card.innerHTML='<div style="text-align:center;padding:8px 0"><div style="font-size:26px;margin-bottom:4px">📏</div><div class="small text2">Log your first weigh-in below to get started</div></div>';
+    card.innerHTML='<div class="small text2" style="text-align:center;padding:6px 0">Log your first weigh-in below to get started</div>';
     return;
   }
   const d=new Date(s.latestDate);
@@ -6263,21 +6292,15 @@ function renderMeasurementsSummary(){
   if(s.prev!=null){
     const delta=+(s.latest-s.prev).toFixed(1);
     const arrow=delta>0?'▲':delta<0?'▼':'—';
-    deltaHtml='<span style="display:inline-flex;align-items:center;gap:4px;background:var(--bg3);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;color:var(--text2);margin-top:6px;font-family:\'DM Mono\',monospace">'+arrow+' '+Math.abs(delta)+' kg since last check-in</span>';
+    deltaHtml='<div class="small text2" style="margin-top:2px">'+arrow+' '+Math.abs(delta)+' kg since last check-in</div>';
   }
-  const sparkline=buildWeightSparklineSVG(s.recentAsc);
-  card.innerHTML='<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px">'
-    +'<div style="min-width:0">'
-    +'<div class="small text3" style="text-transform:uppercase;letter-spacing:0.5px;font-weight:700">Current Weight</div>'
+  card.innerHTML='<div class="small text3" style="text-transform:uppercase;letter-spacing:0.5px;font-weight:700">Current Weight</div>'
     +'<div style="display:flex;align-items:baseline;gap:6px;margin-top:2px">'
-    +'<span style="font-family:\'Bebas Neue\',sans-serif;font-size:40px;letter-spacing:1px;line-height:1">'+fmtMeasureNum(s.latest)+'</span>'
+    +'<span style="font-family:\'Bebas Neue\',sans-serif;font-size:38px;letter-spacing:1px;line-height:1">'+s.latest+'</span>'
     +'<span class="small text2">kg</span>'
     +'</div>'
-    +'<div>'+deltaHtml+'</div>'
-    +'</div>'
-    +sparkline
-    +'</div>'
-    +'<div class="small text3" style="margin-top:10px">Logged '+d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})+'</div>';
+    +deltaHtml
+    +'<div class="small text3" style="margin-top:4px">Logged '+d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})+'</div>';
 }
 function renderMeasurementsTab(){
   document.getElementById('bw-input').value='';
@@ -6301,13 +6324,6 @@ function toggleMeasurementsForm(){
 // reference. excludeToday skips today's own (possibly already-saved) entry, so the hint
 // always reflects the last DIFFERENT day's check-in rather than echoing what's about to
 // be typed.
-// Guards display against floating-point noise (e.g. 83.35000000000001 from repeated
-// arithmetic) — rounds to 2 decimals then drops back to a plain number so trailing zeros
-// don't get padded on either.
-function fmtMeasureNum(v){
-  if(v==null)return'';
-  return String(+(+v).toFixed(2));
-}
 function getLastMeasurementValue(key,excludeToday){
   const entries=state.bodyMeasurements||[];
   const todayK=todayKey();
@@ -6319,26 +6335,24 @@ function getLastMeasurementValue(key,excludeToday){
 }
 function renderMeasurementsGrid(){
   const todayEntry=(state.bodyMeasurements||[]).find(m=>localDateKey(m.date)===todayKey());
-  const fieldInputHtml=(key,label,labelStyle)=>{
+  const fieldInputHtml=(key,placeholder)=>{
     const last=getLastMeasurementValue(key,true);
     const todayVal=todayEntry&&todayEntry[key]!=null?todayEntry[key]:'';
-    return '<div class="small text2" style="margin-bottom:4px'+(labelStyle||'')+'">'+label+'</div>'
-      +'<input type="number" inputmode="decimal" id="meas-'+key+'" placeholder="cm" value="'+todayVal+'">'
-      +(last!=null?'<div class="small text3" style="margin-top:3px;padding-left:2px;font-family:\'DM Mono\',monospace">Last '+fmtMeasureNum(last)+' cm</div>':'');
+    return '<input type="number" inputmode="decimal" id="meas-'+key+'" placeholder="'+placeholder+'" value="'+todayVal+'">'
+      +(last!=null?'<div class="small text3" style="margin-top:3px;padding-left:2px">Last: '+last+' cm</div>':'');
   };
   document.getElementById('measurements-grid-general').innerHTML=
     MEASUREMENT_GENERAL_FIELDS.map(key=>{
       const f=MEASUREMENT_FIELDS.find(x=>x.key===key);
-      return '<div>'+fieldInputHtml(key,f.label)+'</div>';
+      return '<div>'+fieldInputHtml(key,f.label+' (cm)')+'</div>';
     }).join('');
-  const subLabelStyle=';color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:0.5px';
   document.getElementById('measurements-grid-lr').innerHTML=
     MEASUREMENT_LR_PAIRS.map(pair=>
       '<div>'
-      +'<div class="small text2" style="margin-bottom:4px;font-weight:700">'+pair.label+'</div>'
+      +'<div class="small text2" style="margin-bottom:4px">'+pair.label+'</div>'
       +'<div style="display:flex;gap:10px">'
-      +'<div style="flex:1">'+fieldInputHtml(pair.l,'Left',subLabelStyle)+'</div>'
-      +'<div style="flex:1">'+fieldInputHtml(pair.r,'Right',subLabelStyle)+'</div>'
+      +'<div style="flex:1">'+fieldInputHtml(pair.l,'cm')+'</div>'
+      +'<div style="flex:1">'+fieldInputHtml(pair.r,'cm')+'</div>'
       +'</div></div>'
     ).join('');
 }
@@ -6379,27 +6393,16 @@ function renderBWList(){
   const entries=state.bodyMeasurements||[];
   const countEl=document.getElementById('bw-history-count');
   if(countEl)countEl.textContent=entries.length?entries.length+' entr'+(entries.length!==1?'ies':'y'):'';
-  if(!entries.length){
-    list.innerHTML='<div style="text-align:center;padding:28px 0"><div style="font-size:26px;margin-bottom:6px">📏</div><div class="small text2">No entries yet — log your first weigh-in above</div></div>';
-    return;
-  }
-  list.innerHTML=entries.map((e,i)=>{
+  if(!entries.length){list.innerHTML='<div class="small text2" style="text-align:center;padding:14px 0">No entries yet</div>';return;}
+  list.innerHTML=entries.map(e=>{
     const d=new Date(e.date);
-    const otherChips=MEASUREMENT_FIELDS.filter(f=>f.key!=='weight'&&e[f.key]!=null).map(f=>f.label+' '+fmtMeasureNum(e[f.key])+f.unit).join(' · ');
-    const prevWithWeight=entries.slice(i+1).find(p=>p.weight!=null);
-    let deltaHtml='';
-    if(e.weight!=null&&prevWithWeight){
-      const delta=+(e.weight-prevWithWeight.weight).toFixed(1);
-      if(delta!==0){
-        deltaHtml='<span class="small text3" style="font-family:\'DM Mono\',monospace;margin-left:6px">'+(delta>0?'▲':'▼')+' '+Math.abs(delta)+'</span>';
-      }
-    }
-    return'<div class="bw-entry" style="flex-direction:column;align-items:flex-start;gap:3px;border-left:2px solid '+(i===0?'var(--accent2)':'var(--border)')+';padding-left:10px;margin-left:2px">'
+    const otherChips=MEASUREMENT_FIELDS.filter(f=>f.key!=='weight'&&e[f.key]!=null).map(f=>f.label+' '+e[f.key]+f.unit).join(' · ');
+    return'<div class="bw-entry" style="flex-direction:column;align-items:flex-start;gap:3px">'
       +'<div style="display:flex;justify-content:space-between;align-items:center;width:100%">'
       +'<span class="small text2" style="font-weight:600">'+d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})+'</span>'
-      +'<div style="display:flex;align-items:center">'
-      +(e.weight!=null?'<span class="bold mono" style="color:var(--accent2)">'+fmtMeasureNum(e.weight)+' kg</span>'+deltaHtml:'')
-      +'<button onclick="deleteMeasurementEntry(\''+e.date+'\')" style="background:transparent;border:none;color:var(--text3);font-size:15px;line-height:1;cursor:pointer;padding:2px 4px;margin-left:8px" aria-label="Delete entry">&#10005;</button>'
+      +'<div style="display:flex;align-items:center;gap:10px">'
+      +(e.weight!=null?'<span class="bold mono" style="color:var(--accent2)">'+e.weight+' kg</span>':'')
+      +'<button onclick="deleteMeasurementEntry(\''+e.date+'\')" style="background:transparent;border:none;color:var(--text3);font-size:15px;line-height:1;cursor:pointer;padding:2px 4px" aria-label="Delete entry">&#10005;</button>'
       +'</div></div>'
       +(otherChips?'<span class="small text2">'+escHtml(otherChips)+'</span>':'')
       +'</div>';
@@ -6435,33 +6438,45 @@ function renderBWChart(){
   ctx.strokeStyle='rgba(255,255,255,0.05)';ctx.lineWidth=1;
   for(let i=0;i<=3;i++){const y=pad.t+h*i/3;ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(pad.l+w,y);ctx.stroke();ctx.fillStyle='rgba(136,136,170,0.5)';ctx.font='9px DM Mono';ctx.textAlign='right';ctx.fillText((mx-(mx-mn)*i/3).toFixed(1),pad.l-3,y+3);}
   const xS=pts.length>1?w/(pts.length-1):w;
-  const xy=pts.map((p,i)=>[pad.l+i*xS,pad.t+h-(h*(p[metric]-mn)/(mx-mn))]);
-
-  // Gradient fill under the line
-  const grad=ctx.createLinearGradient(0,pad.t,0,pad.t+h);
-  grad.addColorStop(0,'rgba(71,200,255,0.28)');
-  grad.addColorStop(1,'rgba(71,200,255,0)');
-  ctx.beginPath();
-  xy.forEach(([x,y],i)=>{if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);});
-  ctx.lineTo(xy[xy.length-1][0],pad.t+h);ctx.lineTo(xy[0][0],pad.t+h);ctx.closePath();
-  ctx.fillStyle=grad;ctx.fill();
-
-  // Line
-  ctx.beginPath();ctx.strokeStyle='#47c8ff';ctx.lineWidth=2.5;ctx.lineJoin='round';ctx.lineCap='round';
-  xy.forEach(([x,y],i)=>{if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);});
+  ctx.beginPath();ctx.strokeStyle='#47c8ff';ctx.lineWidth=2;
+  pts.forEach((p,i)=>{const x=pad.l+i*xS;const y=pad.t+h-(h*(p[metric]-mn)/(mx-mn));if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);});
   ctx.stroke();
-
-  // Points — the most recent one gets a soft halo so it reads as "you are here"
-  xy.forEach(([x,y],i)=>{
-    const isLast=i===xy.length-1;
-    if(isLast){ctx.beginPath();ctx.arc(x,y,7,0,Math.PI*2);ctx.fillStyle='rgba(71,200,255,0.2)';ctx.fill();}
-    ctx.beginPath();ctx.arc(x,y,isLast?4:2.5,0,Math.PI*2);ctx.fillStyle='#47c8ff';ctx.fill();
-  });
+  pts.forEach((p,i)=>{const x=pad.l+i*xS;const y=pad.t+h-(h*(p[metric]-mn)/(mx-mn));ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fillStyle='#47c8ff';ctx.fill();});
 }
 
 // ── MODAL HELPERS ──
-function openModal(id){const el=document.getElementById(id);el.classList.add('open');el.addEventListener('click',e=>{if(e.target===el)closeModal(id);},{once:true});}
-function closeModal(id){document.getElementById(id).classList.remove('open');}
+// Modals are tracked in modalStack so the Android/browser back button (or edge-swipe gesture)
+// closes the topmost modal instead of leaving the app. Each openModal() pushes one history
+// entry; closeModal() called from a Cancel/Done/backdrop tap consumes that entry via
+// history.back(), and skipNextPopstate prevents the resulting popstate from double-closing.
+let modalStack=[];
+let skipNextPopstate=false;
+function openModal(id){
+  const el=document.getElementById(id);
+  el.classList.add('open');
+  el.addEventListener('click',e=>{if(e.target===el)closeModal(id);},{once:true});
+  modalStack.push(id);
+  history.pushState({forgeModal:id},'');
+}
+function closeModal(id){
+  const el=document.getElementById(id);
+  if(!el||!el.classList.contains('open'))return;
+  el.classList.remove('open');
+  const idx=modalStack.lastIndexOf(id);
+  if(idx!==-1){
+    modalStack.splice(idx,1);
+    skipNextPopstate=true;
+    history.back();
+  }
+}
+window.addEventListener('popstate',()=>{
+  if(skipNextPopstate){skipNextPopstate=false;return;}
+  if(modalStack.length){
+    const id=modalStack.pop();
+    const el=document.getElementById(id);
+    if(el)el.classList.remove('open');
+  }
+});
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2);}
 function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 </script>
