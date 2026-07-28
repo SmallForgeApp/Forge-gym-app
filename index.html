@@ -514,7 +514,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-28.3</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-28.4</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -3870,6 +3870,10 @@ function startRoutineWorkout(i){
   // about to start is rotationsDone+1; when that equals rotationsPerMeso, this is the last one.
   const lastCycleBeforeDeload=!!(activeMeso&&activeMeso.phase==='training'&&activeMeso.deloadEnabled
     &&((activeMeso.rotationsDone||0)+1)>=(activeMeso.rotationsPerMeso||1));
+  // Same target used for the "aim for N RIR today" banner — reused below to pre-fill each
+  // working set's RPE/RIR field to what THIS cycle is actually asking for, rather than whatever
+  // was hit last session (which reflects last session's effort, not today's target).
+  const mesoRIRInfo=activeMeso?getMesoTargetRIR(activeMeso):null;
   let mesoNote=null;
   const exercises=(r.exerciseIds||[]).map((id,idx)=>{
     const ex=getExercise(id);if(!ex)return null;
@@ -3914,6 +3918,10 @@ function startRoutineWorkout(i){
                      :{...withPrev,weight:tgt.weight,reps:tgt.reps};
       });
     }
+    if(mesoRIRInfo&&mesoRIRInfo.rir!=null){
+      const aimRIR=mesoRIRInfo.rir;
+      sets=sets.map(s=>(!s.type||s.type==='normal')?{...s,rpe:useRIR?aimRIR:(10-aimRIR)}:s);
+    }
     if(lastCycleBeforeDeload&&!ex.excludePartials){
       const lastPartial=getLastPartialSet(id);
       sets=[...sets,{type:'partials',weight:0,reps:0,repsL:0,repsR:0,rpe:null,done:false,
@@ -3934,8 +3942,7 @@ function startRoutineWorkout(i){
   }
   const rirNoteEl=document.getElementById('workout-rir-note');
   if(rirNoteEl){
-    const rirInfo=activeMeso?getMesoTargetRIR(activeMeso):null;
-    const rirText=formatMesoRIRNote(rirInfo);
+    const rirText=formatMesoRIRNote(mesoRIRInfo);
     if(rirText){rirNoteEl.textContent=rirText;rirNoteEl.style.display='';}
     else rirNoteEl.style.display='none';
   }
