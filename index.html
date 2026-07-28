@@ -514,7 +514,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-27.4</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-28.3</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1395,6 +1395,15 @@ function updateWorkoutEstimate(){
 
 // ── 1RM (Epley) ──
 function calcORM(weight,reps){if(!weight||reps<1)return 0;if(reps===1)return weight;return Math.round(weight*(1+reps/30));}
+// A set's meaningful "reps done" for progression/PR/comparison purposes. Uses THIS SET's own
+// repsL/repsR if it actually has them — not just whether the exercise is currently flagged
+// unilateral — since an exercise's uni status can change after real history already exists under
+// the old setting; checking the set itself keeps old data readable under whichever mode it was
+// actually logged in. For a genuine unilateral set, the weaker side is used throughout the app
+// (progress off the side that's actually earning it).
+function repsMetricOf(s){
+  return(s.repsL!=null||s.repsR!=null)?Math.min(s.repsL||0,s.repsR||0):(s.reps||0);
+}
 
 // ── PR DETECTION ──
 let prCache={};
@@ -1405,14 +1414,12 @@ function getExercise(id){return state.exercises.find(e=>e.id===id);}
 function getRoutine(id){return state.routines.find(r=>r.id===id);}
 function getPR(exId){
   if(prCache[exId])return prCache[exId];
-  const isUni=!!(getExercise(exId)||{}).uni;
-  const repsOf=s=>isUni?Math.min(s.repsL||0,s.repsR||0):(s.reps||0);
   let bw=0,br=0,bo=0;
   state.history.forEach(w=>w.exercises.forEach(ex=>{
     if(ex.exId!==exId)return;
     ex.sets.filter(s=>s.done&&s.type!=='partials').forEach(s=>{
       if((s.weight||0)>bw)bw=s.weight||0;
-      const r=repsOf(s);
+      const r=repsMetricOf(s);
       if(r>br)br=r;
       const o=calcORM(s.weight||0,r);if(o>bo)bo=o;
     });
@@ -3777,7 +3784,7 @@ function openGymSetupPreview(i){
         const f=state.history[h].exercises.find(e=>e.exId===id);
         if(f){
           const done=f.sets.filter(s=>s.done);
-          if(done.length){const isBW=ex.bw==='bw';const isUniP=!!ex.uni;lastStr=isBW?Math.max(...done.map(s=>isUniP?Math.min(s.repsL||0,s.repsR||0):(s.reps||0)))+' reps':Math.max(...done.map(s=>s.weight||0))+'kg';}
+          if(done.length){const isBW=ex.bw==='bw';lastStr=isBW?Math.max(...done.map(s=>repsMetricOf(s)))+' reps':Math.max(...done.map(s=>s.weight||0))+'kg';}
           sc=done.length||3;
           break;
         }
@@ -3838,7 +3845,7 @@ function openRoutineDetail(i){
       let lastStr='';
       for(let h=state.history.length-1;h>=0;h--){
         const f=state.history[h].exercises.find(e=>e.exId===id);
-        if(f){const done=f.sets.filter(s=>s.done);if(done.length){const isBW=ex.bw==='bw';const isUniP=!!ex.uni;lastStr=isBW?Math.max(...done.map(s=>isUniP?Math.min(s.repsL||0,s.repsR||0):(s.reps||0)))+' reps':Math.max(...done.map(s=>s.weight||0))+'kg';}break;}
+        if(f){const done=f.sets.filter(s=>s.done);if(done.length){const isBW=ex.bw==='bw';lastStr=isBW?Math.max(...done.map(s=>repsMetricOf(s)))+' reps':Math.max(...done.map(s=>s.weight||0))+'kg';}break;}
       }
       const pr=getPR(id);
       return'<div class="rd-ex-row">'
@@ -3893,6 +3900,19 @@ function startRoutineWorkout(i){
       if(activeMeso.phase==='deload')mesoNote='Deload rotation — weights cut '+(activeMeso.deloadPercent||0)+'%.';
       else if(activeMeso.resetFallbackNote)mesoNote=activeMeso.resetFallbackNote;
       else mesoNote='Resuming this mesocycle at reset baseline weights.';
+    }else{
+      // No meso-specific override in play for this exercise right now — pre-fill weight/reps
+      // with the calculated double-progression TARGET rather than a plain copy of last
+      // session's numbers, so the person just confirms/adjusts instead of re-typing every set.
+      // The PREV column (built separately from real history) still shows what was actually done.
+      sets=sets.map((s,si)=>{
+        if(s.type&&s.type!=='normal')return s; // warmup/dropset/etc carry over as-is
+        const tgt=getSetTarget(id,{repRange},si,ex);
+        if(!tgt)return s;
+        const withPrev={...s,prevWeight:s.weight,prevReps:s.reps,prevRepsL:s.repsL,prevRepsR:s.repsR};
+        return ex.uni?{...withPrev,weight:tgt.weight,repsL:tgt.repsL,repsR:tgt.repsR}
+                     :{...withPrev,weight:tgt.weight,reps:tgt.reps};
+      });
     }
     if(lastCycleBeforeDeload&&!ex.excludePartials){
       const lastPartial=getLastPartialSet(id);
@@ -4035,15 +4055,32 @@ function checkMissedRepRange(exId,repRange){
   if(!repRange||!repRange.min)return null;
   const sessions=getSessionsForExercise(exId,2);
   if(sessions.length<2)return null;
-  const isUni=!!(getExercise(exId)||{}).uni;
-  const repsOf=s=>isUni?Math.min(s.repsL||0,s.repsR||0):(s.reps||0);
-  const missed=sessions.map(sets=>sets.every(s=>repsOf(s)<repRange.min));
+  const missed=sessions.map(sets=>sets.every(s=>repsMetricOf(s)<repRange.min));
   if(missed[0]&&missed[1]){
     return 'Missed the bottom of your rep range ('+repRange.min+'+) the last 2 sessions \u2014 consider holding this weight or backing off slightly.';
   }
   return null;
 }
 const DEFAULT_REP_RANGE={min:8,max:12};
+// The set at a given position from N sessions back for this exercise (n=0 = most recent
+// session, n=1 = the one before that). Mirrors getLastSets' own setIdx-or-fallback-to-last
+// tolerance for sessions with a different set count, and attaches useRIR the same way (mode can
+// change session to session, so each set carries whichever mode was actually active for it).
+function getSetAtSessionsAgo(exId,setIdx,n){
+  let count=0;
+  for(let i=0;i<state.history.length;i++){
+    const w=state.history[i];
+    const ex=(w.exercises||[]).find(e=>e.exId===exId);
+    if(ex&&ex.sets&&ex.sets.length){
+      if(count===n){
+        const s=ex.sets[setIdx]||ex.sets[ex.sets.length-1];
+        return s?{...s,useRIR:!!ex.useRIR}:null;
+      }
+      count++;
+    }
+  }
+  return null;
+}
 // Computes a genuine progression TARGET for a set (double progression: add reps within the
 // range, then bump weight and reset to the bottom of the range) rather than just copying
 // last session's numbers. Falls back to an 8–12 default range when none is set anywhere.
@@ -4065,12 +4102,35 @@ function getSetTarget(exId,workoutEx,setIdx,exData){
   const inc=getEquipmentIncrement(exData||{});
   const w=ps.weight||0;
   // For unilateral work, progress off the weaker side so both sides genuinely earn the next jump
-  const repsMetric=isUni?Math.min(ps.repsL||0,ps.repsR||0):(ps.reps||0);
+  const repsMetric=repsMetricOf(ps);
   let targetWeight,targetReps;
   if(!isBW&&repsMetric>=range.max&&hasRoom){
-    targetWeight=Math.round((w+inc)*100)/100;
-    targetReps=range.min;
-  }else if(isBW||repsMetric<range.max){
+    // Require the PRIOR session to have also been at/above the ceiling with room to spare, so
+    // one unusually good day doesn't trigger a jump on its own — a single off day earlier
+    // shouldn't have counted against you either way, this only requires that the ceiling-hit
+    // wasn't a one-off. Falls back to bumping off this single session when there isn't a second
+    // one yet (not enough history to require agreement from).
+    const prior=getSetAtSessionsAgo(exId,setIdx,1);
+    let confirmed=true;
+    if(prior){
+      const priorReps=repsMetricOf(prior);
+      const priorRpeEq=prior.rpe!=null?(prior.useRIR?(10-prior.rpe):prior.rpe):null;
+      const priorHasRoom=priorRpeEq==null||priorRpeEq<=8;
+      confirmed=priorReps>=range.max&&priorHasRoom;
+    }
+    if(confirmed){
+      targetWeight=Math.round((w+inc)*100)/100;
+      targetReps=range.min;
+    }else{
+      // Ceiling hit again but not yet confirmed by the session before it — hold and repeat
+      // rather than bump off what might just be one great day.
+      targetWeight=w;
+      targetReps=repsMetric;
+    }
+  }else if(repsMetric<range.max||(isBW&&hasRoom)){
+    // For bodyweight work there's no weight to add, so past the range ceiling the only way to
+    // progress at all is more reps — keep pushing while effort still allows it. Once effort is
+    // genuinely maxed (last branch), it holds exactly like a weighted exercise does.
     targetWeight=w;
     targetReps=repsMetric+1;
   }else{
@@ -4087,11 +4147,10 @@ function getSetTarget(exId,workoutEx,setIdx,exData){
 // reps are compared per-side; each point (a,b) carries its own .useRIR reflecting whichever mode
 // was actually active when IT was logged — not a single shared mode — so a comparison stays
 // correct even if the exercise's RIR/RPE setting was changed in between.
-function comparePerf(a,b,isUni){
-  const repsOf=p=>isUni?Math.min(p.repsL||0,p.repsR||0):(p.reps||0);
+function comparePerf(a,b){
   const aW=a.weight||0,bW=b.weight||0;
   if(bW!==aW)return bW>aW?1:-1;
-  const aR=repsOf(a),bR=repsOf(b);
+  const aR=repsMetricOf(a),bR=repsMetricOf(b);
   if(bR!==aR)return bR>aR?1:-1;
   if(a.rpe==null||b.rpe==null)return 0; // no effort data to compare — call it flat rather than guess
   const aEff=a.useRIR?(10-a.rpe):a.rpe; // normalize to RPE-equivalent (higher = harder)
@@ -4150,18 +4209,23 @@ function getEquipmentIncrement(exData){
 function suggestNextLoad(exId,workoutEx){
   const sets=getLastSets(exId); // each set carries the mode it was actually logged under
   if(!sets||!sets.length)return null;
-  const last=sets[sets.length-1];
-  if(!last||(!last.weight&&!last.reps&&!last.repsL&&!last.repsR))return null;
+  // Anchor on the FIRST working set, not the last — fatigue means later sets in a session
+  // always show fewer reps at the same weight, so using the last set chronically under-reads
+  // readiness to progress (it can sit below the rep ceiling indefinitely even once the first
+  // set has been topping out for sessions). The first set is the freshest and the one that
+  // genuinely tells you whether the weight is still challenging enough.
+  const first=sets.find(s=>!s.type||s.type==='normal')||sets[0];
+  if(!first||(!first.weight&&!first.reps&&!first.repsL&&!first.repsR))return null;
   const exData=getExercise(exId)||{};
-  const isUni=!!exData.uni;
-  const w=last.weight||0;
+  const hasSplit=first.repsL!=null||first.repsR!=null;
+  const w=first.weight||0;
   // Unilateral sets store reps as the L+R sum (for volume/history purposes) — using that
   // directly against a per-side rep-range target inflates the count and wrongly suggests
   // increasing weight. Progress off the weaker side instead, same as getSetTarget/comparePerf.
-  const r=isUni?Math.min(last.repsL||0,last.repsR||0):(last.reps||0);
-  const rDisplay=isUni?((last.repsL||0)+'/'+(last.repsR||0)):String(r);
-  const useRIR=!!last.useRIR;
-  const raw=last.rpe;
+  const r=repsMetricOf(first);
+  const rDisplay=hasSplit?((first.repsL||0)+'/'+(first.repsR||0)):String(r);
+  const useRIR=!!first.useRIR;
+  const raw=first.rpe;
   // Normalize to an RPE-equivalent scale internally regardless of which the person tracks
   const rpeEq=raw!=null?(useRIR?(10-raw):raw):null;
   const range=workoutEx&&workoutEx.repRange&&workoutEx.repRange.max?workoutEx.repRange:null;
@@ -4171,8 +4235,20 @@ function suggestNextLoad(exId,workoutEx){
   if(range){
     const atTop=r>=range.max;
     const hasRoom=rpeEq==null||rpeEq<=8;
+    let confirmed=true;
     if(atTop&&hasRoom){
+      const firstIdx=sets.indexOf(first);
+      const prior=getSetAtSessionsAgo(exId,firstIdx,1);
+      if(prior){
+        const priorReps=repsMetricOf(prior);
+        const priorRpeEq=prior.rpe!=null?(prior.useRIR?(10-prior.rpe):prior.rpe):null;
+        confirmed=priorReps>=range.max&&(priorRpeEq==null||priorRpeEq<=8);
+      }
+    }
+    if(atTop&&hasRoom&&confirmed){
       tip=inc?('Go up to '+(Math.round((w+inc)*100)/100)+'kg \u00d7 '+range.min+(range.min!==range.max?'\u2013'+range.max:'')+' reps'):('Push past '+range.max+' reps next time');
+    }else if(atTop&&hasRoom&&!confirmed){
+      tip='Hit it again at '+(w?w+'kg \u00d7 ':'')+r+' \u2014 one more like this and the weight goes up';
     }else if(r<range.max){
       tip='Add a rep'+(w?' at '+w+'kg':'')+' \u2192 aim for '+(r+1)+' (target '+range.min+'\u2013'+range.max+')';
     }else{
@@ -4195,7 +4271,7 @@ function buildExerciseCard(exIdx){
   if(ex.repRange&&ex.repRange.max)metaParts.push('Target '+ex.repRange.min+'\u2013'+ex.repRange.max+' reps');
   const noteHtml=exData.note?'<div class="note-row"><span class="note-icon">📌</span><span class="note-text">'+escHtml(exData.note)+'</span></div>':'';
   const sugg=suggestNextLoad(ex.exId,ex);
-  const suggHtml=sugg?'<div class="small" style="padding:2px 16px 10px;color:var(--accent2)">\ud83d\udca1 Last: '+(sugg.w?sugg.w+'kg \u00d7 ':'')+sugg.r+'r'+sugg.effortLbl+' \u2192 '+escHtml(sugg.text)+'</div>':'';
+  const suggHtml=sugg?'<div class="small" style="padding:2px 16px 10px;color:var(--accent2)">\ud83d\udca1 Set 1 last time: '+(sugg.w?sugg.w+'kg \u00d7 ':'')+sugg.r+'r'+sugg.effortLbl+' \u2192 '+escHtml(sugg.text)+'</div>':'';
   const missMsg=checkMissedRepRange(ex.exId,ex.repRange);
   const missHtml=missMsg?'<div class="small" style="padding:6px 16px;margin:0 16px 8px;background:rgba(255,71,87,0.12);border-radius:8px;color:#ff6b7a">\u26a0\ufe0f '+escHtml(missMsg)+'</div>':'';
   const isBW=exData.bw==='bw';
@@ -4234,7 +4310,7 @@ function renderSets(exIdx){
   tbody.innerHTML='';
   ex.sets.forEach((set,setIdx)=>{
     const tr=document.createElement('tr');
-    const prCheckReps=isUni?Math.min(set.repsL||0,set.repsR||0):(set.reps||0);
+    const prCheckReps=repsMetricOf(set);
     const isPR=set.done&&set.weight>0&&checkSetForPR(ex.exId,set.weight||0,prCheckReps);
     tr.className='set-row'+(set.done?' completed':'')+(isPR?' pr-row':'');
     tr.id='set-row-'+exIdx+'-'+setIdx;
@@ -4399,7 +4475,7 @@ function toggleSetDone(exIdx,setIdx){
     }
     // PR check
     const exId=activeWorkout.exercises[exIdx].exId;
-    const prCheckReps=isUni2?Math.min(set.repsL||0,set.repsR||0):(set.reps||0);
+    const prCheckReps=repsMetricOf(set);
     if(set.weight>0&&checkSetForPR(exId,set.weight||0,prCheckReps)){
       showPRToast(getExercise(exId)?.name||'Exercise');
       row.classList.add('pr-row');
@@ -5219,21 +5295,21 @@ function renderProgressChart(){
   const wrap=canvas.parentElement;
   canvas.width=wrap.clientWidth||300;canvas.height=wrap.clientHeight||160;
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  const isUniChart=!!(getExercise(progressExId)||{}).uni;
   // For 'reps'/'orm' a unilateral set's weaker side is the meaningful per-attempt rep count —
   // set.reps is the L+R sum (correct for 'volume', which genuinely is total work across both
   // sides, but wrong here: calcORM expects one real attempt's reps, and a doubled count roughly
-  // doubles the estimated 1RM).
-  const repsOf=s=>isUniChart?Math.min(s.repsL||0,s.repsR||0):(s.reps||0);
+  // doubles the estimated 1RM). repsMetricOf checks each set's OWN repsL/repsR rather than
+  // trusting the exercise's current uni flag, so old data from before/after a uni-status change
+  // still reads correctly.
   const points=[];
   state.history.slice().reverse().forEach(w=>{
     const found=w.exercises.find(e=>e.exId===progressExId);if(!found)return;
     const done=found.sets.filter(s=>s.done);if(!done.length)return;
     let val=0;
     if(chartMetric==='weight')val=Math.max(...done.map(s=>s.weight||0));
-    else if(chartMetric==='reps')val=Math.max(...done.map(s=>repsOf(s)));
+    else if(chartMetric==='reps')val=Math.max(...done.map(s=>repsMetricOf(s)));
     else if(chartMetric==='volume')val=done.reduce((a,s)=>a+(s.weight||0)*(s.reps||0),0);
-    else val=Math.max(...done.map(s=>calcORM(s.weight||0,repsOf(s))));
+    else val=Math.max(...done.map(s=>calcORM(s.weight||0,repsMetricOf(s))));
     if(val>0)points.push({date:new Date(w.date),val,label:new Date(w.date).toLocaleDateString('en-GB',{day:'numeric',month:'short'})});
   });
   const statsEl=document.getElementById('progress-stats');
@@ -5280,7 +5356,7 @@ function renderProgressChart(){
     +'<div class="week-stat" style="flex:1"><div class="week-stat-val">'+points.length+'</div><div class="week-stat-lbl">Sessions</div></div></div>';
   let latestSets=[];
   for(let i=state.history.length-1;i>=0;i--){const f=state.history[i].exercises.find(e=>e.exId===progressExId);if(f){latestSets=f.sets.filter(s=>s.done);break;}}
-  ormEl.innerHTML=latestSets.length?latestSets.map((s,i)=>'<div class="orm-row"><span>Set '+(i+1)+': '+(s.weight||'BW')+'kg x '+(isUniChart?(s.repsL||0)+'/'+(s.repsR||0):s.reps)+' reps</span><span style="color:var(--accent);font-family:monospace">~'+calcORM(s.weight||0,repsOf(s))+'kg</span></div>').join(''):'<div class="small text2">No recent data</div>';
+  ormEl.innerHTML=latestSets.length?latestSets.map((s,i)=>{const hasSplit=s.repsL!=null||s.repsR!=null;return'<div class="orm-row"><span>Set '+(i+1)+': '+(s.weight||'BW')+'kg x '+(hasSplit?(s.repsL||0)+'/'+(s.repsR||0):s.reps)+' reps</span><span style="color:var(--accent);font-family:monospace">~'+calcORM(s.weight||0,repsMetricOf(s))+'kg</span></div>';}).join(''):'<div class="small text2">No recent data</div>';
 }
 
 // ── FINISH WORKOUT ──
@@ -5466,8 +5542,8 @@ function buildLibraryExName(baseName,uni,modifier){
 function renderExRow(r,muscle,list){
   const allSets=r.matchingEx.flatMap(e=>getLastSets(e.id));
   const lastSet=allSets[allSets.length-1];
-  const isUniRow=r.matchingEx.length===1&&!!r.matchingEx[0].uni;
-  const lastStr=lastSet?(lastSet.weight?(lastSet.weight+'kg \xd7'+(isUniRow?(lastSet.repsL||0)+'/'+(lastSet.repsR||0):(lastSet.reps||0))):(isUniRow?(lastSet.repsL||0)+'/'+(lastSet.repsR||0):(lastSet.reps||0))+'r'):'';
+  const hasSplitRow=lastSet&&(lastSet.repsL!=null||lastSet.repsR!=null);
+  const lastStr=lastSet?(lastSet.weight?(lastSet.weight+'kg \xd7'+(hasSplitRow?(lastSet.repsL||0)+'/'+(lastSet.repsR||0):(lastSet.reps||0))):(hasSplitRow?(lastSet.repsL||0)+'/'+(lastSet.repsR||0):(lastSet.reps||0))+'r'):'';
   const uses=r.uses!==undefined?r.uses:r.matchingEx.reduce((n,e)=>n+state.history.reduce((nn,w)=>nn+(w.exercises||[]).filter(x=>x.exId===e.id).length,0),0);
   const equipStr=r.def&&r.def.equipment?r.def.equipment.slice(0,3).join(' / '):(r.matchingEx[0]&&r.matchingEx[0].machine?r.matchingEx[0].machine:'');
 
@@ -5864,8 +5940,8 @@ function openHistoryDetail(id){
       if(s.done){
         const t=SET_TYPES.find(x=>x.id===s.type)||SET_TYPES[0];
         const rpe=s.rpe!=null?'<span style="color:var(--orange)"> · '+(useRIR?'RIR ':'RPE ')+s.rpe+'</span>':'';
-        const isUniH=!!(exData&&exData.uni);
-        html+='<div class="small text2" style="padding:3px 0">Set '+(i+1)+' <span class="badge '+t.badgeClass+'">'+t.label+'</span> — '+(s.weight||'BW')+'kg x '+(isUniH?(s.repsL||0)+'/'+(s.repsR||0):s.reps)+' reps'+rpe+'</div>';
+        const hasSplitH=s.repsL!=null||s.repsR!=null;
+        html+='<div class="small text2" style="padding:3px 0">Set '+(i+1)+' <span class="badge '+t.badgeClass+'">'+t.label+'</span> — '+(s.weight||'BW')+'kg x '+(hasSplitH?(s.repsL||0)+'/'+(s.repsR||0):s.reps)+' reps'+rpe+'</div>';
         if(s.rpe!=null)allEff.push(useRIR?(10-s.rpe):s.rpe);
       }
     });
