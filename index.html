@@ -514,7 +514,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-28.4</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-28.7</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -719,6 +719,18 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div class="modal-actions">
       <button class="btn btn-ghost flex-1" onclick="closeNewExerciseModal()">Cancel</button>
       <button class="btn btn-primary flex-1" onclick="saveNewExercise()">Save</button>
+    </div>
+  </div>
+</div>
+<div class="modal-overlay" id="modal-merge-exercise">
+  <div class="modal"><div class="modal-handle"></div><div class="modal-title">Merge into...</div>
+    <div class="modal-body">
+      <div class="small text2" style="margin-bottom:10px" id="merge-source-label"></div>
+      <input id="merge-search" placeholder="Search exercises..." oninput="renderMergeExerciseList(this.value)"/>
+      <div id="merge-exercise-list" style="margin-top:10px;max-height:340px;overflow-y:auto"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost flex-1" onclick="closeModal('modal-merge-exercise')">Cancel</button>
     </div>
   </div>
 </div>
@@ -1428,13 +1440,18 @@ function getPR(exId){
   prCache[exId]=pr;
   return pr;
 }
-function getLastSets(exId){
+function getLastSets(exId,routineId){
+  let fallback=null;
   for(let i=0;i<state.history.length;i++){
     const w=state.history[i];
     const ex=(w.exercises||[]).find(e=>e.exId===exId);
-    if(ex&&ex.sets&&ex.sets.length)return ex.sets.map(s=>({...s,useRIR:!!ex.useRIR}));
+    if(ex&&ex.sets&&ex.sets.length){
+      const mapped=ex.sets.map(s=>({...s,useRIR:!!ex.useRIR}));
+      if(routineId&&w.routineId===routineId)return mapped;
+      if(!fallback)fallback=mapped;
+    }
   }
-  return[];
+  return fallback||[];
 }
 // Partials sets are auto-added (not part of the routine template) on the last training rotation
 // before a deload, so they don't replay via the normal getLastSets prev-session logic — this
@@ -1667,6 +1684,7 @@ function uiIcon(name, size, color){
     pencil:`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`,
     copy:`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
     trash:`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19,6l-1,14a2,2,0,0,1-2,2H8a2,2,0,0,1-2-2L5,6"/><path d="M10,11v6"/><path d="M14,11v6"/></svg>`,
+    merge:`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><path d="M6 3v7a4 4 0 0 0 4 4h8"/><path d="M14 10l4 4-4 4"/><path d="M6 14v7"/></svg>`,
   };
   return map[name]||'';
 }
@@ -2582,7 +2600,7 @@ function snapshotPreDeloadBaselines(m){
     const r=getRoutine(rid);if(!r)return;
     (r.exerciseIds||[]).forEach(exId=>{
       if(out[exId])return;
-      const sets=getLastSets(exId);if(!sets||!sets.length)return;
+      const sets=getLastSets(exId,rid);if(!sets||!sets.length)return;
       const normalSets=sets.filter(s=>s.done&&(!s.type||s.type==='normal'));
       if(!normalSets.length)return;
       out[exId]=normalSets.map(s=>({weight:s.weight,reps:s.reps,repsL:s.repsL,repsR:s.repsR}));
@@ -2596,7 +2614,7 @@ function loggedOrHistoryFallback(loggedExercises,routine){
   if(loggedExercises&&loggedExercises.length)return loggedExercises;
   if(!routine)return [];
   return(routine.exerciseIds||[]).map(exId=>{
-    const sets=getLastSets(exId);
+    const sets=getLastSets(exId,routine.id);
     return(sets&&sets.length)?{exId,sets}:null;
   }).filter(Boolean);
 }
@@ -3877,7 +3895,7 @@ function startRoutineWorkout(i){
   let mesoNote=null;
   const exercises=(r.exerciseIds||[]).map((id,idx)=>{
     const ex=getExercise(id);if(!ex)return null;
-    const prev=getLastSets(id);
+    const prev=getLastSets(id,r.id);
     // Restore saved superset group from routine
     const sg=(r.supersetGroups&&r.supersetGroups[idx])||null;
     const slotOverride=(activeMesoContext&&activeMeso&&activeMeso.slotRepRanges&&activeMesoContext.routinePos!=null&&activeMeso.slotRepRanges[activeMesoContext.routinePos])
@@ -3911,7 +3929,7 @@ function startRoutineWorkout(i){
       // The PREV column (built separately from real history) still shows what was actually done.
       sets=sets.map((s,si)=>{
         if(s.type&&s.type!=='normal')return s; // warmup/dropset/etc carry over as-is
-        const tgt=getSetTarget(id,{repRange},si,ex);
+        const tgt=getSetTarget(id,{repRange},si,ex,r.id);
         if(!tgt)return s;
         const withPrev={...s,prevWeight:s.weight,prevReps:s.reps,prevRepsL:s.repsL,prevRepsR:s.repsR};
         return ex.uni?{...withPrev,weight:tgt.weight,repsL:tgt.repsL,repsR:tgt.repsR}
@@ -4047,10 +4065,11 @@ function renderActiveWorkout(){
   updateWorkoutStats();updateWorkoutEstimate();initWorkoutReorder();saveActiveWorkoutDraft();
 }
 
-function getSessionsForExercise(exId,limit){
+function getSessionsForExercise(exId,limit,routineId){
   const sessions=[];
   for(let i=0;i<state.history.length&&sessions.length<limit;i++){
     const w=state.history[i];
+    if(routineId&&w.routineId!==routineId)continue;
     const ex=(w.exercises||[]).find(e=>e.exId===exId);
     // Only normal working sets count toward progression/trend — warmups, drop sets etc. don't reflect real progress
     const done=ex&&ex.sets?ex.sets.filter(s=>s.done&&(!s.type||s.type==='normal')).map(s=>({...s,useRIR:!!ex.useRIR})):[];
@@ -4058,9 +4077,9 @@ function getSessionsForExercise(exId,limit){
   }
   return sessions;
 }
-function checkMissedRepRange(exId,repRange){
+function checkMissedRepRange(exId,repRange,routineId){
   if(!repRange||!repRange.min)return null;
-  const sessions=getSessionsForExercise(exId,2);
+  const sessions=getSessionsForExercise(exId,2,routineId);
   if(sessions.length<2)return null;
   const missed=sessions.map(sets=>sets.every(s=>repsMetricOf(s)<repRange.min));
   if(missed[0]&&missed[1]){
@@ -4073,10 +4092,11 @@ const DEFAULT_REP_RANGE={min:8,max:12};
 // session, n=1 = the one before that). Mirrors getLastSets' own setIdx-or-fallback-to-last
 // tolerance for sessions with a different set count, and attaches useRIR the same way (mode can
 // change session to session, so each set carries whichever mode was actually active for it).
-function getSetAtSessionsAgo(exId,setIdx,n){
+function getSetAtSessionsAgo(exId,setIdx,n,routineId){
   let count=0;
   for(let i=0;i<state.history.length;i++){
     const w=state.history[i];
+    if(routineId&&w.routineId!==routineId)continue;
     const ex=(w.exercises||[]).find(e=>e.exId===exId);
     if(ex&&ex.sets&&ex.sets.length){
       if(count===n){
@@ -4091,13 +4111,27 @@ function getSetAtSessionsAgo(exId,setIdx,n){
 // Computes a genuine progression TARGET for a set (double progression: add reps within the
 // range, then bump weight and reset to the bottom of the range) rather than just copying
 // last session's numbers. Falls back to an 8–12 default range when none is set anywhere.
-function getSetTarget(exId,workoutEx,setIdx,exData){
-  const prevSets=getLastSets(exId);
+function getSetTarget(exId,workoutEx,setIdx,exData,routineId){
+  const prevSets=getLastSets(exId,routineId);
   const ps=prevSets[setIdx]||prevSets[prevSets.length-1];
   if(!ps||(!ps.weight&&!ps.reps&&!ps.repsL&&!ps.repsR))return null;
   const isUni=!!(exData&&exData.uni);
-  // Don't apply progression math on top of a warm-up/drop-set/etc slot — just carry it over as-is
+  // Don't apply progression math on top of a warm-up/drop-set/etc slot, but DO scale its weight
+  // proportionally to how the working weight is changing — e.g. if the top-set target is moving
+  // from 36kg to 38.5kg, a warm-up done at 20kg last time should move up with it, not sit frozen.
   if(ps.type&&ps.type!=='normal'){
+    const normalIdx=prevSets.findIndex(s=>!s.type||s.type==='normal');
+    if(normalIdx!==-1&&ps.weight){
+      const oldWorkingWeight=prevSets[normalIdx].weight||0;
+      if(oldWorkingWeight>0){
+        const workingTarget=getSetTarget(exId,workoutEx,normalIdx,exData,routineId);
+        const newWorkingWeight=workingTarget?workingTarget.weight:0;
+        if(newWorkingWeight&&newWorkingWeight!==oldWorkingWeight){
+          const scaled=Math.round((ps.weight*(newWorkingWeight/oldWorkingWeight))*2)/2;
+          return isUni?{weight:scaled,repsL:ps.repsL,repsR:ps.repsR}:{weight:scaled,reps:ps.reps};
+        }
+      }
+    }
     return isUni?{weight:ps.weight,repsL:ps.repsL,repsR:ps.repsR}:{weight:ps.weight,reps:ps.reps};
   }
   const range=(workoutEx&&workoutEx.repRange&&workoutEx.repRange.max)?workoutEx.repRange:DEFAULT_REP_RANGE;
@@ -4117,7 +4151,7 @@ function getSetTarget(exId,workoutEx,setIdx,exData){
     // shouldn't have counted against you either way, this only requires that the ceiling-hit
     // wasn't a one-off. Falls back to bumping off this single session when there isn't a second
     // one yet (not enough history to require agreement from).
-    const prior=getSetAtSessionsAgo(exId,setIdx,1);
+    const prior=getSetAtSessionsAgo(exId,setIdx,1,routineId);
     let confirmed=true;
     if(prior){
       const priorReps=repsMetricOf(prior);
@@ -4135,11 +4169,26 @@ function getSetTarget(exId,workoutEx,setIdx,exData){
       targetReps=repsMetric;
     }
   }else if(repsMetric<range.max||(isBW&&hasRoom)){
-    // For bodyweight work there's no weight to add, so past the range ceiling the only way to
-    // progress at all is more reps — keep pushing while effort still allows it. Once effort is
-    // genuinely maxed (last branch), it holds exactly like a weighted exercise does.
-    targetWeight=w;
-    targetReps=repsMetric+1;
+    // Below the FLOOR of the rep range (not just under the ceiling) for 2 sessions running is a
+    // genuine sign the weight itself is too heavy right now, not just "add a rep" — step it back
+    // down instead of repeating a weight that's already failed twice. Only for weighted exercises
+    // (nothing to step down for pure bodyweight work) and only once there's a second session to
+    // actually confirm the pattern with — a single bad day doesn't trigger this.
+    let stepDown=false;
+    if(!isBW&&range.min&&repsMetric<range.min){
+      const prior=getSetAtSessionsAgo(exId,setIdx,1,routineId);
+      if(prior)stepDown=repsMetricOf(prior)<range.min;
+    }
+    if(stepDown){
+      targetWeight=Math.max(0,Math.round((w-inc)*100)/100);
+      targetReps=range.min;
+    }else{
+      // For bodyweight work there's no weight to add, so past the range ceiling the only way to
+      // progress at all is more reps — keep pushing while effort still allows it. Once effort is
+      // genuinely maxed (last branch), it holds exactly like a weighted exercise does.
+      targetWeight=w;
+      targetReps=repsMetric+1;
+    }
   }else{
     // Topped out but no effort room left (RPE was already very high) — hold rather than push
     targetWeight=w;
@@ -4169,14 +4218,14 @@ function comparePerf(a,b){
 // Trend across up to 3 points (2 previous sessions' same-slot set + this one), not just a
 // single-session comparison. Requires both hops to agree before calling it up/down — a mixed
 // signal (up then down, or vice versa) reads as flat rather than picking a side.
-function getSetTrend(exId,workoutEx,setIdx){
+function getSetTrend(exId,workoutEx,setIdx,routineId){
   const set=workoutEx&&workoutEx.sets&&workoutEx.sets[setIdx];
   if(!set||!set.done)return null;
   if(set.type&&set.type!=='normal')return null;
   const exData=getExercise(exId)||{};
   const isUni=!!exData.uni;
   const liveSet={...set,useRIR:!!(workoutEx&&workoutEx.useRIR)}; // tag with the mode active right now
-  const sessions=getSessionsForExercise(exId,2); // [mostRecentPast, olderPast] — each set already tagged with its own mode
+  const sessions=getSessionsForExercise(exId,2,routineId); // [mostRecentPast, olderPast] — each set already tagged with its own mode
   const p1=sessions[0]?sessions[0][setIdx]:null;
   const p0=sessions[1]?sessions[1][setIdx]:null;
   const points=[];
@@ -4213,8 +4262,8 @@ function getEquipmentIncrement(exData){
   if(eq==='Cable')return inc.Cable||5;
   return inc.Other||2.5;
 }
-function suggestNextLoad(exId,workoutEx){
-  const sets=getLastSets(exId); // each set carries the mode it was actually logged under
+function suggestNextLoad(exId,workoutEx,routineId){
+  const sets=getLastSets(exId,routineId); // each set carries the mode it was actually logged under
   if(!sets||!sets.length)return null;
   // Anchor on the FIRST working set, not the last — fatigue means later sets in a session
   // always show fewer reps at the same weight, so using the last set chronically under-reads
@@ -4238,6 +4287,7 @@ function suggestNextLoad(exId,workoutEx){
   const range=workoutEx&&workoutEx.repRange&&workoutEx.repRange.max?workoutEx.repRange:null;
   const inc=getEquipmentIncrement(exData);
   const effortLbl=raw!=null?(useRIR?' @RIR '+raw:' @RPE '+raw):'';
+  const isBW=!!(exData&&exData.bw==='bw');
   let tip;
   if(range){
     const atTop=r>=range.max;
@@ -4245,17 +4295,25 @@ function suggestNextLoad(exId,workoutEx){
     let confirmed=true;
     if(atTop&&hasRoom){
       const firstIdx=sets.indexOf(first);
-      const prior=getSetAtSessionsAgo(exId,firstIdx,1);
+      const prior=getSetAtSessionsAgo(exId,firstIdx,1,routineId);
       if(prior){
         const priorReps=repsMetricOf(prior);
         const priorRpeEq=prior.rpe!=null?(prior.useRIR?(10-prior.rpe):prior.rpe):null;
         confirmed=priorReps>=range.max&&(priorRpeEq==null||priorRpeEq<=8);
       }
     }
+    let stepDown=false;
+    if(!atTop&&!isBW&&range.min&&r<range.min){
+      const firstIdx=sets.indexOf(first);
+      const prior=getSetAtSessionsAgo(exId,firstIdx,1,routineId);
+      if(prior)stepDown=repsMetricOf(prior)<range.min;
+    }
     if(atTop&&hasRoom&&confirmed){
       tip=inc?('Go up to '+(Math.round((w+inc)*100)/100)+'kg \u00d7 '+range.min+(range.min!==range.max?'\u2013'+range.max:'')+' reps'):('Push past '+range.max+' reps next time');
     }else if(atTop&&hasRoom&&!confirmed){
       tip='Hit it again at '+(w?w+'kg \u00d7 ':'')+r+' \u2014 one more like this and the weight goes up';
+    }else if(stepDown){
+      tip=inc?('Missed '+range.min+'+ twice \u2014 back off to '+Math.max(0,Math.round((w-inc)*100)/100)+'kg \u00d7 '+range.min):('Missed '+range.min+'+ twice \u2014 consider backing off');
     }else if(r<range.max){
       tip='Add a rep'+(w?' at '+w+'kg':'')+' \u2192 aim for '+(r+1)+' (target '+range.min+'\u2013'+range.max+')';
     }else{
@@ -4277,9 +4335,9 @@ function buildExerciseCard(exIdx){
   const metaParts=[exData.muscle,exData.secondary,exData.machine].filter(Boolean);
   if(ex.repRange&&ex.repRange.max)metaParts.push('Target '+ex.repRange.min+'\u2013'+ex.repRange.max+' reps');
   const noteHtml=exData.note?'<div class="note-row"><span class="note-icon">📌</span><span class="note-text">'+escHtml(exData.note)+'</span></div>':'';
-  const sugg=suggestNextLoad(ex.exId,ex);
+  const sugg=suggestNextLoad(ex.exId,ex,activeWorkout.sourceRoutineId);
   const suggHtml=sugg?'<div class="small" style="padding:2px 16px 10px;color:var(--accent2)">\ud83d\udca1 Set 1 last time: '+(sugg.w?sugg.w+'kg \u00d7 ':'')+sugg.r+'r'+sugg.effortLbl+' \u2192 '+escHtml(sugg.text)+'</div>':'';
-  const missMsg=checkMissedRepRange(ex.exId,ex.repRange);
+  const missMsg=checkMissedRepRange(ex.exId,ex.repRange,activeWorkout.sourceRoutineId);
   const missHtml=missMsg?'<div class="small" style="padding:6px 16px;margin:0 16px 8px;background:rgba(255,71,87,0.12);border-radius:8px;color:#ff6b7a">\u26a0\ufe0f '+escHtml(missMsg)+'</div>':'';
   const isBW=exData.bw==='bw';
   const effortHdr=ex.useRIR?'RIR':'RPE';
@@ -4313,7 +4371,7 @@ function renderSets(exIdx){
   const tbody=document.getElementById('sets-body-'+exIdx);if(!tbody)return;
   const isBW=exData.bw==='bw';
   const isUni=!!exData.uni;
-  const prevSets=getLastSets(ex.exId);
+  const prevSets=getLastSets(ex.exId,activeWorkout.sourceRoutineId);
   tbody.innerHTML='';
   ex.sets.forEach((set,setIdx)=>{
     const tr=document.createElement('tr');
@@ -4326,12 +4384,12 @@ function renderSets(exIdx){
     // Previous set for this slot — from history first, then from set's stored prev values
     const ps=prevSets[setIdx]||prevSets[prevSets.length-1];
     // Placeholder is a genuine progression TARGET (double progression), not just a copy of last time
-    const target=getSetTarget(ex.exId,ex,setIdx,exData);
+    const target=getSetTarget(ex.exId,ex,setIdx,exData,activeWorkout.sourceRoutineId);
     const phWeight=target?target.weight:(set.prevWeight||null);
     const phReps=target?target.reps:(set.prevReps||null);
     const phRepsL=target?target.repsL:(set.prevRepsL||null);
     const phRepsR=target?target.repsR:(set.prevRepsR||null);
-    const trend=set.done?getSetTrend(ex.exId,ex,setIdx):null;
+    const trend=set.done?getSetTrend(ex.exId,ex,setIdx,activeWorkout.sourceRoutineId):null;
     const prevTxt=isUni?
       (ps?(isBW?(ps.repsL||0)+'/'+(ps.repsR||0)+'r':(ps.weight||0)+'kg\n'+(ps.repsL||0)+'/'+(ps.repsR||0)+'r')
         :((set.prevRepsL||set.prevRepsR)?(isBW?(set.prevRepsL||0)+'/'+(set.prevRepsR||0)+'r':(set.prevWeight||0)+'kg\n'+(set.prevRepsL||0)+'/'+(set.prevRepsR||0)+'r'):'—'))
@@ -4519,7 +4577,7 @@ function toggleSetDone(exIdx,setIdx){
 
 function addExerciseToWorkout(exId){
   if(!activeWorkout)return;
-  const prev=getLastSets(exId);
+  const prev=getLastSets(exId,activeWorkout.sourceRoutineId);
   const sets=prev.length?prev.map(s=>({...s,done:false})):[newSet()];
   activeWorkout.exercises.push({exId,sets,supersetGroup:null,repRange:null,useRIR:false});
   renderActiveWorkout();
@@ -4531,7 +4589,7 @@ function addSet(exIdx){
   const ex=activeWorkout.exercises[exIdx];
   const last=ex.sets[ex.sets.length-1];
   const newSetIdx=ex.sets.length; // index of the set about to be added
-  const prev=getLastSets(ex.exId);
+  const prev=getLastSets(ex.exId,activeWorkout.sourceRoutineId);
 
   // Priority 1: previous session had this many sets — use that exact set slot
   const prevSlot=prev[newSetIdx];
@@ -5445,6 +5503,7 @@ function confirmFinishWorkout(){
     const workout={id:uid(),name,date:new Date().toISOString(),
       duration:Math.floor((Date.now()-activeWorkout.startTime)/1000),
       notes:activeWorkout.notes||'',exercises:cleanExercises,
+      routineId:activeWorkout.sourceRoutineId||null,
       mesoId:activeMesoContext?state.mesocycles[activeMesoContext.mesoIdx]?.id:null};
     state.history.unshift(workout);invalidatePRCache();
   }
@@ -5574,6 +5633,7 @@ function renderExRow(r,muscle,list){
   if(soloEx){
     const excluded=!!soloEx.excludePartials;
     dropdownItems+='<div class="r-dropdown-item" onclick="event.stopPropagation();toggleExcludePartials(\''+soloEx.id+'\');closeAllDropdowns()">'+(excluded?'☑':'☐')+' Exclude from Partials (pre-deload)</div>';
+    dropdownItems+='<div class="r-dropdown-item" onclick="event.stopPropagation();openMergeExerciseModal(\''+soloEx.id+'\');closeAllDropdowns()">'+uiIcon('merge',15,'currentColor')+' Merge into...</div>';
   }
 
 
@@ -5818,6 +5878,74 @@ function toggleExcludePartials(exId){
   const ex=getExercise(exId);if(!ex)return;
   ex.excludePartials=!ex.excludePartials;
   save();renderExerciseDB();
+}
+let mergeSourceExId=null;
+function openMergeExerciseModal(exId){
+  const ex=getExercise(exId);if(!ex)return;
+  mergeSourceExId=exId;
+  document.getElementById('merge-source-label').textContent='Move all history from "'+ex.name+'" into another exercise. Pick the one to keep:';
+  document.getElementById('merge-search').value='';
+  renderMergeExerciseList('');
+  openModal('modal-merge-exercise');
+}
+function renderMergeExerciseList(filter){
+  const list=document.getElementById('merge-exercise-list');if(!list)return;
+  const f=(filter||'').trim().toLowerCase();
+  const matches=state.exercises
+    .filter(e=>e.id!==mergeSourceExId&&(!f||e.name.toLowerCase().includes(f)))
+    .sort((a,b)=>a.name.localeCompare(b.name))
+    .slice(0,50);
+  list.innerHTML=matches.length?matches.map(e=>
+    '<div class="r-dropdown-item" style="border-bottom:1px solid var(--border);display:block" onclick="confirmMergeExercise(\''+e.id+'\')"><div class="bold">'+escHtml(e.name)+'</div><div class="small text3">'+escHtml(e.muscle||'')+'</div></div>'
+  ).join(''):'<div class="small text3" style="padding:10px 0">No matches</div>';
+}
+function confirmMergeExercise(targetId){
+  const source=getExercise(mergeSourceExId),target=getExercise(targetId);
+  if(!source||!target)return;
+  closeModal('modal-merge-exercise');
+  const historyCount=state.history.reduce((n,w)=>n+(w.exercises||[]).filter(e=>e.exId===mergeSourceExId).length,0);
+  forgeConfirm(
+    'Merge exercises?',
+    'Move all '+historyCount+' logged session'+(historyCount!==1?'s':'')+' of "'+source.name+'" into "'+target.name+'", and update any routines using "'+source.name+'" to use "'+target.name+'" instead. "'+source.name+'" will then be deleted. This can\'t be undone. Note: mesocycle-specific overrides (slot rep-range overrides, RIR-anchor baselines) for "'+source.name+'" won\'t carry over.',
+    ()=>{performExerciseMerge(mergeSourceExId,targetId);},
+    {okLabel:'Merge'}
+  );
+}
+// Migrates the parts of the data model that matter most for training decisions — logged history
+// (the actual data) and each routine's exercise list/rep-range/RIR-mode maps — then deletes the
+// now-unused source record. Deliberately does NOT touch mesocycle-level nested overrides (per-slot
+// rep-range overrides, RIR-anchor baselines, skip logs) — those are rarer, mid-cycle-only, and
+// migrating them safely would need much more certainty about which cycle/slot they came from.
+function performExerciseMerge(sourceId,targetId){
+  state.history.forEach(w=>{
+    (w.exercises||[]).forEach(ex=>{if(ex.exId===sourceId)ex.exId=targetId;});
+  });
+  state.routines.forEach(r=>{
+    if(!r.exerciseIds||!r.exerciseIds.includes(sourceId))return;
+    const alreadyHasTarget=r.exerciseIds.includes(targetId);
+    if(alreadyHasTarget){
+      // Already has the target elsewhere in this routine — drop the source's slot rather than
+      // create a duplicate row for the same exercise; keep supersetGroups aligned by position.
+      const idx=r.exerciseIds.indexOf(sourceId);
+      r.exerciseIds.splice(idx,1);
+      if(r.supersetGroups)r.supersetGroups.splice(idx,1);
+    }else{
+      r.exerciseIds=r.exerciseIds.map(id=>id===sourceId?targetId:id);
+    }
+    if(r.repRanges&&r.repRanges[sourceId]!=null){
+      if(r.repRanges[targetId]==null)r.repRanges[targetId]=r.repRanges[sourceId];
+      delete r.repRanges[sourceId];
+    }
+    if(r.rirModes&&r.rirModes[sourceId]!=null){
+      if(r.rirModes[targetId]==null)r.rirModes[targetId]=r.rirModes[sourceId];
+      delete r.rirModes[sourceId];
+    }
+  });
+  const idx=state.exercises.findIndex(e=>e.id===sourceId);
+  if(idx!==-1)state.exercises.splice(idx,1);
+  invalidatePRCache();
+  save();
+  renderExerciseDB();
 }
 function editLibraryExercise(rowIdx){
   const r=libRowRegistry[rowIdx];if(!r||!r.exId)return;
