@@ -514,7 +514,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-28.7</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-28.10</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -3908,9 +3908,36 @@ function startRoutineWorkout(i){
     if(!sets.length)sets=[newSet()];
     const adjArr=activeMeso?getMesoSetAdjustments(activeMeso,id):null;
     if(adjArr&&adjArr.length){
-      if(activeMeso.phase==='deload'&&sets.length>adjArr.length)sets=sets.slice(0,adjArr.length);
-      sets=sets.map((s,si)=>{
-        const adj=adjArr[si]||adjArr[adjArr.length-1];
+      // adjArr only covers NORMAL-type sets (baselines are snapshotted normal-only) — it must be
+      // mapped onto just the normal-type positions in `sets`, not by raw array index, or a
+      // warm-up sitting before the working sets would wrongly inherit the (cut) working weight.
+      if(activeMeso.phase==='deload'){
+        // Trim by dropping excess NORMAL sets specifically, not just slicing the raw array —
+        // slicing could keep a warm-up and lose a real working set instead.
+        let seenNormal=0;
+        sets=sets.filter(s=>{
+          if(s.type&&s.type!=='normal')return true;
+          seenNormal++;
+          return seenNormal<=adjArr.length;
+        });
+      }
+      let normalIdx=0;
+      const firstNormalRaw=sets.find(s=>!s.type||s.type==='normal');
+      const oldWorkingWeight=firstNormalRaw?(firstNormalRaw.weight||0):0;
+      const newWorkingWeight=(adjArr[0]&&adjArr[0].weight!=null)?adjArr[0].weight:oldWorkingWeight;
+      sets=sets.map(s=>{
+        if(s.type&&s.type!=='normal'){
+          // Scale a warm-up/etc set's weight the same way the plain-progression path does — by
+          // the ratio between the new and old working weight — so it moves with a deload cut or
+          // reset baseline instead of sitting frozen at last session's raw number.
+          if(oldWorkingWeight>0&&newWorkingWeight&&newWorkingWeight!==oldWorkingWeight&&s.weight){
+            const scaled=Math.round((s.weight*(newWorkingWeight/oldWorkingWeight))*2)/2;
+            return{...s,weight:scaled,prevWeight:s.weight};
+          }
+          return s;
+        }
+        const adj=adjArr[normalIdx]||adjArr[adjArr.length-1];
+        normalIdx++;
         if(!adj)return s;
         return{...s,
           weight:adj.weight!=null?adj.weight:s.weight,
@@ -5941,11 +5968,21 @@ function performExerciseMerge(sourceId,targetId){
       delete r.rirModes[sourceId];
     }
   });
+  // A workout in progress right now could still be pointing at the exercise about to disappear —
+  // without this, finishing it would save history against a now-deleted id and the active screen
+  // could break trying to look up a name for it.
+  if(activeWorkout){
+    (activeWorkout.exercises||[]).forEach(ex=>{if(ex.exId===sourceId)ex.exId=targetId;});
+    if(activeWorkout.originalExerciseIds){
+      activeWorkout.originalExerciseIds=activeWorkout.originalExerciseIds.map(id=>id===sourceId?targetId:id);
+    }
+  }
   const idx=state.exercises.findIndex(e=>e.id===sourceId);
   if(idx!==-1)state.exercises.splice(idx,1);
   invalidatePRCache();
   save();
   renderExerciseDB();
+  if(activeWorkout)renderActiveWorkout();
 }
 function editLibraryExercise(rowIdx){
   const r=libRowRegistry[rowIdx];if(!r||!r.exId)return;
