@@ -514,7 +514,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-30.6</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-30.7</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -4057,35 +4057,37 @@ function checkForWorkoutDraft(){
   if(!draft||!draft.activeWorkout||!draft.activeWorkout.exercises||!draft.activeWorkout.exercises.length){
     localStorage.removeItem('forge_active_draft');return;
   }
-  forgeConfirm(
-    'Resume Unfinished Workout?',
-    'It looks like a workout ("'+(draft.activeWorkout.name||'Workout')+'") didn\'t get finished last time — probably the app closed mid-session. Resume where you left off, or discard it.',
-    ()=>{
-      try{
-        activeWorkout=draft.activeWorkout;
-        activeMesoContext=draft.activeMesoContext||null;
-        // Restore the elapsed-time base so the workout clock doesn't jump back to 0.
-        if(!activeWorkout.startTime)activeWorkout.startTime=Date.now();
-        document.getElementById('active-workout-name').value=activeWorkout.name||'Workout';
-        document.getElementById('workout-notes').value=activeWorkout.notes||'';
-        renderActiveWorkout();
-        document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
-        document.getElementById('screen-workout').classList.add('active');
-        startWorkoutClock();
-      }catch(e){
-        // If anything above throws (e.g. the saved draft references something that no longer
-        // exists, or predates a data-shape change), don't leave the same unrestorable draft
-        // sitting in localStorage forever — clear it now so this doesn't loop on every launch,
-        // and tell the person plainly instead of silently doing nothing.
-        console.error('Resume workout failed — discarding the saved draft:',e);
-        activeWorkout=null;activeMesoContext=null;
-        localStorage.removeItem('forge_active_draft');
-        switchTab('home');
-        alert('That saved workout couldn\'t be restored (it may be from an older version) and has been discarded so it won\'t keep popping up.');
-      }
-    },
-    {okLabel:'Resume',cancelLabel:'Discard',danger:false,onCancel:()=>{localStorage.removeItem('forge_active_draft');}}
-  );
+  // Using the plain browser confirm() here instead of the custom modal — the custom
+  // forgeConfirm/history-based popup has repeatedly failed to reliably fire its own buttons for
+  // this exact flow (and for Discard Workout), regardless of how defensively the code after it is
+  // written. confirm() has no dependency on this app's modal/history bookkeeping at all.
+  const resuming=confirm('Resume Unfinished Workout?\n\nIt looks like a workout ("'+(draft.activeWorkout.name||'Workout')+'") didn\'t get finished last time. Tap OK to resume where you left off, or Cancel to discard it.');
+  if(!resuming){
+    localStorage.removeItem('forge_active_draft');
+    return;
+  }
+  try{
+    activeWorkout=draft.activeWorkout;
+    activeMesoContext=draft.activeMesoContext||null;
+    // Restore the elapsed-time base so the workout clock doesn't jump back to 0.
+    if(!activeWorkout.startTime)activeWorkout.startTime=Date.now();
+    document.getElementById('active-workout-name').value=activeWorkout.name||'Workout';
+    document.getElementById('workout-notes').value=activeWorkout.notes||'';
+    renderActiveWorkout();
+    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+    document.getElementById('screen-workout').classList.add('active');
+    startWorkoutClock();
+  }catch(e){
+    // If anything above throws (e.g. the saved draft references something that no longer
+    // exists, or predates a data-shape change), don't leave the same unrestorable draft
+    // sitting in localStorage forever — clear it now so this doesn't loop on every launch,
+    // and tell the person plainly instead of silently doing nothing.
+    console.error('Resume workout failed — discarding the saved draft:',e);
+    activeWorkout=null;activeMesoContext=null;
+    localStorage.removeItem('forge_active_draft');
+    switchTab('home');
+    alert('That saved workout couldn\'t be restored (it may be from an older version) and has been discarded so it won\'t keep popping up.');
+  }
 }
 function renderActiveWorkout(){
   const c=document.getElementById('exercises-container');c.innerHTML='<div style="height:8px"></div>';
@@ -5629,7 +5631,11 @@ function confirmFinishWorkout(){
   endWorkout();renderHistory();renderRoutinesList();maybeAutoSync();
 }
 function cancelWorkout(){
-  forgeConfirm('Discard Workout?','Everything you\'ve logged in this session will be lost. This cannot be undone.',()=>{activeMesoContext=null;endWorkout();});
+  // Native confirm() here instead of the custom modal — see checkForWorkoutDraft for why.
+  if(confirm('Discard Workout?\n\nEverything you\'ve logged in this session will be lost. This cannot be undone.')){
+    activeMesoContext=null;
+    endWorkout();
+  }
 }
 function endWorkout(){
   // Do the actual discard first and unconditionally — this is the part that must never fail to
