@@ -514,7 +514,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-28.10</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-30.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1292,10 +1292,19 @@ function load(){
   runMigrations();
   if(!state.accentColor)state.accentColor='#D97757';
   applyAccentColor(state.accentColor);
-  if(!state.routines||!state.routines.length){
-    const built=buildDefaultRoutineExercises();
-    state.routines=DEFAULT_ROUTINES_META.map(r=>({...r,exerciseIds:built[r.id]||[]}));
+  // Only ever seed the default routines on a genuine first run. Previously this fired any time
+  // state.routines was empty for ANY reason (e.g. a sync hiccup, a transient parse issue, or the
+  // user deleting their last routine on purpose) — silently replacing whatever the user had with
+  // the stock defaults on the very next load, with no way to get the real data back. The
+  // routinesInitialized flag makes the seed a one-time event instead of a standing rule.
+  if(!state.routinesInitialized){
+    if(!state.routines||!state.routines.length){
+      const built=buildDefaultRoutineExercises();
+      state.routines=DEFAULT_ROUTINES_META.map(r=>({...r,exerciseIds:built[r.id]||[]}));
+    }
+    state.routinesInitialized=true;
   }
+  if(!state.routines)state.routines=[];
   // Clear exercise IDs from routines that reference old-format IDs
   state.routines.forEach(r=>{
     r.exerciseIds=(r.exerciseIds||[]).filter(id=>id&&(id.startsWith('gx')||getExercise(id)));
@@ -5929,13 +5938,16 @@ function renderMergeExerciseList(filter){
 function confirmMergeExercise(targetId){
   const source=getExercise(mergeSourceExId),target=getExercise(targetId);
   if(!source||!target)return;
-  closeModal('modal-merge-exercise');
+  // Don't closeModal('modal-merge-exercise') here — that drives the browser-back integration via
+  // an async history.back(), and immediately calling openModal (forgeConfirm, below) to push a new
+  // state before that resolves desyncs the modal/history stack. Stack the confirm on top instead
+  // (a plain pushState — no race), and close the picker together with it once the user acts.
   const historyCount=state.history.reduce((n,w)=>n+(w.exercises||[]).filter(e=>e.exId===mergeSourceExId).length,0);
   forgeConfirm(
     'Merge exercises?',
     'Move all '+historyCount+' logged session'+(historyCount!==1?'s':'')+' of "'+source.name+'" into "'+target.name+'", and update any routines using "'+source.name+'" to use "'+target.name+'" instead. "'+source.name+'" will then be deleted. This can\'t be undone. Note: mesocycle-specific overrides (slot rep-range overrides, RIR-anchor baselines) for "'+source.name+'" won\'t carry over.',
-    ()=>{performExerciseMerge(mergeSourceExId,targetId);},
-    {okLabel:'Merge'}
+    ()=>{closeModal('modal-merge-exercise');performExerciseMerge(mergeSourceExId,targetId);},
+    {okLabel:'Merge',onCancel:()=>{closeModal('modal-merge-exercise');}}
   );
 }
 // Migrates the parts of the data model that matter most for training decisions — logged history
@@ -6709,7 +6721,7 @@ function renderBWChart(){
 // entry; closeModal() called from a Cancel/Done/backdrop tap consumes that entry via
 // history.back(), and skipNextPopstate prevents the resulting popstate from double-closing.
 let modalStack=[];
-let skipNextPopstate=false;
+let skipNextPopstate=0;
 function openModal(id){
   const el=document.getElementById(id);
   el.classList.add('open');
@@ -6724,12 +6736,12 @@ function closeModal(id){
   const idx=modalStack.lastIndexOf(id);
   if(idx!==-1){
     modalStack.splice(idx,1);
-    skipNextPopstate=true;
+    skipNextPopstate++;
     history.back();
   }
 }
 window.addEventListener('popstate',()=>{
-  if(skipNextPopstate){skipNextPopstate=false;return;}
+  if(skipNextPopstate>0){skipNextPopstate--;return;}
   if(modalStack.length){
     const id=modalStack.pop();
     const el=document.getElementById(id);
