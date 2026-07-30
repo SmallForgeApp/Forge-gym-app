@@ -514,7 +514,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-30.1</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-30.2</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1926,7 +1926,7 @@ function renderModifierChips(containerEl,stateObj,onChange){
 let editingExIdx=null;
 let editExWorkoutMeta={useRIR:false};
 let editExState={muscle:null,exDef:null,equipment:null,position:null,grip:null,isUni:false,modifier:null,modifierCustomMode:false,attachment:null,customValues:{},addingField:null,cablePosition:null,benchBack:null,benchSeat:null,showBenchSetup:false};
-load();initNavs();buildTimerPresets();buildPlateInventoryUI();checkForWorkoutDraft();
+load();initNavs();buildTimerPresets();buildPlateInventoryUI();renderHomeScreen();checkForWorkoutDraft();
 document.getElementById('barbell-weight-input').value=state.barbellWeight||20;
 document.getElementById('prog-inc-dumbbell').value=state.progressionIncrements.Dumbbell;
 document.getElementById('prog-inc-cable').value=state.progressionIncrements.Cable;
