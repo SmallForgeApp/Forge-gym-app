@@ -514,7 +514,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-30.4</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-30.6</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -4466,6 +4466,11 @@ function renderSets(exIdx){
 }
 let swipeState={active:false,startX:0,startY:0,dx:0,tr:null,exIdx:null,setIdx:null,decided:false,horizontal:false};
 function setSwipeStart(e,tr,exIdx,setIdx){
+  // Don't start swipe-tracking for touches that begin on the row's own controls (complete
+  // button, set-type button, weight/reps/RPE inputs) — otherwise the small incidental movement
+  // of pressing one of those can register as a leftward swipe and delete the set instead of (or
+  // as well as) completing it. A real delete-swipe should start from plain row space.
+  if(e.target.closest('button, input, select'))return;
   const t=e.touches[0];
   tr.style.transition='none';
   swipeState={active:true,startX:t.clientX,startY:t.clientY,dx:0,tr,exIdx,setIdx,decided:false,horizontal:false};
@@ -5626,7 +5631,26 @@ function confirmFinishWorkout(){
 function cancelWorkout(){
   forgeConfirm('Discard Workout?','Everything you\'ve logged in this session will be lost. This cannot be undone.',()=>{activeMesoContext=null;endWorkout();});
 }
-function endWorkout(){if(workoutTimer){clearInterval(workoutTimer);workoutTimer=null;}stopTimer();activeWorkout=null;localStorage.removeItem('forge_active_draft');switchTab('home');}
+function endWorkout(){
+  // Do the actual discard first and unconditionally — this is the part that must never fail to
+  // run, since it's what stops Discard/Finish from silently "doing nothing" and what stops the
+  // resume draft from reappearing forever. Everything after this is just UI cleanup.
+  activeWorkout=null;
+  localStorage.removeItem('forge_active_draft');
+  if(workoutTimer){clearInterval(workoutTimer);workoutTimer=null;}
+  try{
+    stopTimer();
+    switchTab('home');
+  }catch(e){
+    // If the timer cleanup or the Home re-render throws for any reason, don't leave the person
+    // stuck looking at the workout screen with no way out — fall back to a bare screen swap.
+    console.error('endWorkout: cleanup/render failed, falling back to a plain screen switch:',e);
+    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+    const home=document.getElementById('screen-home');
+    if(home)home.classList.add('active');
+    updateNavActive('home');
+  }
+}
 
 // Custom in-app confirm dialog — replaces native confirm() which can be
 // silently blocked/suppressed inside some installed PWA shells on Android.
