@@ -438,8 +438,12 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     </div>
     <div style="padding:0 16px 8px" id="plate-inventory-summary"></div>
     <div style="padding:0 16px 14px;display:none" id="plate-inventory-section"></div>
-    <div class="section-label">Progression Increments</div>
-    <div style="padding:0 16px 14px">
+    <div class="section-label" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleProgIncSection()">
+      <span>Progression Increments</span>
+      <span id="prog-inc-chevron" style="font-size:11px;color:var(--text3)">▸</span>
+    </div>
+    <div style="padding:0 16px 8px" id="prog-inc-summary"></div>
+    <div style="padding:0 16px 14px;display:none" id="prog-inc-section">
       <div class="small text2" style="margin-bottom:10px;line-height:1.6">The smallest realistic jump on each type of equipment — used to power weight suggestions. Barbell is calculated automatically from your plate inventory above.</div>
       <div class="input-label">Dumbbell (kg per side/hand)</div>
       <input type="number" step="0.5" id="prog-inc-dumbbell" inputmode="decimal" oninput="saveProgressionIncrement('Dumbbell',this.value)"/>
@@ -448,7 +452,12 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <div class="input-label mt12">Other / Machine (kg)</div>
       <input type="number" step="0.5" id="prog-inc-other" inputmode="decimal" oninput="saveProgressionIncrement('Other',this.value)"/>
     </div>
-    <div class="section-label">Warmup</div>
+    <div class="section-label">Timer Alerts</div>
+    <div style="padding:0 16px 14px">
+      <div class="small text2" style="margin-bottom:10px;line-height:1.6">Lets the rest-timer alert use your phone's actual notification sound/vibration instead of just an in-app chime — this is what allows it to cut through music playing in another app, the same way a text message does.</div>
+      <button class="btn btn-ghost btn-full" onclick="requestTimerNotifyPermission()">Enable Notification Alerts</button>
+      <div class="small text3" id="notify-permission-status" style="margin-top:8px"></div>
+    </div>
     <div class="section-label">Display</div>
     <div style="padding:0 16px 14px">
       <button class="btn btn-ghost btn-full" onclick="toggleTheme()">🌙 Toggle Dark / Light Mode</button>
@@ -522,7 +531,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-31.2</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-31.6</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1319,6 +1328,7 @@ function load(){
   });
   if(!state.plates||!Object.keys(state.plates).length){const p={};DEFAULT_PLATES.forEach(kg=>{p[kg]=4;});state.plates=p;}
   if(state.plateSectionCollapsed===undefined)state.plateSectionCollapsed=true;
+  if(state.progIncSectionCollapsed===undefined)state.progIncSectionCollapsed=true;
   if(!state.bodyWeights)state.bodyWeights=[];
   if(!state.bodyMeasurements)state.bodyMeasurements=[];
   // One-time migration: fold any legacy weight-only entries into the new measurements log
@@ -1492,6 +1502,24 @@ function checkSetForPR(exId,weight,reps){
 }
 function showPRToast(name){
   if(navigator.vibrate)navigator.vibrate([15,60,15]);
+  try{
+    if(!sharedAudioCtx)sharedAudioCtx=new(window.AudioContext||window.webkitAudioContext)();
+    if(sharedAudioCtx.state==='suspended')sharedAudioCtx.resume();
+    const now=sharedAudioCtx.currentTime;
+    // A single bright, quick "ding" — celebratory but much shorter than the rest-timer bell,
+    // since a PR fires mid-set and shouldn't linger or distract from the next lift.
+    [1,2.4,3.8].forEach((ratio,i)=>{
+      const osc=sharedAudioCtx.createOscillator();
+      const gain=sharedAudioCtx.createGain();
+      osc.type='sine';osc.frequency.value=1046.5*ratio;
+      const peak=0.4/Math.pow(i+1,0.8);
+      gain.gain.setValueAtTime(0,now);
+      gain.gain.linearRampToValueAtTime(peak,now+0.004);
+      gain.gain.exponentialRampToValueAtTime(0.001,now+0.4);
+      osc.connect(gain);gain.connect(sharedAudioCtx.destination);
+      osc.start(now);osc.stop(now+0.42);
+    });
+  }catch(e){/* audio not available — vibration still fires */}
   const t=document.createElement('div');t.className='pr-toast';t.textContent='PR! '+name;
   document.body.appendChild(t);setTimeout(()=>t.remove(),2500);
 }
@@ -1941,11 +1969,33 @@ document.getElementById('barbell-weight-input').value=state.barbellWeight||20;
 document.getElementById('prog-inc-dumbbell').value=state.progressionIncrements.Dumbbell;
 document.getElementById('prog-inc-cable').value=state.progressionIncrements.Cable;
 document.getElementById('prog-inc-other').value=state.progressionIncrements.Other;
+updateProgIncSummary();
+(function(){
+  const expanded=!state.progIncSectionCollapsed;
+  document.getElementById('prog-inc-section').style.display=expanded?'block':'none';
+  document.getElementById('prog-inc-chevron').textContent=expanded?'▾':'▸';
+})();
 document.getElementById('accent-color-input').value=state.accentColor||'#D97757';
+updateNotifyPermissionStatus();
 function saveProgressionIncrement(kind,val){
   const v=parseFloat(val);
   state.progressionIncrements[kind]=isNaN(v)||v<=0?state.progressionIncrements[kind]:v;
   save();
+  updateProgIncSummary();
+}
+// One-line summary shown when the section is collapsed — same reasoning as the Available Plates
+// summary: the actual numbers stay visible at a glance without needing to expand.
+function updateProgIncSummary(){
+  const el=document.getElementById('prog-inc-summary');if(!el)return;
+  const p=state.progressionIncrements;
+  el.innerHTML='<div class="small text2">Dumbbell '+p.Dumbbell+'kg \u00b7 Cable '+p.Cable+'kg \u00b7 Other '+p.Other+'kg. Tap to edit.</div>';
+}
+function toggleProgIncSection(){
+  state.progIncSectionCollapsed=!state.progIncSectionCollapsed;
+  save();
+  const expanded=!state.progIncSectionCollapsed;
+  document.getElementById('prog-inc-section').style.display=expanded?'block':'none';
+  document.getElementById('prog-inc-chevron').textContent=expanded?'▾':'▸';
 }
 function saveAccentColor(hex){
   applyAccentColor(hex);
@@ -5444,47 +5494,74 @@ function openTimerModal(){openModal('modal-timer');}
 function startCustomTimer(){const v=parseInt(document.getElementById('custom-timer-input').value);if(v>0){startRestTimer(v);closeModal('modal-timer');}}
 // Simple offline beep (three ascending tones) for timer completion — no network/asset needed.
 let sharedAudioCtx=null;
-// Short, quiet tick for each of the final 3 seconds counting down to the rest timer ending.
+// Short woodblock-style knock for each of the final 3 seconds counting down to the rest timer
+// ending — now matches the bell's percussive character (build .5) instead of a plain sine beep.
 function playTimerTick(){
   try{
     if(!sharedAudioCtx)sharedAudioCtx=new(window.AudioContext||window.webkitAudioContext)();
     if(sharedAudioCtx.state==='suspended')sharedAudioCtx.resume();
     const now=sharedAudioCtx.currentTime;
-    const osc=sharedAudioCtx.createOscillator();
+    // A knock reads as a filtered burst of noise with a very fast decay, not a pure tone — this
+    // makes the countdown feel like a percussive lead-in to the bell rather than an unrelated beep.
+    const dur=0.05;
+    const buffer=sharedAudioCtx.createBuffer(1,Math.ceil(sharedAudioCtx.sampleRate*dur),sharedAudioCtx.sampleRate);
+    const data=buffer.getChannelData(0);
+    for(let i=0;i<data.length;i++)data[i]=(Math.random()*2-1)*Math.pow(1-i/data.length,3);
+    const noise=sharedAudioCtx.createBufferSource();
+    noise.buffer=buffer;
+    const bandpass=sharedAudioCtx.createBiquadFilter();
+    bandpass.type='bandpass';bandpass.frequency.value=1400;bandpass.Q.value=2.2;
     const gain=sharedAudioCtx.createGain();
-    osc.type='sine';osc.frequency.value=660;
-    gain.gain.setValueAtTime(0,now);
-    gain.gain.linearRampToValueAtTime(0.22,now+0.008);
-    gain.gain.exponentialRampToValueAtTime(0.001,now+0.12);
-    osc.connect(gain);gain.connect(sharedAudioCtx.destination);
-    osc.start(now);osc.stop(now+0.13);
+    gain.gain.setValueAtTime(0.5,now);
+    gain.gain.exponentialRampToValueAtTime(0.001,now+dur);
+    noise.connect(bandpass);bandpass.connect(gain);gain.connect(sharedAudioCtx.destination);
+    noise.start(now);noise.stop(now+dur+0.01);
   }catch(e){/* audio not available — vibration still fires */}
+}
+// Fires the in-app chime + vibration (as before) AND, if permission has been granted, a real
+// system Notification. This matters specifically for "interrupts my music" — Android routes
+// notification sound/vibration through its own dedicated audio channel (the same one that lets a
+// text message duck Spotify), which is the actual mechanism behind that behavior. A web page has
+// no way to grab that channel directly — Web Audio/HTML5 audio just plays as ordinary media
+// audio, which competes with music rather than overriding it. A real Notification is the only
+// way this app can hook into that system-level interruption behavior at all.
+function fireTimerCompleteAlert(){
+  playTimerSound();
+  if(navigator.vibrate)navigator.vibrate([200,100,200]);
+  try{
+    if(typeof Notification!=='undefined'&&Notification.permission==='granted'){
+      new Notification('Rest Timer Done',{body:'Time to get back to it \ud83d\udcaa',tag:'forge-timer',renotify:true,vibrate:[200,100,200],silent:false});
+    }
+  }catch(e){/* Notification not available/supported here — the in-app chime still fired above */}
 }
 function playTimerSound(){
   try{
     if(!sharedAudioCtx)sharedAudioCtx=new(window.AudioContext||window.webkitAudioContext)();
     if(sharedAudioCtx.state==='suspended')sharedAudioCtx.resume();
     const now=sharedAudioCtx.currentTime;
-    // Low thump underneath the chime for a fuller, beefier feel rather than a thin beep
-    const bass=sharedAudioCtx.createOscillator();
-    const bassGain=sharedAudioCtx.createGain();
-    bass.type='sine';bass.frequency.value=110;
-    bassGain.gain.setValueAtTime(0,now);
-    bassGain.gain.linearRampToValueAtTime(0.5,now+0.012);
-    bassGain.gain.exponentialRampToValueAtTime(0.001,now+0.35);
-    bass.connect(bassGain);bassGain.connect(sharedAudioCtx.destination);
-    bass.start(now);bass.stop(now+0.36);
-    // Ascending chime — triangle wave (richer harmonics than sine) and louder than before
-    [880,1046.5,1318.5].forEach((freq,i)=>{
-      const osc=sharedAudioCtx.createOscillator();
-      const gain=sharedAudioCtx.createGain();
-      osc.type='triangle';osc.frequency.value=freq;
-      const t=now+i*0.15;
-      gain.gain.setValueAtTime(0,t);
-      gain.gain.linearRampToValueAtTime(0.55,t+0.012);
-      gain.gain.exponentialRampToValueAtTime(0.001,t+0.32);
-      osc.connect(gain);gain.connect(sharedAudioCtx.destination);
-      osc.start(t);osc.stop(t+0.34);
+    // Boxing-ring bell: two strikes in quick succession (ding-DING), each built from inharmonic
+    // partials rather than a clean harmonic series — a real struck bell/gong doesn't ring in neat
+    // integer multiples of its fundamental the way a chime or plucked string does; it's a cluster
+    // of slightly-detuned overtones (classic bell partial ratios), which is what actually reads
+    // as "metallic clang" rather than "musical note". Each partial decays at its own rate — higher
+    // partials die out fastest, same as a real bell — leaving the fundamental ringing out longest.
+    const fundamental=480;
+    const partials=[1,1.586,2.0,2.514,3.011,3.85,4.6]; // bell/gong-typical inharmonic ratios
+    [{t:0,vol:1,decayMul:1},{t:0.24,vol:0.85,decayMul:0.9}].forEach(strike=>{
+      const t0=now+strike.t;
+      partials.forEach((ratio,i)=>{
+        const osc=sharedAudioCtx.createOscillator();
+        const gain=sharedAudioCtx.createGain();
+        osc.type='sine';
+        osc.frequency.value=fundamental*ratio;
+        const peak=(0.34/Math.pow(i+1,0.85))*strike.vol;
+        const decay=(1.3-i*0.15)*strike.decayMul;
+        gain.gain.setValueAtTime(0,t0);
+        gain.gain.linearRampToValueAtTime(peak,t0+0.003); // hard, percussive attack
+        gain.gain.exponentialRampToValueAtTime(0.001,t0+Math.max(0.25,decay));
+        osc.connect(gain);gain.connect(sharedAudioCtx.destination);
+        osc.start(t0);osc.stop(t0+Math.max(0.25,decay)+0.05);
+      });
     });
   }catch(e){/* audio not available — vibration still fires */}
 }
@@ -5502,7 +5579,7 @@ function startRestTimer(seconds,label){
   // Force reflow so transition plays
   bar.getBoundingClientRect();
   bar.classList.add('visible');
-  restTimer=setInterval(()=>{restRemaining--;if(restRemaining<=0){stopTimer();playTimerSound();if(navigator.vibrate)navigator.vibrate([200,100,200]);}else{if(restRemaining<=3)playTimerTick();updateTimerDisplay();}},1000);
+  restTimer=setInterval(()=>{restRemaining--;if(restRemaining<=0){stopTimer();fireTimerCompleteAlert();}else{if(restRemaining<=3)playTimerTick();updateTimerDisplay();}},1000);
 }
 function updateTimerDisplay(){
   const m=Math.floor(restRemaining/60),s=restRemaining%60;
@@ -5511,7 +5588,7 @@ function updateTimerDisplay(){
 }
 function addTimer(s){
   restRemaining+=s;
-  if(restRemaining<=0){stopTimer();playTimerSound();if(navigator.vibrate)navigator.vibrate([200,100,200]);}
+  if(restRemaining<=0){stopTimer();fireTimerCompleteAlert();}
   else{updateTimerDisplay();}
 }
 function stopTimer(){
@@ -6426,6 +6503,19 @@ function renderReview(){
 // ── PLATE CALC ──
 // ── SETTINGS ──
 function saveBarbellWeight(v){const n=parseFloat(v);state.barbellWeight=(isNaN(n)||n<=0)?state.barbellWeight||20:n;save();}
+function requestTimerNotifyPermission(){
+  if(typeof Notification==='undefined'){
+    document.getElementById('notify-permission-status').textContent='Not supported on this browser/device.';
+    return;
+  }
+  Notification.requestPermission().then(updateNotifyPermissionStatus);
+}
+function updateNotifyPermissionStatus(){
+  const el=document.getElementById('notify-permission-status');if(!el)return;
+  if(typeof Notification==='undefined'){el.textContent='Not supported on this browser/device.';return;}
+  const p=Notification.permission;
+  el.textContent=p==='granted'?'\u2713 Enabled':p==='denied'?'Blocked \u2014 re-enable it in your browser/site settings.':'Not enabled yet.';
+}
 function buildPlateInventoryUI(){
   const sec=document.getElementById('plate-inventory-section');if(!sec)return;
   sec.innerHTML='<div class="small text2" style="margin-bottom:9px">How many of each plate do you own?</div>';
