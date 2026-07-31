@@ -294,6 +294,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     </div>
   </div>
   <div class="scroll pb" id="home-scroll" style="display:flex;flex-direction:column;">
+    <div id="paused-workout-banner"></div>
     <div class="home-sec" id="home-sec-meso" data-home-key="meso">
       <div id="active-meso-hero"></div>
     </div>
@@ -362,7 +363,10 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-orange flex-1" onclick="openSupersetModal()">🔗 Super</button>
       <button class="btn btn-primary flex-1" onclick="finishWorkout()">Done ✓</button>
     </div>
-    <button class="btn btn-danger btn-full" style="margin-top:7px" onclick="cancelWorkout()">Discard Workout</button>
+    <div style="display:flex;gap:7px;margin-top:7px">
+      <button class="btn btn-ghost flex-1" onclick="pauseWorkout()">⏸️ Pause for later</button>
+      <button class="btn btn-danger flex-1" onclick="cancelWorkout()">Discard Workout</button>
+    </div>
   </div>
 </div>
 
@@ -428,8 +432,12 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <div class="input-label">Your barbell weight (kg)</div>
       <input type="number" id="barbell-weight-input" value="20" inputmode="numeric" onchange="saveBarbellWeight(this.value)"/>
     </div>
-    <div class="section-label">Available Plates</div>
-    <div style="padding:0 16px 14px" id="plate-inventory-section"></div>
+    <div class="section-label" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="togglePlateSection()">
+      <span>Available Plates</span>
+      <span id="plate-section-chevron" style="font-size:11px;color:var(--text3)">▸</span>
+    </div>
+    <div style="padding:0 16px 8px" id="plate-inventory-summary"></div>
+    <div style="padding:0 16px 14px;display:none" id="plate-inventory-section"></div>
     <div class="section-label">Progression Increments</div>
     <div style="padding:0 16px 14px">
       <div class="small text2" style="margin-bottom:10px;line-height:1.6">The smallest realistic jump on each type of equipment — used to power weight suggestions. Barbell is calculated automatically from your plate inventory above.</div>
@@ -514,7 +522,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-30.8</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-31.2</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1310,6 +1318,7 @@ function load(){
     r.exerciseIds=(r.exerciseIds||[]).filter(id=>id&&(id.startsWith('gx')||getExercise(id)));
   });
   if(!state.plates||!Object.keys(state.plates).length){const p={};DEFAULT_PLATES.forEach(kg=>{p[kg]=4;});state.plates=p;}
+  if(state.plateSectionCollapsed===undefined)state.plateSectionCollapsed=true;
   if(!state.bodyWeights)state.bodyWeights=[];
   if(!state.bodyMeasurements)state.bodyMeasurements=[];
   // One-time migration: fold any legacy weight-only entries into the new measurements log
@@ -2427,6 +2436,7 @@ function initHomeDragSort(){
 function renderHomeScreen(){
   applyHomeLayout();
   initHomeDragSort();
+  renderPausedWorkoutBanner();
   renderActiveMesoHero();
   renderWeeklyConsistencyChart();
 }
@@ -4022,6 +4032,28 @@ function startRoutineWorkout(i){
 }
 function startEmptyWorkout(){beginWorkout('Workout',[],null,[]);}
 function beginWorkout(name,exercises,srcId,origIds){
+  const existingDraft=getSavedDraft();
+  if(existingDraft){
+    // There's only one saved-draft slot — starting a new workout now would silently overwrite
+    // (and lose) whatever's paused the next time this new one autosaves, with NO history entry
+    // and NO mesocycle credit for whatever was already logged. Make the safe option (go resume
+    // and properly finish it) the default/primary action, and discarding it entirely an explicit,
+    // clearly-labeled secondary choice — not the only option.
+    const pw=existingDraft.activeWorkout;
+    const doneCount=(pw.exercises||[]).reduce((n,e)=>n+(e.sets||[]).filter(s=>s.done).length,0);
+    const totalCount=(pw.exercises||[]).reduce((n,e)=>n+(e.sets||[]).length,0);
+    const pausedLbl=timeAgoFromMs(existingDraft.savedAt);
+    forgeConfirm(
+      'Paused Workout In Progress',
+      'You have a paused workout ("'+(pw.name||'Workout')+'")'+(pausedLbl?', paused '+pausedLbl:'')+', with '+doneCount+' of '+totalCount+' sets logged. Starting a new workout now won\'t save it to history or count toward your mesocycle. Resume it first to finish (or discard) it properly, or discard it now to start fresh.',
+      ()=>resumeSavedDraft(existingDraft),
+      {okLabel:'Resume It First',cancelLabel:'Discard & Start New',danger:false,onCancel:()=>{localStorage.removeItem('forge_active_draft');reallyBeginWorkout(name,exercises,srcId,origIds);}}
+    );
+    return;
+  }
+  reallyBeginWorkout(name,exercises,srcId,origIds);
+}
+function reallyBeginWorkout(name,exercises,srcId,origIds){
   activeWorkout={name,startTime:Date.now(),exercises,sourceRoutineId:srcId||null,originalExerciseIds:origIds||[],notes:''};
   document.getElementById('active-workout-name').value=name;
   document.getElementById('workout-notes').value='';
@@ -4042,50 +4074,102 @@ function getSupersetColor(gid){
 function saveActiveWorkoutDraft(){
   try{
     if(activeWorkout){
-      localStorage.setItem('forge_active_draft',JSON.stringify({activeWorkout,activeMesoContext}));
+      localStorage.setItem('forge_active_draft',JSON.stringify({activeWorkout,activeMesoContext,savedAt:Date.now()}));
     }else{
       localStorage.removeItem('forge_active_draft');
     }
   }catch(e){/* best-effort — losing the draft is no worse than the pre-existing behaviour */}
 }
 function checkForWorkoutDraft(){
-  let raw;
-  try{raw=localStorage.getItem('forge_active_draft');}catch(e){return;}
-  if(!raw)return;
-  let draft;
-  try{draft=JSON.parse(raw);}catch(e){localStorage.removeItem('forge_active_draft');return;}
-  if(!draft||!draft.activeWorkout||!draft.activeWorkout.exercises||!draft.activeWorkout.exercises.length){
-    localStorage.removeItem('forge_active_draft');return;
-  }
+  const draft=getSavedDraft();
+  if(!draft)return;
   forgeConfirm(
     'Resume Unfinished Workout?',
-    'It looks like a workout ("'+(draft.activeWorkout.name||'Workout')+'") didn\'t get finished last time — probably the app closed mid-session. Resume where you left off, or discard it.',
-    ()=>{
-      try{
-        activeWorkout=draft.activeWorkout;
-        activeMesoContext=draft.activeMesoContext||null;
-        // Restore the elapsed-time base so the workout clock doesn't jump back to 0.
-        if(!activeWorkout.startTime)activeWorkout.startTime=Date.now();
-        document.getElementById('active-workout-name').value=activeWorkout.name||'Workout';
-        document.getElementById('workout-notes').value=activeWorkout.notes||'';
-        renderActiveWorkout();
-        document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
-        document.getElementById('screen-workout').classList.add('active');
-        startWorkoutClock();
-      }catch(e){
-        // If anything above throws (e.g. the saved draft references something that no longer
-        // exists, or predates a data-shape change), don't leave the same unrestorable draft
-        // sitting in localStorage forever — clear it now so this doesn't loop on every launch,
-        // and tell the person plainly instead of silently doing nothing.
-        console.error('Resume workout failed — discarding the saved draft:',e);
-        activeWorkout=null;activeMesoContext=null;
-        localStorage.removeItem('forge_active_draft');
-        switchTab('home');
-        alert('That saved workout couldn\'t be restored (it may be from an older version) and has been discarded so it won\'t keep popping up.');
-      }
-    },
-    {okLabel:'Resume',cancelLabel:'Discard',danger:false,onCancel:()=>{localStorage.removeItem('forge_active_draft');}}
+    'It looks like a workout ("'+(draft.activeWorkout.name||'Workout')+'") didn\'t get finished last time — probably the app closed mid-session, or you paused it. Resume where you left off, or discard it.',
+    ()=>resumeSavedDraft(draft),
+    {okLabel:'Resume',cancelLabel:'Discard',danger:false,onCancel:()=>{localStorage.removeItem('forge_active_draft');renderPausedWorkoutBanner();}}
   );
+}
+// Reads and validates the saved draft without side effects (used by both the boot popup and the
+// Home screen's persistent "Paused Workout" banner). Returns null and cleans up automatically if
+// the stored data is missing, unparseable, or empty.
+function getSavedDraft(){
+  let raw;
+  try{raw=localStorage.getItem('forge_active_draft');}catch(e){return null;}
+  if(!raw)return null;
+  let draft;
+  try{draft=JSON.parse(raw);}catch(e){localStorage.removeItem('forge_active_draft');return null;}
+  if(!draft||!draft.activeWorkout||!draft.activeWorkout.exercises||!draft.activeWorkout.exercises.length){
+    localStorage.removeItem('forge_active_draft');return null;
+  }
+  return draft;
+}
+// Actually restores a saved draft into the live workout screen. Shared by the boot popup and the
+// Home banner's Resume button so both go through identical, already-hardened logic.
+function resumeSavedDraft(draft){
+  try{
+    activeWorkout=draft.activeWorkout;
+    activeMesoContext=draft.activeMesoContext||null;
+    // Restore the elapsed-time base so the workout clock doesn't jump back to 0.
+    if(!activeWorkout.startTime)activeWorkout.startTime=Date.now();
+    document.getElementById('active-workout-name').value=activeWorkout.name||'Workout';
+    document.getElementById('workout-notes').value=activeWorkout.notes||'';
+    renderActiveWorkout();
+    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+    document.getElementById('screen-workout').classList.add('active');
+    startWorkoutClock();
+  }catch(e){
+    // If anything above throws (e.g. the saved draft references something that no longer
+    // exists, or predates a data-shape change), don't leave the same unrestorable draft
+    // sitting in localStorage forever — clear it now so this doesn't loop on every launch,
+    // and tell the person plainly instead of silently doing nothing.
+    console.error('Resume workout failed — discarding the saved draft:',e);
+    activeWorkout=null;activeMesoContext=null;
+    localStorage.removeItem('forge_active_draft');
+    switchTab('home');
+    alert('That saved workout couldn\'t be restored (it may be from an older version) and has been discarded so it won\'t keep popping up.');
+  }
+}
+// Shows a persistent "Paused Workout" card on Home whenever a saved draft exists — not just the
+// one-time boot popup. This is what makes pausing reliable across multiple days/sessions: even
+// if you miss (or dismiss) the boot prompt, or open the app days later for something unrelated,
+// there's always a visible, obvious way back into the paused workout from Home itself.
+// Fine-grained "time ago" for a raw timestamp (minutes/hours/days) — distinct from daysAgo()
+// above, which is calendar-day granularity built for workout history and would just say "Today"
+// for something paused 20 minutes ago.
+function timeAgoFromMs(ts){
+  if(!ts)return'';
+  const mins=Math.floor((Date.now()-ts)/60000);
+  if(mins<1)return'just now';
+  if(mins<60)return mins+' min ago';
+  const hrs=Math.floor(mins/60);
+  if(hrs<24)return hrs+(hrs===1?' hour ago':' hours ago');
+  const days=Math.floor(hrs/24);
+  return days+(days===1?' day ago':' days ago');
+}
+function renderPausedWorkoutBanner(){
+  const el=document.getElementById('paused-workout-banner');
+  if(!el)return;
+  const draft=getSavedDraft();
+  if(!draft){el.innerHTML='';return;}
+  const w=draft.activeWorkout;
+  const doneCount=(w.exercises||[]).reduce((n,e)=>n+(e.sets||[]).filter(s=>s.done).length,0);
+  const totalCount=(w.exercises||[]).reduce((n,e)=>n+(e.sets||[]).length,0);
+  const pausedLbl=timeAgoFromMs(draft.savedAt);
+  el.innerHTML=
+    '<div style="margin:12px 16px 4px;padding:14px;background:var(--bg2);border:1px solid var(--accent2);border-radius:var(--radius)">'
+    +'<div style="font-weight:600;color:var(--accent2)">\u23f8\ufe0f Paused Workout'+(pausedLbl?' \u2014 '+pausedLbl:'')+'</div>'
+    +'<div class="small text2" style="margin:4px 0 12px">"'+escHtml(w.name||'Workout')+'" \u2014 '+doneCount+' of '+totalCount+' sets logged. Pick up where you left off, whenever you\'re ready.</div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button class="btn btn-primary flex-1" onclick="resumeSavedDraft(getSavedDraft())">Resume</button>'
+    +'<button class="btn btn-ghost flex-1" onclick="discardPausedWorkoutFromHome()">Discard</button>'
+    +'</div></div>';
+}
+function discardPausedWorkoutFromHome(){
+  forgeConfirm('Discard Paused Workout?','Everything logged in that session will be lost. This cannot be undone.',()=>{
+    localStorage.removeItem('forge_active_draft');
+    renderPausedWorkoutBanner();
+  });
 }
 function renderActiveWorkout(){
   const c=document.getElementById('exercises-container');c.innerHTML='<div style="height:8px"></div>';
@@ -4157,10 +4241,43 @@ function getSetAtSessionsAgo(exId,setIdx,n,routineId){
   }
   return null;
 }
+// Computes a next-set target from a set that was already completed earlier THIS session (as
+// opposed to getSetTarget's normal history-based logic). Same-day evidence of hitting the rep
+// ceiling with room to spare is trusted immediately — no need to wait for a second session to
+// "confirm" it the way cross-session progression does, since we just watched it happen.
+function getLiveProgressionTarget(loggedSet,workoutEx,exData){
+  const range=(workoutEx&&workoutEx.repRange&&workoutEx.repRange.max)?workoutEx.repRange:DEFAULT_REP_RANGE;
+  const isUni=!!(exData&&exData.uni);
+  const isBW=!!(exData&&exData.bw==='bw');
+  const inc=getEquipmentIncrement(exData||{});
+  const useRIR=!!loggedSet.useRIR;
+  const raw=loggedSet.rpe;
+  const rpeEq=raw!=null?(useRIR?(10-raw):raw):null;
+  const hasRoom=rpeEq==null||rpeEq<=8;
+  const w=loggedSet.weight||0;
+  const repsMetric=repsMetricOf(loggedSet);
+  if(!isBW&&inc&&repsMetric>=range.max&&hasRoom){
+    const targetWeight=Math.round((w+inc)*100)/100;
+    return isUni?{weight:targetWeight,repsL:range.min,repsR:range.min}:{weight:targetWeight,reps:range.min};
+  }
+  // Otherwise just carry today's own numbers forward as the suggestion — fresher and more
+  // relevant than falling back to last session's stale target now that we have live data.
+  return isUni?{weight:w,repsL:loggedSet.repsL,repsR:loggedSet.repsR}:{weight:w,reps:repsMetric};
+}
 // Computes a genuine progression TARGET for a set (double progression: add reps within the
 // range, then bump weight and reset to the bottom of the range) rather than just copying
 // last session's numbers. Falls back to an 8–12 default range when none is set anywhere.
 function getSetTarget(exId,workoutEx,setIdx,exData,routineId){
+  // If the set directly above this one was already completed earlier in TODAY'S session, let
+  // that live result drive the suggestion instead of only looking at last session's numbers —
+  // e.g. if set 1 already blew past the rep ceiling today with room to spare, set 2 should
+  // suggest more weight right away, not repeat last time's target and wait for some future
+  // session to notice the pattern.
+  const liveAbove=(workoutEx&&workoutEx.sets&&setIdx>0)?workoutEx.sets[setIdx-1]:null;
+  if(liveAbove&&liveAbove.done&&(liveAbove.weight||liveAbove.reps||liveAbove.repsL||liveAbove.repsR)&&(!liveAbove.type||liveAbove.type==='normal')){
+    const liveTarget=getLiveProgressionTarget(liveAbove,workoutEx,exData);
+    if(liveTarget)return liveTarget;
+  }
   const prevSets=getLastSets(exId,routineId);
   const ps=prevSets[setIdx]||prevSets[prevSets.length-1];
   if(!ps||(!ps.weight&&!ps.reps&&!ps.repsL&&!ps.repsR))return null;
@@ -4314,12 +4431,30 @@ function getEquipmentIncrement(exData){
 function suggestNextLoad(exId,workoutEx,routineId){
   const sets=getLastSets(exId,routineId); // each set carries the mode it was actually logged under
   if(!sets||!sets.length)return null;
-  // Anchor on the FIRST working set, not the last — fatigue means later sets in a session
-  // always show fewer reps at the same weight, so using the last set chronically under-reads
-  // readiness to progress (it can sit below the rep ceiling indefinitely even once the first
-  // set has been topping out for sessions). The first set is the freshest and the one that
-  // genuinely tells you whether the weight is still challenging enough.
-  const first=sets.find(s=>!s.type||s.type==='normal')||sets[0];
+  // Which set is this tip actually for? Once sets start getting completed this session, walk
+  // forward to the next not-yet-done one instead of staying frozen on set 1 — the coaching tip
+  // should keep pace with where you actually are in the exercise, not just cover the first set.
+  let targetIdx=0,anchor=null,anchorIsLive=false;
+  if(workoutEx&&workoutEx.sets&&workoutEx.sets.length){
+    const nextUndone=workoutEx.sets.findIndex(s=>!s.done&&(!s.type||s.type==='normal'));
+    if(nextUndone===-1)return null; // every working set this session is already done — nothing left to suggest
+    targetIdx=nextUndone;
+    // If the set right before this one was already completed THIS session, anchor the tip on
+    // that live result instead of history — same reasoning as getLiveProgressionTarget: same-day
+    // evidence is more relevant than what happened last time, and doesn't need cross-session
+    // confirmation before acting on it.
+    const liveAbove=targetIdx>0?workoutEx.sets[targetIdx-1]:null;
+    if(liveAbove&&liveAbove.done&&(liveAbove.weight||liveAbove.reps||liveAbove.repsL||liveAbove.repsR)&&(!liveAbove.type||liveAbove.type==='normal')){
+      anchor=liveAbove;anchorIsLive=true;
+    }
+  }
+  // No live anchor — fall back to history for whichever set slot we're targeting. Sets earlier
+  // in a session read fresher than later ones (fatigue drags later-set reps down at the same
+  // weight even once the exercise overall has room to progress), so for set 1 specifically this
+  // still anchors on the historical first working set as before; for later slots it anchors on
+  // that same slot's own history.
+  if(!anchor)anchor=(targetIdx===0?sets.find(s=>!s.type||s.type==='normal'):sets[targetIdx])||sets[0];
+  const first=anchor;
   if(!first||(!first.weight&&!first.reps&&!first.repsL&&!first.repsR))return null;
   const exData=getExercise(exId)||{};
   const hasSplit=first.repsL!=null||first.repsR!=null;
@@ -4342,9 +4477,8 @@ function suggestNextLoad(exId,workoutEx,routineId){
     const atTop=r>=range.max;
     const hasRoom=rpeEq==null||rpeEq<=8;
     let confirmed=true;
-    if(atTop&&hasRoom){
-      const firstIdx=sets.indexOf(first);
-      const prior=getSetAtSessionsAgo(exId,firstIdx,1,routineId);
+    if(atTop&&hasRoom&&!anchorIsLive){
+      const prior=getSetAtSessionsAgo(exId,targetIdx,1,routineId);
       if(prior){
         const priorReps=repsMetricOf(prior);
         const priorRpeEq=prior.rpe!=null?(prior.useRIR?(10-prior.rpe):prior.rpe):null;
@@ -4352,9 +4486,8 @@ function suggestNextLoad(exId,workoutEx,routineId){
       }
     }
     let stepDown=false;
-    if(!atTop&&!isBW&&range.min&&r<range.min){
-      const firstIdx=sets.indexOf(first);
-      const prior=getSetAtSessionsAgo(exId,firstIdx,1,routineId);
+    if(!atTop&&!isBW&&range.min&&r<range.min&&!anchorIsLive){
+      const prior=getSetAtSessionsAgo(exId,targetIdx,1,routineId);
       if(prior)stepDown=repsMetricOf(prior)<range.min;
     }
     if(atTop&&hasRoom&&confirmed){
@@ -4375,7 +4508,7 @@ function suggestNextLoad(exId,workoutEx,routineId){
   }else{
     tip=inc?('Try '+(Math.round((w+inc/2)*100)/100)+'kg \u00d7 '+r+', or '+w+'kg \u00d7 '+(r+1)):('Try '+(r+1)+' reps');
   }
-  return {text:tip,w,r:rDisplay,effortLbl};
+  return {text:tip,w,r:rDisplay,effortLbl,setIdx:targetIdx,isLive:anchorIsLive};
 }
 function buildExerciseCard(exIdx){
   const ex=activeWorkout.exercises[exIdx];
@@ -4385,7 +4518,8 @@ function buildExerciseCard(exIdx){
   if(ex.repRange&&ex.repRange.max)metaParts.push('Target '+ex.repRange.min+'\u2013'+ex.repRange.max+' reps');
   const noteHtml=exData.note?'<div class="note-row"><span class="note-icon">📌</span><span class="note-text">'+escHtml(exData.note)+'</span></div>':'';
   const sugg=suggestNextLoad(ex.exId,ex,activeWorkout.sourceRoutineId);
-  const suggHtml=sugg?'<div class="small" style="padding:2px 16px 10px;color:var(--accent2)">\ud83d\udca1 Set 1 last time: '+(sugg.w?sugg.w+'kg \u00d7 ':'')+sugg.r+'r'+sugg.effortLbl+' \u2192 '+escHtml(sugg.text)+'</div>':'';
+  const suggText=sugg?('\ud83d\udca1 Set '+(sugg.setIdx+1)+(sugg.isLive?' just now':' last time')+': '+(sugg.w?sugg.w+'kg \u00d7 ':'')+sugg.r+'r'+sugg.effortLbl+' \u2192 '+escHtml(sugg.text)):'';
+  const suggHtml='<div class="small" id="tip-'+exIdx+'" style="padding:2px 16px 10px;color:var(--accent2)">'+suggText+'</div>';
   const missMsg=checkMissedRepRange(ex.exId,ex.repRange,activeWorkout.sourceRoutineId);
   const missHtml=missMsg?'<div class="small" style="padding:6px 16px;margin:0 16px 8px;background:rgba(255,71,87,0.12);border-radius:8px;color:#ff6b7a">\u26a0\ufe0f '+escHtml(missMsg)+'</div>':'';
   const isBW=exData.bw==='bw';
@@ -4463,6 +4597,17 @@ function renderSets(exIdx){
     tr.ontouchend=()=>setSwipeEnd();
     tr.ontouchcancel=()=>setSwipeEnd();
   });
+  updateExerciseTip(exIdx);
+}
+// Refreshes the top-of-card tip in place (see suggestNextLoad) without rebuilding the whole
+// exercise card — called every time the sets table redraws so the tip walks forward with the
+// session instead of staying frozen on whatever it said when the card was first built.
+function updateExerciseTip(exIdx){
+  const ex=activeWorkout.exercises[exIdx];
+  const tipEl=document.getElementById('tip-'+exIdx);
+  if(!ex||!tipEl)return;
+  const sugg=suggestNextLoad(ex.exId,ex,activeWorkout.sourceRoutineId);
+  tipEl.innerHTML=sugg?('\ud83d\udca1 Set '+(sugg.setIdx+1)+(sugg.isLive?' just now':' last time')+': '+(sugg.w?sugg.w+'kg \u00d7 ':'')+sugg.r+'r'+sugg.effortLbl+' \u2192 '+escHtml(sugg.text)):'';
 }
 let swipeState={active:false,startX:0,startY:0,dx:0,tr:null,exIdx:null,setIdx:null,decided:false,horizontal:false};
 function setSwipeStart(e,tr,exIdx,setIdx){
@@ -5631,6 +5776,27 @@ function confirmFinishWorkout(){
 function cancelWorkout(){
   forgeConfirm('Discard Workout?','Everything you\'ve logged in this session will be lost. This cannot be undone.',()=>{activeMesoContext=null;endWorkout();});
 }
+// Deliberately steps away from an in-progress workout, to come back to later — possibly days
+// later. Unlike endWorkout()/Discard, this explicitly KEEPS the saved draft in localStorage: the
+// whole point is that it survives being closed, backgrounded, or reopened on another day. The
+// live in-memory activeWorkout is still cleared so Home doesn't think a workout is active while
+// showing it — the saved draft alone is the source of truth while paused.
+function pauseWorkout(){
+  saveActiveWorkoutDraft(); // make sure the very latest state (e.g. an unsaved note) is captured
+  activeWorkout=null;
+  activeMesoContext=null;
+  if(workoutTimer){clearInterval(workoutTimer);workoutTimer=null;}
+  try{
+    stopTimer();
+    switchTab('home');
+  }catch(e){
+    console.error('pauseWorkout: cleanup/render failed, falling back to a plain screen switch:',e);
+    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+    const home=document.getElementById('screen-home');
+    if(home)home.classList.add('active');
+    updateNavActive('home');
+  }
+}
 function endWorkout(){
   // Do the actual discard first and unconditionally — this is the part that must never fail to
   // run, since it's what stops Discard/Finish from silently "doing nothing" and what stops the
@@ -6269,8 +6435,28 @@ function buildPlateInventoryUI(){
     row.innerHTML='<span class="bold">'+kg+'kg plates</span><input type="number" inputmode="numeric" value="'+(state.plates[kg]||0)+'" min="0" max="20" style="width:68px;text-align:center" onchange="updatePlateCount('+kg+',this.value)"/>';
     sec.appendChild(row);
   });
+  updatePlateInventorySummary();
+  const expanded=!state.plateSectionCollapsed;
+  document.getElementById('plate-inventory-section').style.display=expanded?'block':'none';
+  document.getElementById('plate-section-chevron').textContent=expanded?'▾':'▸';
 }
-function updatePlateCount(kg,v){state.plates[kg]=parseInt(v)||0;save();}
+// One-line summary shown when the plate section is collapsed, so the smallest-plate-driven
+// barbell increment (see getEquipmentIncrement) is still visible at a glance without expanding.
+function updatePlateInventorySummary(){
+  const summaryEl=document.getElementById('plate-inventory-summary');if(!summaryEl)return;
+  const owned=DEFAULT_PLATES.filter(kg=>(state.plates[kg]||0)>0);
+  summaryEl.innerHTML=owned.length
+    ?'<div class="small text2">'+owned.length+' size'+(owned.length!==1?'s':'')+' set \u2014 smallest '+owned[0]+'kg. Tap to edit.</div>'
+    :'<div class="small text2">No plates set yet \u2014 tap to edit.</div>';
+}
+function togglePlateSection(){
+  state.plateSectionCollapsed=!state.plateSectionCollapsed;
+  save();
+  const expanded=!state.plateSectionCollapsed;
+  document.getElementById('plate-inventory-section').style.display=expanded?'block':'none';
+  document.getElementById('plate-section-chevron').textContent=expanded?'▾':'▸';
+}
+function updatePlateCount(kg,v){state.plates[kg]=parseInt(v)||0;save();updatePlateInventorySummary();}
 function resetAllData(){if(confirm('Reset ALL data? Cannot be undone.')){localStorage.removeItem('forge_v4');localStorage.removeItem('forge_v3');location.reload();}}
 
 // ============================================================
