@@ -190,6 +190,32 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .modal-handle{width:40px;height:4px;background:var(--border);border-radius:2px;margin:12px auto 0;}
 .modal-title{font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:1.5px;padding:14px 20px 4px;}
 .modal-body{padding:12px 20px 20px;}.modal-actions{display:flex;gap:10px;padding:0 20px 8px;}
+.soreness-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);gap:10px;}
+.soreness-row:last-child{border-bottom:none;}
+.soreness-scale{display:flex;gap:4px;}
+.soreness-btn{width:34px;height:34px;border-radius:50%;border:1px solid var(--border);background:var(--bg);color:var(--text2);font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;}
+.soreness-btn.active[data-score="0"]{background:var(--accent);border-color:var(--accent);color:#fff;}
+.soreness-btn.active[data-score="1"]{background:#2ed573;border-color:#2ed573;color:#fff;}
+.soreness-btn.active[data-score="2"]{background:#ff8c00;border-color:#ff8c00;color:#fff;}
+.soreness-btn.active[data-score="3"]{background:var(--red);border-color:var(--red);color:#fff;}
+.exercise-soreness-warn{margin:2px 16px 10px;padding:8px 12px;border-radius:10px;font-size:12.5px;line-height:1.5;}
+.exercise-soreness-warn.mod{background:rgba(255,140,0,0.14);border:1px solid #ff8c00;color:#ff8c00;}
+.exercise-soreness-warn.severe{background:rgba(255,71,87,0.14);border:1px solid var(--red);color:var(--red);}
+.pef-panel{margin:2px 16px 12px;padding:12px;background:var(--bg2);border:1px solid var(--accent2);border-radius:var(--radius);}
+.pef-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);}
+.pef-row:last-child{border-bottom:none;}
+.pef-scale{display:flex;gap:4px;flex-shrink:0;}
+.pef-btn{width:32px;height:32px;border-radius:50%;border:1px solid var(--border);background:var(--bg);color:var(--text2);font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;}
+.pef-btn.active[data-score="0"]{background:var(--accent);border-color:var(--accent);color:#fff;}
+.pef-btn.active[data-score="1"]{background:#ff8c00;border-color:#ff8c00;color:#fff;}
+.pef-btn.active[data-score="2"]{background:var(--red);border-color:var(--red);color:#fff;}
+.pef-summary{margin:2px 16px 12px;padding:8px 12px;background:var(--bg2);border-radius:10px;font-size:12.5px;color:var(--text2);display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.vl-table-row{display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr 1fr;gap:6px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);}
+.vl-table-row:first-child{padding-top:0;}
+.vl-table-row:last-child{border-bottom:none;}
+.vl-table-row.header{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.3px;}
+.vl-table-row input{width:100%;text-align:center;padding:5px 2px;font-size:13px;}
+.vl-muscle-name{font-weight:600;font-size:13px;}
 .set-type-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
 .set-type-option{padding:12px;border-radius:var(--radius-sm);border:2px solid var(--border);cursor:pointer;transition:all 0.15s;text-align:center;}
 .set-type-option.selected{border-color:var(--accent);background:rgba(var(--accent-rgb),0.08);}
@@ -452,6 +478,15 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <div class="input-label mt12">Other / Machine (kg)</div>
       <input type="number" step="0.5" id="prog-inc-other" inputmode="decimal" oninput="saveProgressionIncrement('Other',this.value)"/>
     </div>
+    <div class="section-label" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleVolumeLandmarksSection()">
+      <span>Volume Landmarks</span>
+      <span id="vl-section-chevron" style="font-size:11px;color:var(--text3)">▸</span>
+    </div>
+    <div style="padding:0 16px 8px" id="vl-section-summary"></div>
+    <div style="padding:0 16px 14px;display:none" id="vl-section-body">
+      <div class="small text2" style="margin-bottom:10px;line-height:1.6">Weekly working-set landmarks per muscle — MV (maintenance), MEV (minimum effective), MAV (maximum adaptive), MRV (maximum recoverable). Used to judge whether a muscle's weekly volume (in Review) is too low, in the growth zone, or past what you can likely recover from. Defaults are a reasonable starting point, not a prescription — tune them to your own recovery over time.</div>
+      <div id="vl-table"></div>
+    </div>
     <div class="section-label">Timer Alerts</div>
     <div style="padding:0 16px 14px">
       <div class="small text2" style="margin-bottom:10px;line-height:1.6">Lets the rest-timer alert use your phone's actual notification sound/vibration instead of just an in-app chime — this is what allows it to cut through music playing in another app, the same way a text message does.</div>
@@ -531,7 +566,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-07-31.6</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-01.6</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -547,6 +582,31 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div class="modal-actions">
       <button class="btn btn-ghost flex-1" onclick="closeModal('modal-gym-setup')">Close</button>
       <button class="btn btn-primary flex-1" id="gym-setup-start-btn">▶ Start</button>
+    </div>
+  </div>
+</div>
+<div class="modal-overlay" id="modal-soreness">
+  <div class="modal"><div class="modal-handle"></div>
+    <div class="modal-title">How sore are you today?</div>
+    <div class="modal-body">
+      <div class="small text2" style="margin-bottom:10px">Rate soreness for each muscle you're about to train — this only adjusts today's on-screen guidance, nothing is changed automatically.</div>
+      <div id="soreness-list"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost flex-1" onclick="closeSorenessModal()">Cancel</button>
+      <button class="btn btn-primary flex-1" id="soreness-start-btn">Save &amp; Begin Workout</button>
+    </div>
+  </div>
+</div>
+<div class="modal-overlay" id="modal-soreness-impact">
+  <div class="modal"><div class="modal-handle"></div>
+    <div class="modal-title">Did soreness affect today?</div>
+    <div class="modal-body">
+      <div class="small text2" style="margin-bottom:10px">You rated these muscles sore before starting — now that it's done, how much did it actually limit today's training?</div>
+      <div id="soreness-impact-list"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary btn-full" id="soreness-impact-save-btn">Save &amp; Continue</button>
     </div>
   </div>
 </div>
@@ -1211,7 +1271,7 @@ function buildDefaultRoutineExercises(){
 // Bump this whenever a change to `state`'s shape needs a one-time migration in load() below.
 const CURRENT_SCHEMA_VERSION=2;
 let state={schemaVersion:CURRENT_SCHEMA_VERSION,exercises:[],routines:[],history:[],mesocycles:[],activeMesoId:null,equipment:null,barbellWeight:20,plates:{},warmupDone:{},bodyWeights:[],bodyMeasurements:[],exDbSort:'muscle',addExSort:'muscle',filterByEquip:true,addExFilterEquip:true,lightMode:false};
-let activeWorkout=null,workoutTimer=null,restTimer=null,restRemaining=0;
+let activeWorkout=null,workoutTimer=null,restTimer=null,restRemaining=0,restEndTime=null;
 let activeMesoContext=null;
 let mesoReelExpanded={}; // mesoIdx -> bool, ephemeral UI-only state for the home hero's reel expand/collapse (not persisted)
 let editingNoteExId=null,editingSetTypeInfo=null,pendingSetType=null,fromWorkout=false,editingExId=null,viewingRoutineIdx=null,libRowRegistry=[],exDbMuscleView=null,exDbMachineExpanded={},pickerDestination='workout';
@@ -1329,6 +1389,7 @@ function load(){
   if(!state.plates||!Object.keys(state.plates).length){const p={};DEFAULT_PLATES.forEach(kg=>{p[kg]=4;});state.plates=p;}
   if(state.plateSectionCollapsed===undefined)state.plateSectionCollapsed=true;
   if(state.progIncSectionCollapsed===undefined)state.progIncSectionCollapsed=true;
+  if(state.vlSectionCollapsed===undefined)state.vlSectionCollapsed=true;
   if(!state.bodyWeights)state.bodyWeights=[];
   if(!state.bodyMeasurements)state.bodyMeasurements=[];
   // One-time migration: fold any legacy weight-only entries into the new measurements log
@@ -1380,6 +1441,18 @@ function load(){
   if(!state.equipmentFilterMode)state.equipmentFilterMode='all';
   if(!state.progressionIncrements)state.progressionIncrements={Dumbbell:2,Cable:5,Other:2.5};
   if(!state.weeklyWorkoutTarget)state.weeklyWorkoutTarget=4;
+  if(!state.volumeLandmarks||!Object.keys(state.volumeLandmarks).length){
+    // Approximate, widely-cited starting points for weekly set landmarks — MV (maintenance),
+    // MEV (minimum effective), MAV (maximum adaptive), MRV (maximum recoverable). These vary a
+    // lot person to person; treat as a reasonable default to tune from, not a prescription.
+    state.volumeLandmarks={
+      Chest:{mv:4,mev:8,mav:16,mrv:22},Back:{mv:6,mev:10,mav:18,mrv:25},
+      Shoulders:{mv:4,mev:8,mav:20,mrv:26},Biceps:{mv:4,mev:8,mav:16,mrv:26},
+      Triceps:{mv:2,mev:6,mav:12,mrv:18},Quads:{mv:4,mev:8,mav:15,mrv:20},
+      Hamstrings:{mv:2,mev:6,mav:12,mrv:20},Glutes:{mv:0,mev:4,mav:10,mrv:16},
+      Core:{mv:0,mev:6,mav:14,mrv:20},Calves:{mv:4,mev:8,mav:14,mrv:20}
+    };
+  }
   if(!state.homeLayout)state.homeLayout=['meso','startEmpty','chart'];
   if(state.activeMesoId===undefined)state.activeMesoId=null;
   if(state.lightMode)document.body.classList.add('light-mode');
@@ -1546,7 +1619,7 @@ function switchTab(tab){
   if(tab==='review')renderReview();
   if(tab==='mesocycles')renderMesocycles();
   if(tab==='measurements')renderMeasurementsTab();
-  if(tab==='settings'){buildPlateInventoryUI();initGoogleSync();}
+  if(tab==='settings'){buildPlateInventoryUI();buildVolumeLandmarksUI();initGoogleSync();}
 }
 function toggleTheme(){
   state.lightMode=!state.lightMode;save();
@@ -1964,7 +2037,7 @@ function renderModifierChips(containerEl,stateObj,onChange){
 let editingExIdx=null;
 let editExWorkoutMeta={useRIR:false};
 let editExState={muscle:null,exDef:null,equipment:null,position:null,grip:null,isUni:false,modifier:null,modifierCustomMode:false,attachment:null,customValues:{},addingField:null,cablePosition:null,benchBack:null,benchSeat:null,showBenchSetup:false};
-load();initNavs();buildTimerPresets();buildPlateInventoryUI();renderHomeScreen();checkForWorkoutDraft();
+load();initNavs();buildTimerPresets();buildPlateInventoryUI();buildVolumeLandmarksUI();renderHomeScreen();checkForWorkoutDraft();
 document.getElementById('barbell-weight-input').value=state.barbellWeight||20;
 document.getElementById('prog-inc-dumbbell').value=state.progressionIncrements.Dumbbell;
 document.getElementById('prog-inc-cable').value=state.progressionIncrements.Cable;
@@ -3084,7 +3157,18 @@ function getMesoVolumeSuggestions(m,routineId){
     const g=groups[muscle];
     const n=g.up+g.down+g.flat;
     if(!n)return;
-    if(g.up>g.down&&g.up>=Math.ceil(n/2))suggestions.push({muscle,action:'add_set',exerciseNames:g.names});
+    if(g.up>g.down&&g.up>=Math.ceil(n/2)){
+      // Trend alone says "add a set" — but check this isn't recommending more volume for a
+      // muscle the landmark/SFR-based system has already flagged as overreached. Downgrade
+      // rather than silently dropping the note, so the reason is visible instead of the
+      // suggestion just disappearing.
+      const rec=getVolumeRecommendation(muscle);
+      if(rec.status==='at-or-above-mrv'||rec.status==='pain-flag'||rec.status==='high-fatigue'){
+        suggestions.push({muscle,action:'hold',exerciseNames:g.names,overrideReason:rec.action});
+      }else{
+        suggestions.push({muscle,action:'add_set',exerciseNames:g.names});
+      }
+    }
     else if(g.down>=g.up&&g.down>0)suggestions.push({muscle,action:'hold',exerciseNames:g.names});
   });
   return suggestions.length?suggestions:null;
@@ -3092,9 +3176,11 @@ function getMesoVolumeSuggestions(m,routineId){
 function formatMesoVolumeNote(suggestions){
   if(!suggestions||!suggestions.length)return null;
   const adds=suggestions.filter(s=>s.action==='add_set').map(s=>s.muscle);
-  const holds=suggestions.filter(s=>s.action==='hold').map(s=>s.muscle);
+  const overridden=suggestions.filter(s=>s.action==='hold'&&s.overrideReason);
+  const holds=suggestions.filter(s=>s.action==='hold'&&!s.overrideReason).map(s=>s.muscle);
   const parts=[];
   if(adds.length)parts.push(adds.join(' & ')+' still trending up — consider adding a set.');
+  overridden.forEach(s=>parts.push(s.muscle+' was trending up, but '+s.overrideReason.charAt(0).toLowerCase()+s.overrideReason.slice(1)));
   if(holds.length)parts.push(holds.join(' & ')+' flat/declining — hold steady.');
   return parts.length?parts.join(' '):null;
 }
@@ -3899,7 +3985,7 @@ function openGymSetupPreview(i){
         +'</div></div>';
     }).join('');
   }
-  document.getElementById('gym-setup-start-btn').onclick=()=>{closeModal('modal-gym-setup');startRoutineWorkout(i);};
+  document.getElementById('gym-setup-start-btn').onclick=()=>{closeModal('modal-gym-setup');beginRoutineWithSorenessCheck(i);};
   openModal('modal-gym-setup');
 }
 function openRoutineDetail(i){
@@ -3949,7 +4035,63 @@ function openRoutineDetail(i){
   openModal('modal-routine-detail');
 }
 // ── START WORKOUT ──
-function startRoutineWorkout(i){
+// Unique primary muscle groups planned for a routine's exercises, in the order they first appear
+// — used both to build the pre-workout soreness modal and to decide whether it's worth showing
+// at all (an empty/all-unset-muscle routine skips it entirely rather than showing a blank modal).
+function getRoutinePlannedMuscles(routine){
+  const seen=[];
+  (routine.exerciseIds||[]).forEach(id=>{
+    const ex=getExercise(id);
+    const m=ex&&ex.muscle;
+    if(m&&!seen.includes(m))seen.push(m);
+  });
+  return seen;
+}
+let sorenessDraft={},pendingSorenessRoutineIdx=null;
+// Entry point from the gym-setup preview's Start button. Shows the soreness modal only when
+// there's actually something to ask about; otherwise goes straight into the workout as before.
+function beginRoutineWithSorenessCheck(i){
+  const r=state.routines[i];
+  const muscles=r?getRoutinePlannedMuscles(r):[];
+  if(!muscles.length){startRoutineWorkout(i);return;}
+  pendingSorenessRoutineIdx=i;
+  sorenessDraft={};
+  muscles.forEach(m=>sorenessDraft[m]=0);
+  renderSorenessList();
+  document.getElementById('soreness-start-btn').onclick=confirmSorenessAndStart;
+  document.getElementById('modal-soreness').classList.add('open');
+}
+function renderSorenessList(){
+  const el=document.getElementById('soreness-list');if(!el)return;
+  const labels=['0: None','1: Mild','2: Moderate','3: Extreme'];
+  const muscleKeys=Object.keys(sorenessDraft);
+  el.innerHTML=muscleKeys.map((m,i)=>
+    '<div class="soreness-row"><span class="bold">'+escHtml(m)+'</span><div class="soreness-scale">'
+    +[0,1,2,3].map(s=>'<button class="soreness-btn'+(sorenessDraft[m]===s?' active':'')+'" data-score="'+s+'" title="'+labels[s]+'" onclick="setSorenessScoreByIndex('+i+','+s+')">'+s+'</button>').join('')
+    +'</div></div>'
+  ).join('');
+}
+// Referencing the muscle by its position in the list (rather than interpolating the name
+// directly into an onclick attribute) sidesteps any quote-escaping edge case entirely.
+function setSorenessScoreByIndex(i,score){
+  const muscle=Object.keys(sorenessDraft)[i];
+  if(muscle==null)return;
+  sorenessDraft[muscle]=score;
+  renderSorenessList();
+}
+// Direct class toggle, no history involvement — see the comment above this block.
+function closeSorenessModal(){
+  document.getElementById('modal-soreness').classList.remove('open');
+  pendingSorenessRoutineIdx=null;
+}
+function confirmSorenessAndStart(){
+  const i=pendingSorenessRoutineIdx;
+  const scores={...sorenessDraft};
+  document.getElementById('modal-soreness').classList.remove('open');
+  pendingSorenessRoutineIdx=null;
+  if(i!=null)startRoutineWorkout(i,scores);
+}
+function startRoutineWorkout(i,sorenessScores){
   const r=state.routines[i];
   const activeMeso=activeMesoContext?state.mesocycles[activeMesoContext.mesoIdx]:null;
   // The Partials set (beyond-failure partials) only ever gets auto-added on the final training
@@ -4050,6 +4192,7 @@ function startRoutineWorkout(i){
     mesoNote=mesoNote?mesoNote+' '+partialsMsg:partialsMsg;
   }
   beginWorkout(r.name,exercises,r.id,[...(r.exerciseIds||[])]);
+  if(activeWorkout&&activeWorkout.sourceRoutineId===r.id)activeWorkout.muscleSoreness=sorenessScores||{};
   const noteEl=document.getElementById('workout-meso-note');
   if(noteEl){
     if(mesoNote){noteEl.textContent=mesoNote;noteEl.style.display='';}
@@ -4103,6 +4246,19 @@ function beginWorkout(name,exercises,srcId,origIds){
   }
   reallyBeginWorkout(name,exercises,srcId,origIds);
 }
+// Keeps the screen from auto-locking while a workout is active — otherwise the phone locking
+// itself mid-rest (or while you're just reading the next exercise) is a real annoyance. The
+// browser auto-releases this the moment the tab is hidden/backgrounded, so it's re-acquired on
+// visibilitychange (see below) whenever the app comes back to the foreground during a workout.
+let wakeLock=null;
+async function acquireWakeLock(){
+  try{
+    if('wakeLock' in navigator)wakeLock=await navigator.wakeLock.request('screen');
+  }catch(e){/* not supported, or blocked (e.g. battery saver) — fine, just no wake lock */}
+}
+function releaseWakeLock(){
+  if(wakeLock){wakeLock.release().catch(()=>{});wakeLock=null;}
+}
 function reallyBeginWorkout(name,exercises,srcId,origIds){
   activeWorkout={name,startTime:Date.now(),exercises,sourceRoutineId:srcId||null,originalExerciseIds:origIds||[],notes:''};
   document.getElementById('active-workout-name').value=name;
@@ -4111,6 +4267,7 @@ function reallyBeginWorkout(name,exercises,srcId,origIds){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('screen-workout').classList.add('active');
   startWorkoutClock();
+  acquireWakeLock();
 }
 
 // ── ACTIVE WORKOUT RENDER ──
@@ -4129,6 +4286,15 @@ function saveActiveWorkoutDraft(){
       localStorage.removeItem('forge_active_draft');
     }
   }catch(e){/* best-effort — losing the draft is no worse than the pre-existing behaviour */}
+}
+// Debounced wrapper for the frequent, render-triggered draft save (rapid taps — completing sets
+// back to back, reordering — would otherwise write to localStorage on every single one). Only
+// used at that call site; saveActiveWorkoutDraft() itself stays synchronous/immediate, since
+// pauseWorkout() needs a guaranteed flush right before switching away, not a delayed one.
+let draftSaveDebounceTimer=null;
+function scheduleSaveActiveWorkoutDraft(){
+  if(draftSaveDebounceTimer)clearTimeout(draftSaveDebounceTimer);
+  draftSaveDebounceTimer=setTimeout(()=>{draftSaveDebounceTimer=null;saveActiveWorkoutDraft();},500);
 }
 function checkForWorkoutDraft(){
   const draft=getSavedDraft();
@@ -4168,6 +4334,7 @@ function resumeSavedDraft(draft){
     document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
     document.getElementById('screen-workout').classList.add('active');
     startWorkoutClock();
+    acquireWakeLock();
   }catch(e){
     // If anything above throws (e.g. the saved draft references something that no longer
     // exists, or predates a data-shape change), don't leave the same unrestorable draft
@@ -4245,7 +4412,7 @@ function renderActiveWorkout(){
       rendered.add(i);c.appendChild(buildExerciseCard(i));
     }
   });
-  updateWorkoutStats();updateWorkoutEstimate();initWorkoutReorder();saveActiveWorkoutDraft();
+  updateWorkoutStats();updateWorkoutEstimate();initWorkoutReorder();scheduleSaveActiveWorkoutDraft();
 }
 
 function getSessionsForExercise(exId,limit,routineId){
@@ -4276,10 +4443,13 @@ const DEFAULT_REP_RANGE={min:8,max:12};
 // tolerance for sessions with a different set count, and attaches useRIR the same way (mode can
 // change session to session, so each set carries whichever mode was actually active for it).
 function getSetAtSessionsAgo(exId,setIdx,n,routineId){
+  const exData=getExercise(exId);
+  const muscle=exData&&exData.muscle;
   let count=0;
   for(let i=0;i<state.history.length;i++){
     const w=state.history[i];
     if(routineId&&w.routineId!==routineId)continue;
+    if(muscle&&w.sorenessImpact&&w.sorenessImpact[muscle]===2)continue;
     const ex=(w.exercises||[]).find(e=>e.exId===exId);
     if(ex&&ex.sets&&ex.sets.length){
       if(count===n){
@@ -4560,6 +4730,74 @@ function suggestNextLoad(exId,workoutEx,routineId){
   }
   return {text:tip,w,r:rDisplay,effortLbl,setIdx:targetIdx,isLive:anchorIsLive};
 }
+// Post-Exercise Feedback (Stimulus-to-Fatigue Ratio inputs): pump / target-muscle challenge /
+// joint pain, captured right after an exercise's last set is completed. Purely a data capture —
+// nothing reads/reacts to it automatically yet (future volume/weight predictions can use it later,
+// per the user's own framing — it's saved to history so that data exists when that's built).
+const PEF_FIELDS=[
+  {field:'pump',label:'Pump',legend:'0 Flat \u00b7 1 Good Pump \u00b7 2 Max Pump'},
+  {field:'challenge',label:'Target Muscle Challenge',legend:'0 Other muscle failed first \u00b7 1 Reached failure \u00b7 2 Extreme fatigue/cramping'},
+  {field:'jointPain',label:'Joint / Acute Pain',legend:'0 No pain \u00b7 1 Mild ache \u00b7 2 Sharp pain'}
+];
+let pefDraft={},pefPanelOpenIdxs=new Set();
+// Called whenever a set is marked done — checks internally whether that was the exercise's last
+// remaining set and feedback hasn't already been given, and if so opens the panel immediately
+// without a full card rebuild (direct DOM update on the existing panel node).
+function checkExerciseFeedbackTrigger(exIdx){
+  const ex=activeWorkout&&activeWorkout.exercises[exIdx];
+  if(!ex||ex.feedback||!ex.sets.length||!ex.sets.every(s=>s.done))return;
+  openExerciseFeedback(exIdx);
+}
+function openExerciseFeedback(exIdx){
+  const ex=activeWorkout.exercises[exIdx];if(!ex)return;
+  pefDraft[exIdx]=ex.feedback?{...ex.feedback}:{pump:null,challenge:null,jointPain:null};
+  pefPanelOpenIdxs.add(exIdx);
+  const panel=document.getElementById('pef-panel-'+exIdx);
+  const summary=document.getElementById('pef-summary-'+exIdx);
+  if(summary)summary.style.display='none';
+  if(panel){renderPEFPanel(exIdx);panel.style.display='block';}
+}
+function setPEFScore(exIdx,field,value){
+  if(!pefDraft[exIdx])pefDraft[exIdx]={pump:null,challenge:null,jointPain:null};
+  pefDraft[exIdx][field]=value;
+  renderPEFPanel(exIdx);
+}
+function renderPEFPanel(exIdx){
+  const panel=document.getElementById('pef-panel-'+exIdx);if(!panel)return;
+  const d=pefDraft[exIdx]||{pump:null,challenge:null,jointPain:null};
+  const rowsEl=panel.querySelector('.pef-rows');if(!rowsEl)return;
+  rowsEl.innerHTML=PEF_FIELDS.map(f=>
+    '<div class="pef-row"><div><div class="bold" style="font-size:13px">'+f.label+'</div><div class="small text3">'+f.legend+'</div></div>'
+    +'<div class="pef-scale">'+[0,1,2].map(s=>'<button class="pef-btn'+(d[f.field]===s?' active':'')+'" data-score="'+s+'" onclick="setPEFScore('+exIdx+',\''+f.field+'\','+s+')">'+s+'</button>').join('')
+    +'</div></div>'
+  ).join('');
+}
+function savePEFeedback(exIdx){
+  const ex=activeWorkout.exercises[exIdx];if(!ex)return;
+  ex.feedback={...(pefDraft[exIdx]||{pump:null,challenge:null,jointPain:null})};
+  pefPanelOpenIdxs.delete(exIdx);
+  const panel=document.getElementById('pef-panel-'+exIdx);
+  if(panel)panel.style.display='none';
+  updatePEFSummary(exIdx);
+  scheduleSaveActiveWorkoutDraft();
+}
+function updatePEFSummary(exIdx){
+  const ex=activeWorkout&&activeWorkout.exercises[exIdx];
+  const el=document.getElementById('pef-summary-'+exIdx);if(!el)return;
+  if(!ex||!ex.feedback){el.style.display='none';return;}
+  const f=ex.feedback;
+  el.innerHTML='<span>Pump '+f.pump+' \u00b7 Challenge '+f.challenge+' \u00b7 Joint '+f.jointPain+'</span><button class="btn btn-ghost btn-sm" onclick="openExerciseFeedback('+exIdx+')">Edit</button>';
+  el.style.display='flex';
+}
+
+// soreness modal for its primary muscle. Purely informational — nothing is changed automatically,
+// same principle as the RIR ramp's rep-target predictor never touching weight.
+function getMuscleSorenessWarningHtml(muscle){
+  const score=(activeWorkout&&activeWorkout.muscleSoreness)?activeWorkout.muscleSoreness[muscle]:null;
+  if(score===2)return'<div class="exercise-soreness-warn mod">\u26a0\ufe0f '+escHtml(muscle)+' rated moderately sore today \u2014 consider a lower RIR target or dropping a set.</div>';
+  if(score===3)return'<div class="exercise-soreness-warn severe">\ud83d\uded1 '+escHtml(muscle)+' rated extremely sore today \u2014 consider swapping this exercise or using it as active recovery.</div>';
+  return'';
+}
 function buildExerciseCard(exIdx){
   const ex=activeWorkout.exercises[exIdx];
   const exData=getExercise(ex.exId)||{name:'Unknown',muscle:'',machine:'',secondary:'',note:'',bw:'no'};
@@ -4567,6 +4805,7 @@ function buildExerciseCard(exIdx){
   const metaParts=[exData.muscle,exData.secondary,exData.machine].filter(Boolean);
   if(ex.repRange&&ex.repRange.max)metaParts.push('Target '+ex.repRange.min+'\u2013'+ex.repRange.max+' reps');
   const noteHtml=exData.note?'<div class="note-row"><span class="note-icon">📌</span><span class="note-text">'+escHtml(exData.note)+'</span></div>':'';
+  const sorenessHtml=getMuscleSorenessWarningHtml(exData.muscle);
   const sugg=suggestNextLoad(ex.exId,ex,activeWorkout.sourceRoutineId);
   const suggText=sugg?('\ud83d\udca1 Set '+(sugg.setIdx+1)+(sugg.isLive?' just now':' last time')+': '+(sugg.w?sugg.w+'kg \u00d7 ':'')+sugg.r+'r'+sugg.effortLbl+' \u2192 '+escHtml(sugg.text)):'';
   const suggHtml='<div class="small" id="tip-'+exIdx+'" style="padding:2px 16px 10px;color:var(--accent2)">'+suggText+'</div>';
@@ -4582,6 +4821,7 @@ function buildExerciseCard(exIdx){
     +'<button class="btn btn-ghost btn-sm" onclick="openNoteModal(\''+ex.exId+'\')">📌</button>'
     +'<button class="btn btn-danger btn-sm" onclick="removeExercise('+exIdx+')">✕</button></div></div>'
     +noteHtml
+    +sorenessHtml
     +suggHtml
     +missHtml
     +'<table class="set-table"><thead><tr>'
@@ -4593,8 +4833,14 @@ function buildExerciseCard(exIdx){
     +'<button class="btn btn-ghost btn-sm" onclick="addSet('+exIdx+')">＋ Set</button>'
     +'<button class="btn btn-accent2 btn-sm" onclick="openTimerModal()">⏱</button>'
     +'<button class="btn btn-ghost btn-sm" onclick="openEditExerciseModal('+exIdx+')">✏️</button>'
+    +'</div>'
+    +'<div class="pef-summary" id="pef-summary-'+exIdx+'" style="display:'+(ex.feedback&&!pefPanelOpenIdxs.has(exIdx)?'flex':'none')+'"></div>'
+    +'<div class="pef-panel" id="pef-panel-'+exIdx+'" style="display:'+(pefPanelOpenIdxs.has(exIdx)?'block':'none')+'">'
+    +'<div class="bold" style="margin-bottom:8px;color:var(--accent2)">How did that feel?</div>'
+    +'<div class="pef-rows"></div>'
+    +'<button class="btn btn-primary btn-full" style="margin-top:10px" onclick="savePEFeedback('+exIdx+')">Save Feedback</button>'
     +'</div>';
-  setTimeout(()=>renderSets(exIdx),0);
+  setTimeout(()=>{renderSets(exIdx);renderPEFPanel(exIdx);updatePEFSummary(exIdx);},0);
   return wrap;
 }
 
@@ -4681,10 +4927,15 @@ function setSwipeMove(e){
   }
   if(!swipeState.horizontal)return;
   if(e.cancelable)e.preventDefault();
-  const clamped=Math.min(0,Math.max(dx,-120));
+  // Percentage of screen width rather than fixed pixels — a 70px swipe is a much shorter physical
+  // gesture on a high-density/narrow phone than a low-density/wide one. These percentages were
+  // picked to match the old 70px/120px feel on a typical ~390-400px-wide phone.
+  const clampCap=-(window.innerWidth*0.3);
+  const armThreshold=-(window.innerWidth*0.18);
+  const clamped=Math.min(0,Math.max(dx,clampCap));
   swipeState.dx=clamped;
   swipeState.tr.style.transform='translateX('+clamped+'px)';
-  swipeState.tr.classList.toggle('swipe-armed',clamped<-70);
+  swipeState.tr.classList.toggle('swipe-armed',clamped<armThreshold);
 }
 function setSwipeEnd(){
   if(!swipeState.active)return;
@@ -4692,7 +4943,8 @@ function setSwipeEnd(){
   swipeState.active=false;
   if(!tr)return;
   tr.style.transition='transform 0.15s ease, opacity 0.15s ease';
-  if(horizontal&&dx<-70){
+  const armThreshold=-(window.innerWidth*0.18);
+  if(horizontal&&dx<armThreshold){
     tr.style.transform='translateX(-100%)';
     tr.style.opacity='0';
     setTimeout(()=>removeSetAt(exIdx,setIdx),150);
@@ -4820,6 +5072,7 @@ function toggleSetDone(exIdx,setIdx){
     // Shorter rest for supersets
     if(ex.supersetGroup!=null)restSecs=Math.min(restSecs,60);
     startRestTimer(restSecs);
+    checkExerciseFeedbackTrigger(exIdx);
   }
   updateWorkoutStats();
 }
@@ -4920,6 +5173,7 @@ function removeExercise(exIdx){
     if(partners.length===1){orphanedIdx=partners[0];activeWorkout.exercises[orphanedIdx].supersetGroup=null;}
   }
   activeWorkout.exercises.splice(exIdx,1);
+  pefPanelOpenIdxs.clear();pefDraft={}; // indices shift — stale entries would apply to the wrong exercise
   renderActiveWorkout();updateWorkoutEstimate();
   showUndoToast('Removed '+(exData?exData.name:'exercise'),()=>{
     activeWorkout.exercises.splice(exIdx,0,removed);
@@ -5571,6 +5825,7 @@ function startRestTimer(seconds,label){
     if(sharedAudioCtx.state==='suspended')sharedAudioCtx.resume();
   }catch(e){/* audio not available — vibration still fires */}
   if(restTimer)clearInterval(restTimer);
+  restEndTime=Date.now()+seconds*1000; // authoritative source of truth — see tick()/onVisible() below
   restRemaining=seconds;
   document.getElementById('timer-bar-label').textContent=label||'Rest Timer';
   const bar=document.getElementById('timer-bar');
@@ -5579,7 +5834,17 @@ function startRestTimer(seconds,label){
   // Force reflow so transition plays
   bar.getBoundingClientRect();
   bar.classList.add('visible');
-  restTimer=setInterval(()=>{restRemaining--;if(restRemaining<=0){stopTimer();fireTimerCompleteAlert();}else{if(restRemaining<=3)playTimerTick();updateTimerDisplay();}},1000);
+  restTimer=setInterval(restTimerTick,1000);
+}
+// Recomputes remaining time from the absolute end-timestamp rather than just decrementing a
+// counter — Android Chrome throttles background tab timers, so a naive "restRemaining--" every
+// tick drifts behind real time (or pauses outright) while the phone's locked/backgrounded. Basing
+// it on Date.now() vs a fixed target means whenever this DOES get to run, it self-corrects to the
+// true remaining time instead of compounding the drift.
+function restTimerTick(){
+  restRemaining=Math.round((restEndTime-Date.now())/1000);
+  if(restRemaining<=0){stopTimer();fireTimerCompleteAlert();}
+  else{if(restRemaining<=3)playTimerTick();updateTimerDisplay();}
 }
 function updateTimerDisplay(){
   const m=Math.floor(restRemaining/60),s=restRemaining%60;
@@ -5587,16 +5852,25 @@ function updateTimerDisplay(){
   document.getElementById('timer-display').style.color=restRemaining<=10?'var(--red)':'var(--accent)';
 }
 function addTimer(s){
-  restRemaining+=s;
+  restEndTime+=s*1000;
+  restRemaining=Math.round((restEndTime-Date.now())/1000);
   if(restRemaining<=0){stopTimer();fireTimerCompleteAlert();}
   else{updateTimerDisplay();}
 }
 function stopTimer(){
   if(restTimer){clearInterval(restTimer);restTimer=null;}
+  restEndTime=null;
   const bar=document.getElementById('timer-bar');
   bar.classList.remove('visible');
   setTimeout(()=>{if(!bar.classList.contains('visible'))bar.style.display='none';},320);
 }
+// Catches up instantly the moment the app comes back to the foreground, rather than waiting for
+// the next throttled tick — otherwise the display could sit on a stale number for a few seconds
+// after unlocking the phone, or the completion alert could fire late.
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden&&restTimer&&restEndTime)restTimerTick();
+  if(!document.hidden&&activeWorkout)acquireWakeLock();
+});
 function startWorkoutClock(){
   if(workoutTimer)clearInterval(workoutTimer);
   workoutTimer=setInterval(()=>{const e=Math.floor((Date.now()-activeWorkout.startTime)/1000);document.getElementById('workout-duration').textContent=Math.floor(e/60)+':'+String(e%60).padStart(2,'0');},1000);
@@ -5701,7 +5975,50 @@ function renderProgressChart(){
 }
 
 // ── FINISH WORKOUT ──
+// Muscles that were flagged sore (2+) at the start of this workout, and so are worth asking
+// about now that the session is actually done — retrospective judgment is more reliable than
+// the pre-workout prediction, and the gap between the two is itself useful data (see
+// getMuscleSFRSignal's confirmed-impact signal below).
+function getSoreMusclesNeedingImpactCheck(){
+  const ms=activeWorkout&&activeWorkout.muscleSoreness;
+  if(!ms)return[];
+  return Object.keys(ms).filter(m=>ms[m]>=2);
+}
+let sorenessImpactDraft={};
 function finishWorkout(){
+  const sore=getSoreMusclesNeedingImpactCheck();
+  if(sore.length&&!activeWorkout.sorenessImpactAsked){
+    activeWorkout.sorenessImpactAsked=true;
+    sorenessImpactDraft={};
+    sore.forEach(m=>sorenessImpactDraft[m]=0);
+    renderSorenessImpactList();
+    document.getElementById('soreness-impact-save-btn').onclick=saveSorenessImpactAndContinue;
+    document.getElementById('modal-soreness-impact').classList.add('open');
+    return;
+  }
+  reallyFinishWorkout();
+}
+function renderSorenessImpactList(){
+  const el=document.getElementById('soreness-impact-list');if(!el)return;
+  const labels=['0: No effect','1: Slightly limited','2: Significantly limited'];
+  el.innerHTML=Object.keys(sorenessImpactDraft).map((m,i)=>
+    '<div class="pef-row"><div><div class="bold" style="font-size:13px">'+escHtml(m)+'</div><div class="small text3">0 No effect \u00b7 1 Slightly limited \u00b7 2 Significantly limited</div></div>'
+    +'<div class="pef-scale">'+[0,1,2].map(s=>'<button class="pef-btn'+(sorenessImpactDraft[m]===s?' active':'')+'" data-score="'+s+'" title="'+labels[s]+'" onclick="setSorenessImpactScoreByIndex('+i+','+s+')">'+s+'</button>').join('')
+    +'</div></div>'
+  ).join('');
+}
+function setSorenessImpactScoreByIndex(i,score){
+  const muscle=Object.keys(sorenessImpactDraft)[i];
+  if(muscle==null)return;
+  sorenessImpactDraft[muscle]=score;
+  renderSorenessImpactList();
+}
+function saveSorenessImpactAndContinue(){
+  activeWorkout.sorenessImpact={...sorenessImpactDraft};
+  document.getElementById('modal-soreness-impact').classList.remove('open');
+  reallyFinishWorkout();
+}
+function reallyFinishWorkout(){
   if(activeWorkout)activeWorkout.notes=document.getElementById('workout-notes').value||'';
   let vol=0,sets=0;
   activeWorkout.exercises.forEach(ex=>ex.sets.forEach(s=>{if(s.done){sets++;vol+=(s.weight||0)*(s.reps||0);}}));
@@ -5767,7 +6084,7 @@ function confirmFinishWorkout(){
       const r=s.reps||(!s.done&&s.prevReps?s.prevReps:0);
       return{...s,weight:w,reps:r};
     });
-    return{exId:ex.exId,sets,supersetGroup:ex.supersetGroup,useRIR:!!ex.useRIR};
+    return{exId:ex.exId,sets,supersetGroup:ex.supersetGroup,useRIR:!!ex.useRIR,feedback:ex.feedback||null};
   });
 
   // Nothing actually performed (e.g. the workout was only opened to set up equipment, or purely
@@ -5780,7 +6097,9 @@ function confirmFinishWorkout(){
       duration:Math.floor((Date.now()-activeWorkout.startTime)/1000),
       notes:activeWorkout.notes||'',exercises:cleanExercises,
       routineId:activeWorkout.sourceRoutineId||null,
-      mesoId:activeMesoContext?state.mesocycles[activeMesoContext.mesoIdx]?.id:null};
+      mesoId:activeMesoContext?state.mesocycles[activeMesoContext.mesoIdx]?.id:null,
+      muscleSoreness:activeWorkout.muscleSoreness||{},
+      sorenessImpact:activeWorkout.sorenessImpact||{}};
     state.history.unshift(workout);invalidatePRCache();
   }
 
@@ -5859,6 +6178,8 @@ function cancelWorkout(){
 // live in-memory activeWorkout is still cleared so Home doesn't think a workout is active while
 // showing it — the saved draft alone is the source of truth while paused.
 function pauseWorkout(){
+  releaseWakeLock();
+  if(draftSaveDebounceTimer){clearTimeout(draftSaveDebounceTimer);draftSaveDebounceTimer=null;}
   saveActiveWorkoutDraft(); // make sure the very latest state (e.g. an unsaved note) is captured
   activeWorkout=null;
   activeMesoContext=null;
@@ -5878,6 +6199,8 @@ function endWorkout(){
   // Do the actual discard first and unconditionally — this is the part that must never fail to
   // run, since it's what stops Discard/Finish from silently "doing nothing" and what stops the
   // resume draft from reappearing forever. Everything after this is just UI cleanup.
+  releaseWakeLock();
+  if(draftSaveDebounceTimer){clearTimeout(draftSaveDebounceTimer);draftSaveDebounceTimer=null;}
   activeWorkout=null;
   localStorage.removeItem('forge_active_draft');
   if(workoutTimer){clearInterval(workoutTimer);workoutTimer=null;}
@@ -6438,9 +6761,12 @@ function exportHistory(){
 }
 
 // ── WEEKLY REVIEW ──
-function renderReview(){
-  const c=document.getElementById('review-content');c.innerHTML='';
-  const now=new Date();const wa=new Date(now-7*864e5);
+// Shared muscle-volume tally: rolling window of `windowDays`, counting done normal/working sets
+// (partials excluded) per primary muscle, plus half-credit toward secondary muscles. Used by both
+// the Review tab's display and getVolumeRecommendation() below, so the two stay consistent.
+function getWeeklyMuscleVolume(windowDays){
+  windowDays=windowDays||7;
+  const now=new Date();const wa=new Date(now-windowDays*864e5);
   const ww=state.history.filter(w=>new Date(w.date)>=wa);
   const ms={};MUSCLE_GROUPS.forEach(m=>ms[m]=0);
   ww.forEach(w=>w.exercises.forEach(ex=>{
@@ -6449,6 +6775,89 @@ function renderReview(){
     if(exData.muscle)ms[exData.muscle]=(ms[exData.muscle]||0)+done;
     if(exData.secondary)exData.secondary.split(',').forEach(sm=>{const t=sm.trim();if(t&&ms[t]!==undefined)ms[t]=(ms[t]||0)+Math.ceil(done*0.5);});
   }));
+  return{ww,ms};
+}
+function getMuscleLandmarks(muscle){
+  return state.volumeLandmarks[muscle]||{mv:0,mev:8,mav:16,mrv:22}; // sane fallback for an untracked muscle
+}
+// Aggregates recent Post-Exercise Feedback (pump/challenge/jointPain) and Pre-Workout Soreness
+// ratings for a muscle over the last 2 weeks — the recovery/stimulus-quality signal that sits
+// alongside raw weekly set counts. maxJointPain (not average) is used deliberately: one sharp-pain
+// session should flag caution even if most sessions were pain-free.
+function getMuscleSFRSignal(muscle){
+  const cutoff=new Date(Date.now()-14*864e5);
+  const recent=state.history.filter(w=>new Date(w.date)>=cutoff);
+  let pumpSum=0,pumpN=0,challengeSum=0,challengeN=0,maxJointPain=-1,jointPainN=0,sorenessSum=0,sorenessN=0;
+  let impactSum=0,impactN=0;
+  recent.forEach(w=>{
+    if(w.muscleSoreness&&w.muscleSoreness[muscle]!=null){sorenessSum+=w.muscleSoreness[muscle];sorenessN++;}
+    // Confirmed post-workout impact (only asked when soreness was rated 2+) is a stronger, more
+    // reliable fatigue signal than the raw pre-workout prediction — it's retrospective, not
+    // predictive. Tracked separately so the recommendation below can prefer it once there's
+    // enough of it, and fall back to the raw rating otherwise.
+    if(w.sorenessImpact&&w.sorenessImpact[muscle]!=null){impactSum+=w.sorenessImpact[muscle];impactN++;}
+    (w.exercises||[]).forEach(ex=>{
+      const exData=getExercise(ex.exId);
+      if(!exData||exData.muscle!==muscle||!ex.feedback)return;
+      if(ex.feedback.pump!=null){pumpSum+=ex.feedback.pump;pumpN++;}
+      if(ex.feedback.challenge!=null){challengeSum+=ex.feedback.challenge;challengeN++;}
+      if(ex.feedback.jointPain!=null){if(ex.feedback.jointPain>maxJointPain)maxJointPain=ex.feedback.jointPain;jointPainN++;}
+    });
+  });
+  return{
+    avgPump:pumpN?pumpSum/pumpN:null,
+    avgChallenge:challengeN?challengeSum/challengeN:null,
+    maxJointPain:jointPainN?maxJointPain:null,
+    avgSoreness:sorenessN?sorenessSum/sorenessN:null,
+    avgConfirmedImpact:impactN?impactSum/impactN:null,
+    impactSampleCount:impactN,
+    sampleCount:Math.max(pumpN,challengeN,jointPainN,sorenessN)
+  };
+}
+// Combines this week's actual volume against the muscle's MV/MEV/MAV/MRV landmarks with the SFR
+// signal above into one actionable read. Safety (joint pain) and fatigue (soreness trend) can
+// override a purely volume-based read in either direction — e.g. a muscle numerically under MRV
+// but rating consistently sore is still flagged, and a muscle at/above MRV is flagged regardless
+// of how good the pump felt, since recoverable volume is the harder ceiling.
+function getVolumeRecommendation(muscle){
+  const lm=getMuscleLandmarks(muscle);
+  const{ms}=getWeeklyMuscleVolume(7);
+  const vol=ms[muscle]||0;
+  const sfr=getMuscleSFRSignal(muscle);
+  let status,action;
+  if(sfr.maxJointPain!=null&&sfr.maxJointPain>=2){
+    status='pain-flag';
+    action='Sharp joint pain reported recently for '+muscle+' \u2014 consider swapping the exercise or resting this muscle, regardless of volume.';
+  }else if(lm.mrv>0&&vol>=lm.mrv){
+    status='at-or-above-mrv';
+    action=muscle+' is at/above your MRV ('+vol+'/'+lm.mrv+' sets this week) \u2014 back off volume to avoid overreaching.';
+  }else if(sfr.impactSampleCount>=2&&sfr.avgConfirmedImpact!=null&&sfr.avgConfirmedImpact>=1.2){
+    status='high-fatigue';
+    action=muscle+' soreness has been confirmed to actually limit sessions recently (not just predicted beforehand) \u2014 recovery may be lagging even at '+vol+'/'+lm.mrv+' sets. Consider holding or reducing.';
+  }else if(sfr.impactSampleCount<2&&sfr.sampleCount>=2&&sfr.avgSoreness!=null&&sfr.avgSoreness>=2.2){
+    status='high-fatigue';
+    action=muscle+' has been rating consistently sore before sessions \u2014 recovery may be lagging even at '+vol+'/'+lm.mrv+' sets. Consider holding or reducing.';
+  }else if(vol<lm.mev){
+    status='below-mev';
+    action=muscle+' is below MEV ('+vol+'/'+lm.mev+' sets this week) \u2014 likely too little stimulus for growth. Consider adding sets.';
+  }else if(vol<lm.mav){
+    if(sfr.sampleCount>=2&&sfr.avgPump!=null&&sfr.avgChallenge!=null&&sfr.avgPump<=0.5&&sfr.avgChallenge<=0.5){
+      status='building-poor-sfr';
+      action=muscle+' is in the building range ('+vol+'/'+lm.mav+' sets) but pump/challenge feedback has been low \u2014 worth checking exercise execution or proximity to failure before just adding volume.';
+    }else{
+      status='building';
+      action=muscle+' is in the building zone ('+vol+'/'+lm.mav+' sets)'+(sfr.sampleCount>=2?' with solid feedback':'')+' \u2014 likely room to add a set or two.';
+    }
+  }else{
+    status='mav-to-mrv';
+    action=muscle+' is in the MAV\u2013MRV range ('+vol+'/'+lm.mrv+' sets) \u2014 a strong weekly volume; hold here unless recovery signals say otherwise.';
+  }
+  return{muscle,vol,landmarks:lm,sfr,status,action};
+}
+function renderReview(){
+  const c=document.getElementById('review-content');c.innerHTML='';
+  const{ww,ms}=getWeeklyMuscleVolume(7);
+  const now=new Date();
   let vol=0,sets=0,rpeAll=[];const days=new Set();let consec=0;
   ww.forEach(w=>{days.add(new Date(w.date).toDateString());w.exercises.forEach(ex=>{const useRIR=!!ex.useRIR;ex.sets.forEach(s=>{if(s.done&&s.type!=='partials'){sets++;vol+=(s.weight||0)*(s.reps||0);if(s.rpe!=null)rpeAll.push(useRIR?(10-s.rpe):s.rpe);}});});});
   for(let i=0;i<7;i++){const d=new Date(now-i*864e5);if(days.has(d.toDateString()))consec++;else break;}
@@ -6462,7 +6871,11 @@ function renderReview(){
     +'<div class="week-stat"><div class="week-stat-val">'+(vol/1000).toFixed(1)+'t</div><div class="week-stat-lbl">Volume</div></div>'
     +'<div class="week-stat"><div class="week-stat-val" style="color:var(--orange)">'+avgRPE+'</div><div class="week-stat-lbl">Avg Effort</div></div></div>';
   const maxS=Math.max(...Object.values(ms),1);
-  const barsHtml=MUSCLE_GROUPS.filter(m=>ms[m]>0).sort((a,b)=>ms[b]-ms[a]).map(m=>'<div class="muscle-bar-wrap"><div class="muscle-bar-label"><span style="font-weight:600">'+m+'</span><span class="text3 small">'+ms[m]+' sets</span></div><div class="muscle-bar-track"><div class="muscle-bar-fill" style="width:'+Math.round(ms[m]/maxS*100)+'%;background:'+(MUSCLE_COLORS[m]||'#aaa')+'"></div></div></div>').join('');
+  const barsHtml=MUSCLE_GROUPS.filter(m=>ms[m]>0).sort((a,b)=>ms[b]-ms[a]).map(m=>{
+    const lm=state.volumeLandmarks[m];
+    const lmCaption=lm?'<span class="text3 small" style="display:block;text-align:right">MEV '+lm.mev+' \u00b7 MAV '+lm.mav+' \u00b7 MRV '+lm.mrv+'</span>':'';
+    return '<div class="muscle-bar-wrap"><div class="muscle-bar-label"><span style="font-weight:600">'+m+'</span><span class="text3 small">'+ms[m]+' sets</span></div><div class="muscle-bar-track"><div class="muscle-bar-fill" style="width:'+Math.round(ms[m]/maxS*100)+'%;background:'+(MUSCLE_COLORS[m]||'#aaa')+'"></div></div>'+lmCaption+'</div>';
+  }).join('');
   const untrained=MUSCLE_GROUPS.filter(m=>!ms[m]&&m!=='Full Body');
   const sugg=[];
   if(!ww.length){sugg.push({i:'💪',t:'No workouts this week yet. Start a session to begin tracking!'});}
@@ -6473,9 +6886,10 @@ function renderReview(){
       if(ra>0&&rb===0)sugg.push({i:'⚖️',t:'Trained '+a+' but skipped '+b+' this week. Balancing these reduces injury risk.'});
       else if(ra>0&&rb>0&&ra/rb>2.5)sugg.push({i:'⚠️',t:a+' volume ('+ra+' sets) is much higher than '+b+' ('+rb+' sets). Add more '+b+' work.'});
     });
-    ['Chest','Back','Quads','Hamstrings'].forEach(m=>{
-      if(!ms[m])sugg.push({i:'📉',t:m+' not trained this week. Aim for 10-20 sets per week for major muscles.'});
-      else if(ms[m]<6)sugg.push({i:'📊',t:m+' at '+ms[m]+' sets — 10+ weekly sets is optimal for hypertrophy.'});
+    Object.keys(state.volumeLandmarks).forEach(m=>{
+      const rec=getVolumeRecommendation(m);
+      const icons={'pain-flag':'🛑','at-or-above-mrv':'🚧','high-fatigue':'😮\u200d💨','below-mev':'📉','building-poor-sfr':'🔍','building':'📈'};
+      if(icons[rec.status])sugg.push({i:icons[rec.status],t:rec.action});
     });
     if(consec>=5)sugg.push({i:'😴',t:consec+' consecutive days training. Schedule a rest day — muscles grow during recovery.'});
     if(!ms['Core'])sugg.push({i:'🔷',t:'No core work this week. 5 minutes of planks or crunches transfers to every lift.'});
@@ -6547,6 +6961,41 @@ function togglePlateSection(){
   document.getElementById('plate-section-chevron').textContent=expanded?'▾':'▸';
 }
 function updatePlateCount(kg,v){state.plates[kg]=parseInt(v)||0;save();updatePlateInventorySummary();}
+function buildVolumeLandmarksUI(){
+  const wrap=document.getElementById('vl-table');if(!wrap)return;
+  const muscles=Object.keys(state.volumeLandmarks);
+  wrap.innerHTML='<div class="vl-table-row header"><span></span><span>MV</span><span>MEV</span><span>MAV</span><span>MRV</span></div>'
+    +muscles.map(m=>{
+      const lm=state.volumeLandmarks[m];
+      return '<div class="vl-table-row"><span class="vl-muscle-name">'+m+'</span>'
+        +['mv','mev','mav','mrv'].map(f=>'<input type="number" inputmode="numeric" min="0" max="60" value="'+lm[f]+'" onchange="saveVolumeLandmark(\''+m+'\',\''+f+'\',this.value)"/>').join('')
+        +'</div>';
+    }).join('');
+  updateVolumeLandmarksSummary();
+  const expanded=!state.vlSectionCollapsed;
+  document.getElementById('vl-section-body').style.display=expanded?'block':'none';
+  document.getElementById('vl-section-chevron').textContent=expanded?'▾':'▸';
+}
+function updateVolumeLandmarksSummary(){
+  const el=document.getElementById('vl-section-summary');if(!el)return;
+  const n=Object.keys(state.volumeLandmarks).length;
+  el.innerHTML='<div class="small text2">'+n+' muscles configured. Tap to view/edit.</div>';
+}
+function toggleVolumeLandmarksSection(){
+  state.vlSectionCollapsed=!state.vlSectionCollapsed;
+  save();
+  const expanded=!state.vlSectionCollapsed;
+  document.getElementById('vl-section-body').style.display=expanded?'block':'none';
+  document.getElementById('vl-section-chevron').textContent=expanded?'▾':'▸';
+}
+// Muscle names are a fixed internal set (MUSCLE_GROUPS), not free text, so interpolating them
+// directly into the onchange attribute above is safe — no user-entered quotes possible.
+function saveVolumeLandmark(muscle,field,v){
+  const n=parseInt(v);
+  if(!state.volumeLandmarks[muscle])return;
+  state.volumeLandmarks[muscle][field]=isNaN(n)||n<0?state.volumeLandmarks[muscle][field]:n;
+  save();
+}
 function resetAllData(){if(confirm('Reset ALL data? Cannot be undone.')){localStorage.removeItem('forge_v4');localStorage.removeItem('forge_v3');location.reload();}}
 
 // ============================================================
