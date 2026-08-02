@@ -495,7 +495,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     </div>
     <div class="section-label">Timer Alerts</div>
     <div style="padding:0 16px 14px">
-      <div class="small text2" style="margin-bottom:10px;line-height:1.6">Lets the rest-timer alert use your phone's actual notification sound/vibration instead of just an in-app chime — this is what allows it to cut through music playing in another app, the same way a text message does.</div>
+      <div class="small text2" style="margin-bottom:10px;line-height:1.6">Lets the rest-timer alert use your phone's actual notification sound/vibration, the same channel a text message uses — this can duck/cut through music in another app, but mainly once FORGE is backgrounded or your screen is locked. While you're actively looking at the timer, most phones suppress that notification sound and you'll just hear the in-app chime at normal volume.</div>
       <button class="btn btn-ghost btn-full" onclick="requestTimerNotifyPermission()">Enable Notification Alerts</button>
       <div class="small text3" id="notify-permission-status" style="margin-top:8px"></div>
     </div>
@@ -572,7 +572,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-02.5</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-02.9</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1475,21 +1475,56 @@ function load(){
 }
 
 // ── TIME ESTIMATOR ──
+// Prefers a real average (seconds-per-set actually logged for this routine, from its most recent
+// completed sessions) over the old pure-formula guestimate. Falls back to the formula only until
+// a routine has built up enough real history (2+ logged sessions) to average from. Because the
+// real average is expressed as seconds-per-SET rather than a fixed per-routine total, it already
+// self-adjusts when a routine gains or loses sets/exercises — more predicted sets simply scales
+// the real per-set average up or down.
 function getSetRestTime(exId){
   const ex=getExercise(exId);
   if(!ex)return 90;if(ex.bw==='bw')return 60;
   if(COMPOUND_MUSCLES.includes(ex.muscle))return 150;return 90;
 }
-function estimateRoutineTime(exerciseIds){
-  if(!exerciseIds||!exerciseIds.length)return null;
+function getRoutineHistorySessions(routineId,limit){
+  if(!routineId)return[];
+  // state.history is newest-first (new entries are unshifted), so this naturally returns the
+  // most recent sessions — keeping the average current if pace/rest habits change over time.
+  return state.history.filter(w=>w.routineId===routineId&&w.duration>0).slice(0,limit||8);
+}
+function formatMinRange(t){
+  const m=Math.round(t/60),lo=Math.max(5,Math.round((m-10)/5)*5),hi=Math.round((m+10)/5)*5;
+  return lo+'–'+hi+' min';
+}
+// exerciseIds/routineId are used to fall back to the old formula estimate when there isn't yet
+// enough real history; totalSets is the actual/predicted set count to scale the real average by.
+function estimateSecondsForSets(totalSets,exerciseIds,routineId){
+  const sessions=getRoutineHistorySessions(routineId,8);
+  if(sessions.length>=2){
+    let totalSec=0,totalDoneSets=0;
+    sessions.forEach(w=>{
+      const doneSets=w.exercises.reduce((a,ex)=>a+ex.sets.filter(s=>s.done).length,0);
+      if(doneSets>0){totalSec+=w.duration;totalDoneSets+=doneSets;}
+    });
+    if(totalDoneSets>0)return(totalSec/totalDoneSets)*totalSets;
+  }
   let t=0;
-  exerciseIds.forEach(exId=>{
+  (exerciseIds||[]).forEach(exId=>{
     let sc=3;
     for(let i=state.history.length-1;i>=0;i--){const f=state.history[i].exercises.find(e=>e.exId===exId);if(f){sc=f.sets.filter(s=>s.done).length||3;break;}}
     t+=sc*45+(sc-1)*getSetRestTime(exId)+60;
   });
-  const m=Math.round(t/60),lo=Math.max(5,Math.round((m-10)/5)*5),hi=Math.round((m+10)/5)*5;
-  return lo+'–'+hi+' min';
+  return t;
+}
+function estimateRoutineTime(exerciseIds,routineId){
+  if(!exerciseIds||!exerciseIds.length)return null;
+  let predictedSets=0;
+  exerciseIds.forEach(exId=>{
+    let sc=3;
+    for(let i=state.history.length-1;i>=0;i--){const f=state.history[i].exercises.find(e=>e.exId===exId);if(f){sc=f.sets.filter(s=>s.done).length||3;break;}}
+    predictedSets+=sc;
+  });
+  return formatMinRange(estimateSecondsForSets(predictedSets,exerciseIds,routineId));
 }
 function updateWorkoutStats(){
   if(!activeWorkout)return;
@@ -1516,9 +1551,10 @@ function updateWorkoutStats(){
 function updateWorkoutEstimate(){
   const el=document.getElementById('workout-est-time');if(!el||!activeWorkout)return;
   if(!activeWorkout.exercises.length){el.textContent='';return;}
-  let t=0;activeWorkout.exercises.forEach(ex=>{const s=ex.sets.length;t+=s*45+(s-1)*getSetRestTime(ex.exId)+60;});
-  const m=Math.round(t/60),lo=Math.max(5,Math.round((m-10)/5)*5),hi=Math.round((m+10)/5)*5;
-  el.textContent='Estimated: '+lo+'–'+hi+' min';
+  const totalSets=activeWorkout.exercises.reduce((a,ex)=>a+ex.sets.length,0);
+  const exIds=activeWorkout.exercises.map(e=>e.exId);
+  const t=estimateSecondsForSets(totalSets,exIds,activeWorkout.sourceRoutineId);
+  el.textContent='Estimated: '+formatMinRange(t);
 }
 
 // ── 1RM (Epley) ──
@@ -2484,7 +2520,7 @@ function renderActiveMesoHero(){
     const showBtn='<button onclick="event.stopPropagation();toggleMesoExList(\'' +exListId+ '\')" style="background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text3);font-size:10px;padding:2px 7px;cursor:pointer;flex-shrink:0">'+n+' ex</button>';
 
     if(isNext){
-      const est=estimateRoutineTime(r.exerciseIds||[])||'—';
+      const est=estimateRoutineTime(r.exerciseIds||[],r.id)||'—';
       return '<div style="background:linear-gradient(90deg,var(--accent)18,var(--accent)05);border:1px solid var(--accent)44;border-radius:14px;padding:14px;margin:8px 0;cursor:pointer" onclick="openGymSetupPreview('+state.routines.indexOf(r)+')">'
         +'<div style="display:flex;align-items:center;gap:10px">'
         +'<div style="width:32px;height:32px;border-radius:10px;background:var(--accent);color:#0F1117;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;flex-shrink:0">'+(idx+1)+'</div>'
@@ -4031,7 +4067,7 @@ function openRoutineDetail(i){
   viewingRoutineIdx=i;const r=state.routines[i];
   document.getElementById('rd-title').textContent=r.name;
   const n=(r.exerciseIds||[]).length;
-  const est=estimateRoutineTime(r.exerciseIds||[]);
+  const est=estimateRoutineTime(r.exerciseIds||[],r.id);
   document.getElementById('rd-meta').innerHTML=(r.desc?escHtml(r.desc)+' &middot; ':'')+n+' exercise'+(n!==1?'s':'')+(est?' &middot; <span style="color:var(--accent2)">⏱ '+est+'</span>':'');
   const mh=state.history.filter(w=>{const ids=w.exercises.map(e=>e.exId);return (r.exerciseIds||[]).length>0&&(r.exerciseIds||[]).every(id=>ids.includes(id));}).sort((a,b)=>new Date(b.date)-new Date(a.date));
   const lw=mh[0];
@@ -4696,6 +4732,21 @@ function getEquipmentIncrement(exData){
   if(eq==='Cable')return inc.Cable||5;
   return inc.Other||2.5;
 }
+// Best working (non-warmup/dropset/etc) set from a session's logged sets for an exercise —
+// highest weight wins, ties broken by most reps (weaker-side reps for unilateral sets, same
+// metric used everywhere else for progression comparisons). Used to anchor next time's opening
+// set on whatever was actually proven capable last session, not just whatever happened to land
+// in slot 1.
+function pickBestWorkingSet(sets){
+  const normal=(sets||[]).filter(s=>!s.type||s.type==='normal');
+  if(!normal.length)return null;
+  return normal.reduce((best,s)=>{
+    if(!best)return s;
+    const w=s.weight||0,bw=best.weight||0;
+    if(w!==bw)return w>bw?s:best;
+    return repsMetricOf(s)>repsMetricOf(best)?s:best;
+  },null);
+}
 function suggestNextLoad(exId,workoutEx,routineId){
   const sets=getLastSets(exId,routineId); // each set carries the mode it was actually logged under
   if(!sets||!sets.length)return null;
@@ -4716,12 +4767,15 @@ function suggestNextLoad(exId,workoutEx,routineId){
       anchor=liveAbove;anchorIsLive=true;
     }
   }
-  // No live anchor — fall back to history for whichever set slot we're targeting. Sets earlier
-  // in a session read fresher than later ones (fatigue drags later-set reps down at the same
-  // weight even once the exercise overall has room to progress), so for set 1 specifically this
-  // still anchors on the historical first working set as before; for later slots it anchors on
-  // that same slot's own history.
-  if(!anchor)anchor=(targetIdx===0?sets.find(s=>!s.type||s.type==='normal'):sets[targetIdx])||sets[0];
+  // No live anchor — fall back to history for whichever set slot we're targeting. For set 1
+  // specifically, anchor on the BEST working set from last session (highest weight, then most
+  // reps) rather than literally whatever was done in slot 1 — a heavier weight proven later in a
+  // session, even while fatigued, is real evidence of fresh capability (fatigue only pushes
+  // performance down, never up), so it should carry forward into next time's opening set instead
+  // of being stranded at whatever slot it happened in. Later slots still anchor on that same
+  // slot's own history, since a fresh set 1 isn't a fair comparison for how much a fatigued set 3
+  // should be expected to do.
+  if(!anchor)anchor=(targetIdx===0?pickBestWorkingSet(sets):sets[targetIdx])||sets[0];
   const first=anchor;
   if(!first||(!first.weight&&!first.reps&&!first.repsL&&!first.repsR))return null;
   const exData=getExercise(exId)||{};
@@ -4765,7 +4819,25 @@ function suggestNextLoad(exId,workoutEx,routineId){
     }else if(stepDown){
       tip=inc?('Missed '+range.min+'+ twice \u2014 back off to '+Math.max(0,Math.round((w-inc)*100)/100)+'kg \u00d7 '+range.min):('Missed '+range.min+'+ twice \u2014 consider backing off');
     }else if(r<range.max){
-      tip='Add a rep'+(w?' at '+w+'kg':'')+' \u2192 aim for '+(r+1)+' (target '+range.min+'\u2013'+range.max+')';
+      // Previously this just chained "+1 rep" off whatever the live previous set did, every time,
+      // with no regard for how many sets deep we are or how hard that set already felt — so it
+      // kept pushing "add a rep" through set 4 even when fatigue makes that unrealistic. Now, once
+      // we're chaining off a same-session set (anchorIsLive) beyond the first working set, weigh
+      // that against real signal: the anchor's own RIR/RPE (are you already near failure?) and
+      // what THIS EXACT set slot did last time this routine came around (getSetAtSessionsAgo,
+      // already used elsewhere for corroboration) — not the live set immediately before it, but
+      // the historical version of the very set you're about to do. Only keep pushing for another
+      // rep when neither signal says to back off; otherwise suggest holding instead.
+      const nearFailure=rpeEq!=null&&rpeEq>=9; // RIR<=1 / RPE>=9 on the set just done
+      let holdInstead=false;
+      if(anchorIsLive&&targetIdx>0){
+        const priorSameSlot=getSetAtSessionsAgo(exId,targetIdx,1,routineId);
+        const priorSlotReps=priorSameSlot?repsMetricOf(priorSameSlot):null;
+        if(nearFailure||(priorSlotReps!=null&&r<priorSlotReps))holdInstead=true;
+      }
+      tip=holdInstead
+        ?('This deep in, hold at '+(w?w+'kg \u00d7 ':'')+r+' reps'+(nearFailure?' \u2014 that RIR says you\'re close to done':' \u2014 usually dips here by this set'))
+        :('Add a rep'+(w?' at '+w+'kg':'')+' \u2192 aim for '+(r+1)+' (target '+range.min+'\u2013'+range.max+')');
     }else{
       tip='Hold at '+(w?w+'kg \u00d7 ':'')+r+' reps'+(inc?', or add '+inc+'kg if that felt manageable':'');
     }
@@ -5082,8 +5154,6 @@ function toggleSetDone(exIdx,setIdx){
   }
   set.done=!set.done;
   if(navigator.vibrate)navigator.vibrate(set.done?12:8);
-  const btn=row.querySelector('.complete-btn');
-  row.classList.toggle('completed',set.done);btn.classList.toggle('done',set.done);
   if(set.done){
     // Pre-populate next set with same weight/reps/rpe
     const ex=activeWorkout.exercises[exIdx];
@@ -5096,15 +5166,22 @@ function toggleSetDone(exIdx,setIdx){
         if(!next.repsR&&!next.prevRepsR&&set.repsR){next.prevRepsR=set.repsR;}
       }
       if(next.rpe==null&&next.prevRpe==null&&set.rpe!=null){next.prevRpe=set.rpe;}
-      renderSets(exIdx);
     }
-    // PR check
+    // PR check — this only fires the toast/vibration now. The red highlight itself is applied
+    // uniformly by the renderSets() call below (every set's pr-row/pr-input class is recomputed
+    // there), so it shows correctly no matter which set index this is — including the exercise's
+    // last set, which previously never got highlighted because only the "pre-populate next set"
+    // branch above used to trigger a re-render.
     const exId=activeWorkout.exercises[exIdx].exId;
     const prCheckReps=repsMetricOf(set);
     if(set.weight>0&&checkSetForPR(exId,set.weight||0,prCheckReps)){
       showPRToast(getExercise(exId)?.name||'Exercise');
-      row.classList.add('pr-row');
     }
+  }
+  renderSets(exIdx);
+  updateWorkoutStats();
+  if(set.done){
+    const ex=activeWorkout.exercises[exIdx];
     // Superset auto-advance: move to next exercise in superset, same set index
     if(ex.supersetGroup!=null){
       const groupIdxs=activeWorkout.exercises.map((e,i)=>({e,i})).filter(x=>x.e.supersetGroup===ex.supersetGroup).map(x=>x.i);
@@ -5122,6 +5199,7 @@ function toggleSetDone(exIdx,setIdx){
       }
     }
     // Smart rest timer
+    const exId=ex.exId;
     const exDat=getExercise(exId);
     let restSecs=90;
     if(set.type==='warmup')restSecs=45;
@@ -5133,7 +5211,6 @@ function toggleSetDone(exIdx,setIdx){
     startRestTimer(restSecs);
     checkExerciseFeedbackTrigger(exIdx);
   }
-  updateWorkoutStats();
 }
 
 function addExerciseToWorkout(exId){
@@ -5836,43 +5913,66 @@ function playTimerTick(){
 // notification sound/vibration through its own dedicated audio channel (the same one that lets a
 // text message duck Spotify), which is the actual mechanism behind that behavior. A web page has
 // no way to grab that channel directly — Web Audio/HTML5 audio just plays as ordinary media
-// audio, which competes with music rather than overriding it. A real Notification is the only
-// way this app can hook into that system-level interruption behavior at all.
+// audio, which competes with music (at the SAME system media volume, never louder than it)
+// rather than overriding it. A real Notification is the only way this app can hook into that
+// system-level interruption behavior at all — and even then, most phones suppress a
+// notification's sound/vibration for whichever app is currently in the foreground (i.e. FORGE
+// open on screen mid-rest), since you're already seeing the in-app toast. So the notification
+// reliably cuts through music once you background the app or lock the screen; while you're
+// actively looking at the timer, only the in-app chime plays, at ordinary media volume.
 function fireTimerCompleteAlert(){
   playTimerSound();
   if(navigator.vibrate)navigator.vibrate([200,100,200]);
-  try{
-    if(typeof Notification!=='undefined'&&Notification.permission==='granted'){
-      new Notification('Rest Timer Done',{body:'Time to get back to it \ud83d\udcaa',tag:'forge-timer',renotify:true,vibrate:[200,100,200],silent:false});
-    }
-  }catch(e){/* Notification not available/supported here — the in-app chime still fired above */}
+  if(typeof Notification==='undefined'||Notification.permission!=='granted')return;
+  const opts={body:'Time to get back to it \ud83d\udcaa',tag:'forge-timer',renotify:true,vibrate:[200,100,200],silent:false};
+  // Prefer the service worker's showNotification() over the bare Notification() constructor: once
+  // FORGE is installed as a home-screen app, the bare constructor is unreliable (silently
+  // no-ops on some Android/installed-PWA combinations) or unsupported entirely (iOS Safari/PWA
+  // has no Notification() constructor at all — only ServiceWorkerRegistration.showNotification()
+  // works there). Falls back to the constructor only if no service worker is registered.
+  if(navigator.serviceWorker&&navigator.serviceWorker.ready){
+    navigator.serviceWorker.ready.then(reg=>reg.showNotification('Rest Timer Done',opts)).catch(()=>{
+      try{new Notification('Rest Timer Done',opts);}catch(e){/* neither path available here */}
+    });
+  }else{
+    try{new Notification('Rest Timer Done',opts);}catch(e){/* Notification not available/supported here — the in-app chime still fired above */}
+  }
 }
 function playTimerSound(){
   try{
     if(!sharedAudioCtx)sharedAudioCtx=new(window.AudioContext||window.webkitAudioContext)();
     if(sharedAudioCtx.state==='suspended')sharedAudioCtx.resume();
     const now=sharedAudioCtx.currentTime;
-    // Boxing-ring bell: two strikes in quick succession (ding-DING), each built from inharmonic
-    // partials rather than a clean harmonic series — a real struck bell/gong doesn't ring in neat
-    // integer multiples of its fundamental the way a chime or plucked string does; it's a cluster
-    // of slightly-detuned overtones (classic bell partial ratios), which is what actually reads
-    // as "metallic clang" rather than "musical note". Each partial decays at its own rate — higher
-    // partials die out fastest, same as a real bell — leaving the fundamental ringing out longest.
+    // A page can't push output past the phone's system media volume — that ceiling is fixed by
+    // the OS, not by us. What we CAN do is use the headroom better: a compressor squeezes the
+    // combined partials so the chime sits closer to that ceiling on average (louder-sounding at
+    // the same peak level) instead of leaving gaps between strikes at low volume.
+    const comp=sharedAudioCtx.createDynamicsCompressor();
+    comp.threshold.value=-24;comp.knee.value=6;comp.ratio.value=8;comp.attack.value=0.002;comp.release.value=0.15;
+    comp.connect(sharedAudioCtx.destination);
+    // Boxing-ring bell: three strikes in quick succession (ding-ding-DING), each built from
+    // inharmonic partials rather than a clean harmonic series — a real struck bell/gong doesn't
+    // ring in neat integer multiples of its fundamental the way a chime or plucked string does;
+    // it's a cluster of slightly-detuned overtones (classic bell partial ratios), which is what
+    // actually reads as "metallic clang" rather than "musical note". Each partial decays at its
+    // own rate — higher partials die out fastest, same as a real bell — leaving the fundamental
+    // ringing out longest. A third, louder strike was added (over the old two) so there's more
+    // total signal for the compressor above to work with, and more chances to be noticed.
     const fundamental=480;
     const partials=[1,1.586,2.0,2.514,3.011,3.85,4.6]; // bell/gong-typical inharmonic ratios
-    [{t:0,vol:1,decayMul:1},{t:0.24,vol:0.85,decayMul:0.9}].forEach(strike=>{
+    [{t:0,vol:1,decayMul:1},{t:0.24,vol:0.9,decayMul:0.9},{t:0.48,vol:1,decayMul:0.95}].forEach(strike=>{
       const t0=now+strike.t;
       partials.forEach((ratio,i)=>{
         const osc=sharedAudioCtx.createOscillator();
         const gain=sharedAudioCtx.createGain();
         osc.type='sine';
         osc.frequency.value=fundamental*ratio;
-        const peak=(0.34/Math.pow(i+1,0.85))*strike.vol;
+        const peak=(0.55/Math.pow(i+1,0.85))*strike.vol;
         const decay=(1.3-i*0.15)*strike.decayMul;
         gain.gain.setValueAtTime(0,t0);
         gain.gain.linearRampToValueAtTime(peak,t0+0.003); // hard, percussive attack
         gain.gain.exponentialRampToValueAtTime(0.001,t0+Math.max(0.25,decay));
-        osc.connect(gain);gain.connect(sharedAudioCtx.destination);
+        osc.connect(gain);gain.connect(comp);
         osc.start(t0);osc.stop(t0+Math.max(0.25,decay)+0.05);
       });
     });
@@ -6088,7 +6188,7 @@ function reallyFinishWorkout(){
     const dSets=ex.sets.filter(s=>s.done);
     return'<div class="small text2" style="padding:3px 0">'+(exData?escHtml(exData.name):'?')+': '+dSets.length+' sets · '+dSets.reduce((a,s)=>a+(s.weight||0)*(s.reps||0),0).toFixed(0)+' kg</div>';
   }).join('');
-  const futureEst=estimateRoutineTime(activeWorkout.exercises.map(e=>e.exId));
+  const futureEst=estimateRoutineTime(activeWorkout.exercises.map(e=>e.exId),activeWorkout.sourceRoutineId);
   document.getElementById('finish-summary').innerHTML=
     '<div class="summary-stat"><span>Duration</span><span class="summary-val">'+m+':'+String(s).padStart(2,'0')+'</span></div>'
     +'<div class="summary-stat"><span>Total Volume</span><span class="summary-val">'+vol.toFixed(0)+' kg</span></div>'
