@@ -572,7 +572,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-02.2</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-02.4</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -2605,7 +2605,7 @@ function renderRoutinesList(){
       +'<button class="tight-dots" onclick="toggleDropdown(event,'+i+')">'+uiIcon('dots',16,'currentColor')+'</button>'
       +'<div class="r-dropdown" id="rdrop-'+i+'">'
       +'<div class="r-dropdown-item" onclick="openRoutineDetail('+i+');closeAllDropdowns()">'+uiIcon('eye',15,'currentColor')+' View</div>'
-      +'<div class="r-dropdown-item" onclick="startRoutineWorkout('+i+');closeAllDropdowns()">'+uiIcon('play',15,'currentColor')+' Start Workout</div>'
+      +'<div class="r-dropdown-item" onclick="beginRoutineWithSorenessCheck('+i+');closeAllDropdowns()">'+uiIcon('play',15,'currentColor')+' Start Workout</div>'
       +'<div class="r-dropdown-item" onclick="openEditRoutineModal_fromList('+i+');closeAllDropdowns()">'+uiIcon('pencil',15,'currentColor')+' Edit</div>'
       +'<div class="r-dropdown-item" onclick="duplicateRoutine('+i+');closeAllDropdowns()">'+uiIcon('copy',15,'currentColor')+' Duplicate</div>'
       +'<div class="r-dropdown-item" onclick="openAddRoutineToMesoModal('+i+');closeAllDropdowns()">'+uiIcon('grid',15,'currentColor')+' Add to Mesocycle</div>'
@@ -2833,6 +2833,8 @@ function advanceMesoProgress(m,loggedExercises){
     m.rotationBaselines={};
     m.preDeloadBaselines={};
     m.skipLog=[]; // a new pass starts — any still-open catch-up window from the last pass no longer applies
+    m.rirRampAnchorTotal=null; // fresh pass — ramp computes against its own rotationsPerMeso, not a carried-over extension anchor
+    if(m.baseRotationsPerMeso!=null){m.rotationsPerMeso=m.baseRotationsPerMeso;m.baseRotationsPerMeso=null;} // an extension only ever applies to the pass it was granted for
     m.phase=(totalRepeats>0&&m.repeatsDone>=totalRepeats)?'finished':'training';
     return;
   }
@@ -2854,6 +2856,8 @@ function advanceMesoProgress(m,loggedExercises){
     m.baselines={};
     m.rotationBaselines={};
     m.skipLog=[]; // a new pass starts — any still-open catch-up window from the last pass no longer applies
+    m.rirRampAnchorTotal=null; // fresh pass — ramp computes against its own rotationsPerMeso, not a carried-over extension anchor
+    if(m.baseRotationsPerMeso!=null){m.rotationsPerMeso=m.baseRotationsPerMeso;m.baseRotationsPerMeso=null;} // an extension only ever applies to the pass it was granted for
     m.phase=(totalRepeats>0&&m.repeatsDone>=totalRepeats)?'finished':'training';
   }
 }
@@ -3058,8 +3062,15 @@ function getMesoTargetRIR(m,rotNumOverride){
   const end=m.rirEnd!=null?m.rirEnd:0;
   const cap=m.rirStartCap!=null?m.rirStartCap:4;
   const rotNum=Math.min(rotNumOverride!=null?rotNumOverride:(m.rotationsDone||0)+1,total);
-  const start=Math.min(cap,end+total-1);
-  const rir=total<=1?end:Math.round(start+(end-start)*((rotNum-1)/(total-1)));
+  // If this pass was extended past its original planned length (Deload Readiness Check → Extend
+  // Training), the ramp curve itself stays anchored to the ORIGINAL total — an extended rotation
+  // continues at the same (deepest) RIR the ramp had already earned, rather than recalculating a
+  // shallower point on a now-longer curve. rotNum/total below still reflect the true count for
+  // display ("Rotation 4 of 5"); only the ramp math uses the anchor.
+  const rampTotal=Math.min(total,m.rirRampAnchorTotal||total);
+  const rampRotNum=Math.min(rotNum,rampTotal);
+  const start=Math.min(cap,end+rampTotal-1);
+  const rir=rampTotal<=1?end:Math.round(start+(end-start)*((rampRotNum-1)/(rampTotal-1)));
   return{rotNum,total,rir};
 }
 function formatMesoRIRNote(info){
@@ -3763,7 +3774,7 @@ function startMesoRoutine(mi){
   if(routineIdx===-1){alert('That routine no longer exists. Remove it from the mesocycle and try again.');return;}
   // Tag the workout with this mesocycle so history can track it
   activeMesoContext={mesoIdx:mi,routinePos:nextIdx};
-  startRoutineWorkout(routineIdx);
+  beginRoutineWithSorenessCheck(routineIdx);
 }
 
 function skipMesoRoutine(mi){
@@ -3804,7 +3815,7 @@ function startCatchUpSession(mi,skipId){
   const idx=state.routines.findIndex(r=>r.id===entry.routineId);
   if(idx===-1){alert('That routine no longer exists. Remove it from the mesocycle and try again.');return;}
   activeMesoContext={mesoIdx:mi,routinePos:entry.slotIndex,catchUp:true,skipId:entry.id};
-  startRoutineWorkout(idx);
+  beginRoutineWithSorenessCheck(idx);
 }
 // Fully reverses the single most recent Skip — restores currentPos/rotationsDone to what they
 // were before that skip, and removes the skip-log entry entirely (unlike Revisit, which logs
@@ -4059,7 +4070,7 @@ function openRoutineDetail(i){
         +(pr.orm?'<br><span style="color:var(--accent);font-size:10px">1RM~'+pr.orm+'kg</span>':'')+'</div></div>';
     }).join('');
   }
-  document.getElementById('rd-start-btn').onclick=()=>{closeModal('modal-routine-detail');startRoutineWorkout(i);};
+  document.getElementById('rd-start-btn').onclick=()=>{closeModal('modal-routine-detail');beginRoutineWithSorenessCheck(i);};
   openModal('modal-routine-detail');
 }
 // ── START WORKOUT ──
@@ -6202,9 +6213,18 @@ function confirmFinishWorkout(){
             ()=>{save();renderMesocycles();},
             {okLabel:'Deload As Planned',cancelLabel:'Extend Training',danger:false,onCancel:()=>{
               const completedWorkouts=m.completedWorkouts,startedAt=m.startedAt;
+              // Anchor the RIR ramp AND the original rotation count to what this pass had BEFORE
+              // this extension — but only if not already anchored (a second extension in the
+              // same pass still anchors to the very first original values, not shifting forward).
+              // baseRotationsPerMeso is what gets restored once this pass actually finishes, so
+              // extending only affects THIS pass — not every future pass of this mesocycle too.
+              const anchorTotal=m.rirRampAnchorTotal||mesoSnapshotBefore.rotationsPerMeso;
+              const baseRotations=m.baseRotationsPerMeso||mesoSnapshotBefore.rotationsPerMeso;
               Object.assign(m,mesoSnapshotBefore);
               m.completedWorkouts=completedWorkouts;m.startedAt=startedAt; // this workout genuinely happened regardless of the deload/extend choice
               m.rotationsPerMeso=(m.rotationsPerMeso||1)+1;
+              m.rirRampAnchorTotal=anchorTotal;
+              m.baseRotationsPerMeso=baseRotations;
               save();renderMesocycles();
             }}
           );
