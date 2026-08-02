@@ -572,7 +572,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-02.4</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-02.5</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -4912,6 +4912,17 @@ function renderSets(exIdx){
     const ps=prevSets[setIdx]||prevSets[prevSets.length-1];
     // Placeholder is a genuine progression TARGET (double progression), not just a copy of last time
     const target=getSetTarget(ex.exId,ex,setIdx,exData,activeWorkout.sourceRoutineId);
+    // Actually fill the target into the real data, not just a passive greyed-out hint — matches
+    // how targets are meant to work everywhere else in this app (pre-filled and overridable, not
+    // just suggested). Only touches a field that's genuinely untouched (falsy) on a set that
+    // isn't done yet, so it never clobbers something the user already typed or already logged.
+    if(target&&!set.done){
+      if(!isUni&&!isBW&&!set.weight&&target.weight!=null)set.weight=target.weight;
+      if(!isUni&&!set.reps&&target.reps!=null)set.reps=target.reps;
+      if(isUni&&!isBW&&!set.weight&&target.weight!=null)set.weight=target.weight;
+      if(isUni&&!set.repsL&&target.repsL!=null)set.repsL=target.repsL;
+      if(isUni&&!set.repsR&&target.repsR!=null)set.repsR=target.repsR;
+    }
     const phWeight=target?target.weight:(set.prevWeight||null);
     const phReps=target?target.reps:(set.prevReps||null);
     const phRepsL=target?target.repsL:(set.prevRepsL||null);
