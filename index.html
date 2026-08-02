@@ -216,6 +216,12 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .vl-table-row.header{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.3px;}
 .vl-table-row input{width:100%;text-align:center;padding:5px 2px;font-size:13px;}
 .vl-muscle-name{font-weight:600;font-size:13px;}
+.vl-priority-pills{display:flex;gap:4px;}
+.vl-priority-btn{padding:4px 9px;border-radius:12px;border:1px solid var(--border);background:var(--bg);color:var(--text2);font-size:11px;font-weight:600;}
+.vl-priority-btn.active{color:#fff;}
+.vl-priority-btn.active.low{background:var(--text3);border-color:var(--text3);}
+.vl-priority-btn.active{background:var(--accent);border-color:var(--accent);}
+.vl-priority-btn.active.high{background:#2ed573;border-color:#2ed573;}
 .set-type-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
 .set-type-option{padding:12px;border-radius:var(--radius-sm);border:2px solid var(--border);cursor:pointer;transition:all 0.15s;text-align:center;}
 .set-type-option.selected{border-color:var(--accent);background:rgba(var(--accent-rgb),0.08);}
@@ -566,7 +572,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-01.6</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-02.2</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1419,7 +1425,7 @@ function load(){
     if(!m.deloadSetMode)m.deloadSetMode='flat'; // 'flat' | 'relative'
     if(m.deloadSetValue==null)m.deloadSetValue=1;
     if(m.deloadTargetRIR==null)m.deloadTargetRIR=4;
-    if(m.rirRepTargetEnabled==null)m.rirRepTargetEnabled=false; // opt-in: needs a completed pass before it has an anchor to work from
+    if(m.rirRepTargetEnabled==null)m.rirRepTargetEnabled=true; // default on — falls through to normal progression until there's an anchor to work from anyway
     if(!m.trueFailureAnchor)m.trueFailureAnchor={};
     if(!m.resetMode)m.resetMode='preDeload'; // 'deload' | 'preDeload' | 'mesoStart' | 'rotation'
     if(m.resetRotationNumber==null)m.resetRotationNumber=1;
@@ -1436,6 +1442,13 @@ function load(){
     if(!m.skipLog)m.skipLog=[]; // {id,routineId,slotIndex,step,skippedAt} — revisitable until that slot comes up again
     if(m.undoSkip===undefined)m.undoSkip=null; // one-shot full-undo snapshot for the single most recent skip
   });
+  // One-time forced migration (not just a default-if-missing): the user explicitly asked for
+  // maximum automation across the board, including for mesocycles that already existed with this
+  // toggle off. Gated so it only ever runs once and won't stomp on a future manual toggle-off.
+  if(!state.rirRepTargetForceEnableMigrated){
+    state.mesocycles.forEach(m=>{m.rirRepTargetEnabled=true;});
+    state.rirRepTargetForceEnableMigrated=true;
+  }
   if(!state.customCatalogueFields)state.customCatalogueFields={};
   if(!state.homeEquipment)state.homeEquipment=[];
   if(!state.equipmentFilterMode)state.equipmentFilterMode='all';
@@ -1453,6 +1466,8 @@ function load(){
       Core:{mv:0,mev:6,mav:14,mrv:20},Calves:{mv:4,mev:8,mav:14,mrv:20}
     };
   }
+  if(!state.musclePriority)state.musclePriority={};
+  Object.keys(state.volumeLandmarks).forEach(m=>{if(!state.musclePriority[m])state.musclePriority[m]='normal';});
   if(!state.homeLayout)state.homeLayout=['meso','startEmpty','chart'];
   if(state.activeMesoId===undefined)state.activeMesoId=null;
   if(state.lightMode)document.body.classList.add('light-mode');
@@ -3146,28 +3161,41 @@ function getMesoVolumeSuggestions(m,routineId){
       const c=comparePerf(points[i-1],points[i],isUni);
       if(c>0)up++;else if(c<0)down++;
     }
-    if(!groups[muscle])groups[muscle]={up:0,down:0,flat:0,names:[]};
+    if(!groups[muscle])groups[muscle]={up:0,down:0,flat:0,names:[],exIds:[]};
     if(up>down)groups[muscle].up++;
     else if(down>up)groups[muscle].down++;
     else groups[muscle].flat++;
     groups[muscle].names.push(exData.name);
+    groups[muscle].exIds.push(exId);
   });
   const suggestions=[];
   Object.keys(groups).forEach(muscle=>{
     const g=groups[muscle];
     const n=g.up+g.down+g.flat;
     if(!n)return;
-    if(g.up>g.down&&g.up>=Math.ceil(n/2)){
+    const priority=state.musclePriority[muscle]||'normal';
+    const rec=getVolumeRecommendation(muscle);
+    const overreached=rec.status==='at-or-above-mrv'||rec.status==='pain-flag'||rec.status==='high-fatigue';
+    // Trend-based eligibility, adjusted by priority: Low priority requires the muscle to
+    // actually be under-stimulated (below MEV) before an up-trend earns it more volume — a
+    // muscle you're not trying to grow shouldn't keep accumulating sets just because it happens
+    // to have more exercises assigned to it and so trends well by default. High priority is more
+    // generous the other way — even a flat trend earns a set as long as there's room below MAV,
+    // since the goal is to actively push volume toward these muscles rather than wait for proof.
+    const trendUp=g.up>g.down&&g.up>=Math.ceil(n/2);
+    const eligible=priority==='low'?(trendUp&&rec.vol<rec.landmarks.mev)
+      :priority==='high'?(!overreached&&rec.vol<rec.landmarks.mav)
+      :trendUp;
+    if(eligible&&!overreached){
+      suggestions.push({muscle,action:'add_set',exerciseNames:g.names,exIds:g.exIds,priority});
+    }else if(trendUp&&overreached){
       // Trend alone says "add a set" — but check this isn't recommending more volume for a
       // muscle the landmark/SFR-based system has already flagged as overreached. Downgrade
       // rather than silently dropping the note, so the reason is visible instead of the
       // suggestion just disappearing.
-      const rec=getVolumeRecommendation(muscle);
-      if(rec.status==='at-or-above-mrv'||rec.status==='pain-flag'||rec.status==='high-fatigue'){
-        suggestions.push({muscle,action:'hold',exerciseNames:g.names,overrideReason:rec.action});
-      }else{
-        suggestions.push({muscle,action:'add_set',exerciseNames:g.names});
-      }
+      suggestions.push({muscle,action:'hold',exerciseNames:g.names,overrideReason:rec.action});
+    }else if(priority==='low'&&trendUp&&rec.vol>=rec.landmarks.mev){
+      suggestions.push({muscle,action:'hold',exerciseNames:g.names,overrideReason:muscle+' is Low priority and already past MEV — holding volume steady even though it\u2019s trending up, to leave recovery room for higher-priority muscles.'});
     }
     else if(g.down>=g.up&&g.down>0)suggestions.push({muscle,action:'hold',exerciseNames:g.names});
   });
@@ -3179,9 +3207,9 @@ function formatMesoVolumeNote(suggestions){
   const overridden=suggestions.filter(s=>s.action==='hold'&&s.overrideReason);
   const holds=suggestions.filter(s=>s.action==='hold'&&!s.overrideReason).map(s=>s.muscle);
   const parts=[];
-  if(adds.length)parts.push(adds.join(' & ')+' still trending up — consider adding a set.');
+  if(adds.length)parts.push('Added a set to '+adds.join(' & ')+' (still trending up).');
   overridden.forEach(s=>parts.push(s.muscle+' was trending up, but '+s.overrideReason.charAt(0).toLowerCase()+s.overrideReason.slice(1)));
-  if(holds.length)parts.push(holds.join(' & ')+' flat/declining — hold steady.');
+  if(holds.length)parts.push(holds.join(' & ')+' flat/declining — held steady.');
   return parts.length?parts.join(' '):null;
 }
 // Looks for two independent early-warning signs that a mesocycle's remaining training
@@ -3251,7 +3279,7 @@ function saveNewMesocycle(){
     rotationsPerMeso:4,mesoRepeats:1,deloadEnabled:true,deloadPercent:40,deloadSetsDrop:0,resetMode:'preDeload',resetRotationNumber:1,resetFallbackNote:null,
     rirRampEnabled:true,rirEnd:0,rirStartCap:4,earlyDeloadDetection:'suggest',earlyDeloadDeclineCount:2,
     deloadMethod:'weight',deloadSetMode:'flat',deloadSetValue:1,deloadTargetRIR:4,slotRepRanges:{},
-    rirRepTargetEnabled:false,trueFailureAnchor:{},
+    rirRepTargetEnabled:true,trueFailureAnchor:{},
     rotationsDone:0,repeatsDone:0,phase:'training',passWorkoutCount:0,rotationWorkoutCount:0,baselines:{},rotationBaselines:{},preDeloadBaselines:{},pendingResetBaseline:null,measurementsPending:false,skipLog:[],undoSkip:null});
   save();renderMesocycles();closeModal('modal-new-mesocycle');
 }
@@ -4104,6 +4132,11 @@ function startRoutineWorkout(i,sorenessScores){
   // working set's RPE/RIR field to what THIS cycle is actually asking for, rather than whatever
   // was hit last session (which reflects last session's effort, not today's target).
   const mesoRIRInfo=activeMeso?getMesoTargetRIR(activeMeso):null;
+  // Computed once up front so it can both auto-apply an extra set below (once activeWorkout
+  // exists) and drive the note text later, without computing it twice.
+  const volSuggestions=activeMeso?getMesoVolumeSuggestions(activeMeso,r.id):null;
+  const addSetExIds=new Set();
+  (volSuggestions||[]).forEach(s=>{if(s.action==='add_set')(s.exIds||[]).forEach(id=>addSetExIds.add(id));});
   let mesoNote=null;
   const exercises=(r.exerciseIds||[]).map((id,idx)=>{
     const ex=getExercise(id);if(!ex)return null;
@@ -4192,7 +4225,12 @@ function startRoutineWorkout(i,sorenessScores){
     mesoNote=mesoNote?mesoNote+' '+partialsMsg:partialsMsg;
   }
   beginWorkout(r.name,exercises,r.id,[...(r.exerciseIds||[])]);
-  if(activeWorkout&&activeWorkout.sourceRoutineId===r.id)activeWorkout.muscleSoreness=sorenessScores||{};
+  if(activeWorkout&&activeWorkout.sourceRoutineId===r.id){
+    activeWorkout.muscleSoreness=sorenessScores||{};
+    if(addSetExIds.size){
+      activeWorkout.exercises.forEach((ex,exIdx)=>{if(addSetExIds.has(ex.exId))addSet(exIdx);});
+    }
+  }
   const noteEl=document.getElementById('workout-meso-note');
   if(noteEl){
     if(mesoNote){noteEl.textContent=mesoNote;noteEl.style.display='';}
@@ -4206,7 +4244,6 @@ function startRoutineWorkout(i,sorenessScores){
   }
   const volNoteEl=document.getElementById('workout-volume-note');
   if(volNoteEl){
-    const volSuggestions=activeMeso?getMesoVolumeSuggestions(activeMeso,r.id):null;
     const volText=formatMesoVolumeNote(volSuggestions);
     if(volText){volNoteEl.textContent=volText;volNoteEl.style.display='';}
     else volNoteEl.style.display='none';
@@ -4532,28 +4569,12 @@ function getSetTarget(exId,workoutEx,setIdx,exData,routineId){
   const repsMetric=repsMetricOf(ps);
   let targetWeight,targetReps;
   if(!isBW&&repsMetric>=range.max&&hasRoom){
-    // Require the PRIOR session to have also been at/above the ceiling with room to spare, so
-    // one unusually good day doesn't trigger a jump on its own — a single off day earlier
-    // shouldn't have counted against you either way, this only requires that the ceiling-hit
-    // wasn't a one-off. Falls back to bumping off this single session when there isn't a second
-    // one yet (not enough history to require agreement from).
-    const prior=getSetAtSessionsAgo(exId,setIdx,1,routineId);
-    let confirmed=true;
-    if(prior){
-      const priorReps=repsMetricOf(prior);
-      const priorRpeEq=prior.rpe!=null?(prior.useRIR?(10-prior.rpe):prior.rpe):null;
-      const priorHasRoom=priorRpeEq==null||priorRpeEq<=8;
-      confirmed=priorReps>=range.max&&priorHasRoom;
-    }
-    if(confirmed){
-      targetWeight=Math.round((w+inc)*100)/100;
-      targetReps=range.min;
-    }else{
-      // Ceiling hit again but not yet confirmed by the session before it — hold and repeat
-      // rather than bump off what might just be one great day.
-      targetWeight=w;
-      targetReps=repsMetric;
-    }
+    // Bumps immediately off a single ceiling-hit-with-room session — no longer waits for the
+    // session before it to also confirm the pattern. The app is meant to push progression
+    // forward rather than hold back on a cautious confirmation; the actual PREV column and
+    // editable inputs are always right there to override if a particular jump doesn't feel right.
+    targetWeight=Math.round((w+inc)*100)/100;
+    targetReps=range.min;
   }else if(repsMetric<range.max||(isBW&&hasRoom)){
     // Below the FLOOR of the rep range (not just under the ceiling) for 2 sessions running is a
     // genuine sign the weight itself is too heavy right now, not just "add a rep" — step it back
@@ -4579,6 +4600,22 @@ function getSetTarget(exId,workoutEx,setIdx,exData,routineId){
     // Topped out but no effort room left (RPE was already very high) — hold rather than push
     targetWeight=w;
     targetReps=repsMetric;
+  }
+  // Pre-workout soreness rating caps the computed target — real auto-regulation touching the
+  // actual number, not just a warning banner. A moderate rating prevents progressing further
+  // today (but won't undo a step-down the normal logic already decided on its own); an extreme
+  // rating backs off by one increment unless the normal logic was already more conservative than
+  // that. Only applies to this plain cross-session path — a live same-session anchor (you already
+  // lifted more THIS session) is real-time evidence and takes priority over a pre-workout guess.
+  const sorenessScore=(activeWorkout&&activeWorkout.muscleSoreness&&exData)?activeWorkout.muscleSoreness[exData.muscle]:null;
+  if(sorenessScore===2&&targetWeight>w){
+    targetWeight=w;targetReps=repsMetric;
+  }else if(sorenessScore===3&&!isBW){
+    const reduced=Math.max(0,Math.round((w-inc)*100)/100);
+    if(targetWeight>reduced){targetWeight=reduced;targetReps=range.min;}
+  }else if(sorenessScore===3&&isBW){
+    const reducedReps=Math.max(1,Math.round(repsMetric*0.85));
+    if(targetReps>reducedReps){targetWeight=w;targetReps=reducedReps;}
   }
   return isUni?{weight:targetWeight,repsL:targetReps,repsR:targetReps}:{weight:targetWeight,reps:targetReps};
 }
@@ -4736,7 +4773,7 @@ function suggestNextLoad(exId,workoutEx,routineId){
 // per the user's own framing — it's saved to history so that data exists when that's built).
 const PEF_FIELDS=[
   {field:'pump',label:'Pump',legend:'0 Flat \u00b7 1 Good Pump \u00b7 2 Max Pump'},
-  {field:'challenge',label:'Target Muscle Challenge',legend:'0 Other muscle failed first \u00b7 1 Reached failure \u00b7 2 Extreme fatigue/cramping'},
+  {field:'challenge',label:'Target Muscle Challenge',legend:'0 Another muscle/joint limited it first \u00b7 1 Target muscle was the limiting factor \u00b7 2 Pushed well past plan (extreme fatigue/cramping)'},
   {field:'jointPain',label:'Joint / Acute Pain',legend:'0 No pain \u00b7 1 Mild ache \u00b7 2 Sharp pain'}
 ];
 let pefDraft={},pefPanelOpenIdxs=new Set();
@@ -6141,9 +6178,38 @@ function confirmFinishWorkout(){
       const wasTrainingBefore=m.phase==='training';
       const rotNumBefore=(m.rotationsDone||0)+1;
       const totalBefore=m.rotationsPerMeso||1;
+      // Snapshot before advancing — if a scheduled deload triggers and the readiness check below
+      // says it isn't actually needed yet, "extend training" restores this wholesale rather than
+      // trying to manually reverse enterDeloadPhase's several interdependent mutations
+      // (preDeloadBaselines, trueFailureAnchor, pendingResetBaseline, etc.) one field at a time.
+      const mesoSnapshotBefore=JSON.parse(JSON.stringify(m));
       advanceMesoProgress(m,cleanExercises);
       if(!m.startedAt)m.startedAt=new Date().toISOString();
       m.completedWorkouts=(m.completedWorkouts||0)+1;
+      // A scheduled deload (not the separate early-trigger path below) just fired — check whether
+      // the fatigue data this app already collects actually supports it, or whether this pass
+      // just ran at a lower frequency than usual and hasn't really accumulated the fatigue a
+      // fixed rotation count assumes.
+      if(wasTrainingBefore&&m.phase==='deload'){
+        const readiness=getMesoDeloadReadiness(m);
+        if(readiness.needsCheck){
+          const reasons=[];
+          if(readiness.freqDropped)reasons.push('you\u2019ve trained about '+readiness.freq.sessionsPerWeek.toFixed(1)+'x/week this block, vs your usual '+readiness.overallFreq.toFixed(1)+'x/week \u2014 likely more recovery between sessions than the schedule assumes.');
+          if(readiness.lowFatigue)reasons.push('fatigue/soreness signals across '+m.name+'\u2019s trained muscles have mostly looked fine ('+readiness.concerning+' of '+readiness.total+' muscles showing any real fatigue flag).');
+          forgeConfirm(
+            'Deload Due \u2014 But Do You Need It?',
+            'A deload is scheduled for '+m.name+', but '+reasons.join(' Also, ')+' Extend training by one more rotation instead, or go ahead with the deload as planned?',
+            ()=>{save();renderMesocycles();},
+            {okLabel:'Deload As Planned',cancelLabel:'Extend Training',danger:false,onCancel:()=>{
+              const completedWorkouts=m.completedWorkouts,startedAt=m.startedAt;
+              Object.assign(m,mesoSnapshotBefore);
+              m.completedWorkouts=completedWorkouts;m.startedAt=startedAt; // this workout genuinely happened regardless of the deload/extend choice
+              m.rotationsPerMeso=(m.rotationsPerMeso||1)+1;
+              save();renderMesocycles();
+            }}
+          );
+        }
+      }
       // Only worth checking if we were mid-pass and didn't just naturally hit deload/finished —
       // no point suggesting an "early" deload on the same workout that triggers it on schedule.
       if(wasTrainingBefore&&m.phase==='training'&&m.deloadEnabled&&rotNumBefore<totalBefore){
@@ -6819,6 +6885,72 @@ function getMuscleSFRSignal(muscle){
 // override a purely volume-based read in either direction — e.g. a muscle numerically under MRV
 // but rating consistently sore is still flagged, and a muscle at/above MRV is flagged regardless
 // of how good the pump felt, since recoverable volume is the harder ceiling.
+// Flags a priority mismatch: a muscle you've marked Low/Normal priority using MORE of its own
+// weekly capacity (as a % of its MRV) than a muscle you've marked High priority. Each looks fine
+// in isolation against its own landmarks — the point of this check is the comparison between them,
+// since routine design (more exercises assigned to one muscle than another) can easily produce
+// this kind of imbalance without it being intentional.
+function getPriorityImbalanceNotes(){
+  const{ms}=getWeeklyMuscleVolume(7);
+  const muscles=Object.keys(state.volumeLandmarks).filter(m=>ms[m]>0);
+  const withPct=muscles.map(m=>{
+    const lm=state.volumeLandmarks[m];
+    return{muscle:m,priority:state.musclePriority[m]||'normal',pct:lm.mrv>0?ms[m]/lm.mrv:0};
+  });
+  const highs=withPct.filter(x=>x.priority==='high');
+  if(!highs.length)return[]; // nothing marked as a priority — no comparison to make
+  const lows=withPct.filter(x=>x.priority!=='high');
+  const notes=[];
+  lows.forEach(l=>{
+    const mostUnderused=highs.reduce((a,b)=>b.pct<a.pct?b:a,highs[0]);
+    if(l.pct>mostUnderused.pct+0.15){
+      notes.push(l.muscle+' ('+(l.priority==='low'?'Low':'Normal')+' priority) is using more of its weekly capacity ('+Math.round(l.pct*100)+'% of MRV) than '+mostUnderused.muscle+' (High priority, '+Math.round(mostUnderused.pct*100)+'%) \u2014 worth shifting some volume toward '+mostUnderused.muscle+' if that\u2019s where you actually want growth.');
+    }
+  });
+  return notes;
+}
+// Average sessions/week during the CURRENT pass of a mesocycle (from its first workout to its
+// most recent), vs the person's overall average across their last 30 sessions regardless of
+// mesocycle. A pass trained at a much lower frequency than usual accumulates less real fatigue
+// per rotation than a fixed rotation count assumes — this is the frequency half of the
+// deload-readiness check.
+function getMesoPassFrequency(m){
+  const passWorkouts=state.history.filter(w=>w.mesoId===m.id).slice(0,m.passWorkoutCount||0).map(w=>new Date(w.date)).sort((a,b)=>a-b);
+  if(passWorkouts.length<2)return null;
+  const spanDays=(passWorkouts[passWorkouts.length-1]-passWorkouts[0])/864e5;
+  return spanDays>0?{sessionsPerWeek:7*(passWorkouts.length-1)/spanDays,workoutCount:passWorkouts.length}:null;
+}
+function getOverallFrequency(){
+  const all=state.history.slice(0,30).map(w=>new Date(w.date)).sort((a,b)=>a-b);
+  if(all.length<2)return null;
+  const spanDays=(all[all.length-1]-all[0])/864e5;
+  return spanDays>0?7*(all.length-1)/spanDays:null;
+}
+// The actual readiness check: does the accumulated-fatigue data this app already collects (SFR
+// feedback, soreness, confirmed impact, volume vs landmarks) support that a scheduled deload is
+// actually needed right now, or has this pass just been going for a while without real fatigue
+// building up — e.g. because training frequency dropped and more recovery happened between
+// rotations than a fixed rotation count assumes.
+function getMesoDeloadReadiness(m){
+  const muscles=new Set();
+  (m.routineIds||[]).forEach(rid=>{
+    const r=getRoutine(rid);
+    (r&&r.exerciseIds||[]).forEach(id=>{const ex=getExercise(id);if(ex&&ex.muscle)muscles.add(ex.muscle);});
+  });
+  let concerning=0,total=0;
+  muscles.forEach(mu=>{
+    if(!state.volumeLandmarks[mu])return;
+    total++;
+    const status=getVolumeRecommendation(mu).status;
+    if(status==='high-fatigue'||status==='at-or-above-mrv'||status==='pain-flag')concerning++;
+  });
+  const freq=getMesoPassFrequency(m);
+  const overallFreq=getOverallFrequency();
+  const freqDropped=!!(freq&&overallFreq&&freq.sessionsPerWeek<overallFreq*0.7);
+  const lowFatigue=total>0&&(concerning/total)<0.34;
+  return{lowFatigue,freqDropped,freq,overallFreq,concerning,total,
+    needsCheck:total>0&&(lowFatigue||freqDropped)};
+}
 function getVolumeRecommendation(muscle){
   const lm=getMuscleLandmarks(muscle);
   const{ms}=getWeeklyMuscleVolume(7);
@@ -6891,6 +7023,7 @@ function renderReview(){
       const icons={'pain-flag':'🛑','at-or-above-mrv':'🚧','high-fatigue':'😮\u200d💨','below-mev':'📉','building-poor-sfr':'🔍','building':'📈'};
       if(icons[rec.status])sugg.push({i:icons[rec.status],t:rec.action});
     });
+    getPriorityImbalanceNotes().forEach(note=>sugg.push({i:'🎯',t:note}));
     if(consec>=5)sugg.push({i:'😴',t:consec+' consecutive days training. Schedule a rest day — muscles grow during recovery.'});
     if(!ms['Core'])sugg.push({i:'🔷',t:'No core work this week. 5 minutes of planks or crunches transfers to every lift.'});
     if(!ms['Calves']&&(ms['Quads']>0||ms['Hamstrings']>0))sugg.push({i:'🦵',t:'Hitting legs but skipping calves. Easy to bolt calf raises onto any session.'});
@@ -6964,17 +7097,32 @@ function updatePlateCount(kg,v){state.plates[kg]=parseInt(v)||0;save();updatePla
 function buildVolumeLandmarksUI(){
   const wrap=document.getElementById('vl-table');if(!wrap)return;
   const muscles=Object.keys(state.volumeLandmarks);
-  wrap.innerHTML='<div class="vl-table-row header"><span></span><span>MV</span><span>MEV</span><span>MAV</span><span>MRV</span></div>'
+  const priorityBtn=(m,p,label)=>{
+    const active=(state.musclePriority[m]||'normal')===p;
+    return '<button class="vl-priority-btn'+(active?' active '+p:'')+'" onclick="saveMusclePriority(\''+m+'\',\''+p+'\')">'+label+'</button>';
+  };
+  wrap.innerHTML='<div class="small text3" style="padding:4px 0 8px;line-height:1.5">Priority reflects your goals — it steers which muscles automated volume growth favors when trends alone would otherwise treat every muscle the same. "Low" only earns extra volume once it\'s genuinely under-stimulated (below MEV); "High" earns it more readily, even without a strong trend, as long as there\'s room below MAV.</div>'
     +muscles.map(m=>{
       const lm=state.volumeLandmarks[m];
-      return '<div class="vl-table-row"><span class="vl-muscle-name">'+m+'</span>'
+      return '<div style="padding:9px 0;border-bottom:1px solid var(--border)">'
+        +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">'
+        +'<span class="vl-muscle-name">'+m+'</span>'
+        +'<div class="vl-priority-pills">'+priorityBtn(m,'low','Low')+priorityBtn(m,'normal','Normal')+priorityBtn(m,'high','High')+'</div>'
+        +'</div>'
+        +'<div class="vl-table-row" style="border:none;padding:0"><span class="small text3">MV/MEV/MAV/MRV</span>'
         +['mv','mev','mav','mrv'].map(f=>'<input type="number" inputmode="numeric" min="0" max="60" value="'+lm[f]+'" onchange="saveVolumeLandmark(\''+m+'\',\''+f+'\',this.value)"/>').join('')
-        +'</div>';
+        +'</div></div>';
     }).join('');
   updateVolumeLandmarksSummary();
   const expanded=!state.vlSectionCollapsed;
   document.getElementById('vl-section-body').style.display=expanded?'block':'none';
   document.getElementById('vl-section-chevron').textContent=expanded?'▾':'▸';
+}
+function saveMusclePriority(muscle,priority){
+  if(!state.musclePriority[muscle])return;
+  state.musclePriority[muscle]=priority;
+  save();
+  buildVolumeLandmarksUI();
 }
 function updateVolumeLandmarksSummary(){
   const el=document.getElementById('vl-section-summary');if(!el)return;
