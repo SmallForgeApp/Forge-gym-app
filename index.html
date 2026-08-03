@@ -572,7 +572,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-02.9</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-03.2</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1486,11 +1486,34 @@ function getSetRestTime(exId){
   if(!ex)return 90;if(ex.bw==='bw')return 60;
   if(COMPOUND_MUSCLES.includes(ex.muscle))return 150;return 90;
 }
+// A session's duration/doneSets is only trustworthy if it's in the same ballpark as the user's
+// other sessions for this routine. Sessions logged in build < 2026-08-03 could fail to track time
+// properly, later re-opened and rushed through just to preserve the set/rep data — those have an
+// implausibly low seconds-per-set and would drag the average (and thus every future estimate) way
+// down if included as-is. MIN_PLAUSIBLE_SEC_PER_SET is a hard floor no genuine set+rest can beat;
+// the median/MAD check on top of that catches anything merely abnormal (rushed, or left running).
+const MIN_PLAUSIBLE_SEC_PER_SET=20;
+function filterPlausibleSessions(sessions){
+  const rated=sessions.map(w=>{
+    const doneSets=w.exercises.reduce((a,ex)=>a+ex.sets.filter(s=>s.done).length,0);
+    return{w,doneSets,rate:doneSets>0?w.duration/doneSets:null};
+  }).filter(s=>s.rate!=null);
+  if(rated.length<3)return rated.filter(s=>s.rate>=MIN_PLAUSIBLE_SEC_PER_SET).map(s=>s.w);
+  const rates=rated.map(s=>s.rate).sort((a,b)=>a-b);
+  const median=rates[Math.floor(rates.length/2)];
+  const mad=rates.map(r=>Math.abs(r-median)).sort((a,b)=>a-b)[Math.floor(rates.length/2)]||median*0.3;
+  const spread=Math.max(mad*3,median*0.5);
+  const lo=Math.max(MIN_PLAUSIBLE_SEC_PER_SET,median-spread),hi=median+spread;
+  return rated.filter(s=>s.rate>=lo&&s.rate<=hi).map(s=>s.w);
+}
 function getRoutineHistorySessions(routineId,limit){
   if(!routineId)return[];
   // state.history is newest-first (new entries are unshifted), so this naturally returns the
   // most recent sessions — keeping the average current if pace/rest habits change over time.
-  return state.history.filter(w=>w.routineId===routineId&&w.duration>0).slice(0,limit||8);
+  // Pull a larger pool than needed before filtering, so outliers don't just get replaced by
+  // shrinking the effective window.
+  const pool=state.history.filter(w=>w.routineId===routineId&&w.duration>0).slice(0,(limit||8)*3);
+  return filterPlausibleSessions(pool).slice(0,limit||8);
 }
 function formatMinRange(t){
   const m=Math.round(t/60),lo=Math.max(5,Math.round((m-10)/5)*5),hi=Math.round((m+10)/5)*5;
@@ -1593,9 +1616,12 @@ function getPR(exId){
   return pr;
 }
 function getLastSets(exId,routineId){
+  const exDataForSkip=getExercise(exId);
+  const muscleForSkip=exDataForSkip&&exDataForSkip.muscle;
   let fallback=null;
   for(let i=0;i<state.history.length;i++){
     const w=state.history[i];
+    if(muscleForSkip&&w.sorenessImpact&&w.sorenessImpact[muscleForSkip]===2)continue;
     const ex=(w.exercises||[]).find(e=>e.exId===exId);
     if(ex&&ex.sets&&ex.sets.length){
       const mapped=ex.sets.map(s=>({...s,useRIR:!!ex.useRIR}));
@@ -3159,9 +3185,13 @@ function getAnyValidSkipEntry(m){
 // after the just-finished workout has already been unshifted onto state.history[0], so index 0
 // itself is deliberately skipped (comparing "this session" against sessions before it).
 function getPriorNormalTopSets(exId,count){
+  const exDataForSkip=getExercise(exId);
+  const muscleForSkip=exDataForSkip&&exDataForSkip.muscle;
   const out=[];
   for(let i=1;i<state.history.length&&out.length<count;i++){
-    const ex=(state.history[i].exercises||[]).find(e=>e.exId===exId);
+    const w=state.history[i];
+    if(muscleForSkip&&w.sorenessImpact&&w.sorenessImpact[muscleForSkip]===2)continue;
+    const ex=(w.exercises||[]).find(e=>e.exId===exId);
     if(!ex)continue;
     const normalSets=(ex.sets||[]).filter(s=>s.done&&(!s.type||s.type==='normal'));
     if(normalSets.length)out.push({...normalSets[0],useRIR:!!ex.useRIR});
@@ -3172,9 +3202,13 @@ function getPriorNormalTopSets(exId,count){
 // used when checking trend ahead of a workout that hasn't happened yet, rather than after one
 // was just logged (getPriorNormalTopSets deliberately skips index 0 for that reason).
 function getRecentNormalTopSets(exId,count){
+  const exDataForSkip=getExercise(exId);
+  const muscleForSkip=exDataForSkip&&exDataForSkip.muscle;
   const out=[];
   for(let i=0;i<state.history.length&&out.length<count;i++){
-    const ex=(state.history[i].exercises||[]).find(e=>e.exId===exId);
+    const w=state.history[i];
+    if(muscleForSkip&&w.sorenessImpact&&w.sorenessImpact[muscleForSkip]===2)continue;
+    const ex=(w.exercises||[]).find(e=>e.exId===exId);
     if(!ex)continue;
     const normalSets=(ex.sets||[]).filter(s=>s.done&&(!s.type||s.type==='normal'));
     if(normalSets.length)out.push({...normalSets[0],useRIR:!!ex.useRIR});
@@ -3191,7 +3225,12 @@ function getMesoVolumeSuggestions(m,routineId){
   if(!m||m.phase!=='training')return null;
   const total=m.rotationsPerMeso||1;
   const rotNum=(m.rotationsDone||0)+1;
-  if(total<2||rotNum<total-1)return null; // only relevant in the final 2 rotations of a pass
+  // ASSUMPTION (flagging back per your request): "midpoint onward" implemented as the ceiling of
+  // half the pass length, e.g. rotation 3 of 5, or 2 of 3 — so a muscle can gain a set gradually
+  // across several rotations instead of at most once right before deload. No cooldown between
+  // additions was added; let me know if you want a different fraction or a cooldown.
+  const midpoint=Math.ceil(total/2);
+  if(total<2||rotNum<midpoint)return null;
   const r=getRoutine(routineId);
   if(!r)return null;
   const groups={};
@@ -4500,10 +4539,13 @@ function renderActiveWorkout(){
 }
 
 function getSessionsForExercise(exId,limit,routineId){
+  const exDataForSkip=getExercise(exId);
+  const muscleForSkip=exDataForSkip&&exDataForSkip.muscle;
   const sessions=[];
   for(let i=0;i<state.history.length&&sessions.length<limit;i++){
     const w=state.history[i];
     if(routineId&&w.routineId!==routineId)continue;
+    if(muscleForSkip&&w.sorenessImpact&&w.sorenessImpact[muscleForSkip]===2)continue;
     const ex=(w.exercises||[]).find(e=>e.exId===exId);
     // Only normal working sets count toward progression/trend — warmups, drop sets etc. don't reflect real progress
     const done=ex&&ex.sets?ex.sets.filter(s=>s.done&&(!s.type||s.type==='normal')).map(s=>({...s,useRIR:!!ex.useRIR})):[];
@@ -4568,6 +4610,26 @@ function getLiveProgressionTarget(loggedSet,workoutEx,exData){
   // relevant than falling back to last session's stale target now that we have live data.
   return isUni?{weight:w,repsL:loggedSet.repsL,repsR:loggedSet.repsR}:{weight:w,reps:repsMetric};
 }
+// Re-derives the SAME training-phase meso override (RIR-ramp reps, or pending-reset-baseline
+// weight+reps) that startRoutineWorkout applies once at seed time — so getSetTarget can apply it
+// too, and every caller (initial build, renderSets, addSet, and the volume-suggestion auto-added
+// set) agrees on the number rather than only the very first render knowing the override exists.
+// Deliberately skips the deload branch of getMesoSetAdjustments — that trimming logic stays
+// exclusively at the original seed call site (startRoutineWorkout), untouched.
+// adjArr only covers NORMAL-type set positions, so setIdx (which walks the raw sets array,
+// warmups included) has to first be converted to a normal-only index the same way the seed
+// call site does it.
+function getMesoTrainingOverride(exId,workoutEx,setIdx){
+  if(!activeMesoContext)return null;
+  const m=state.mesocycles[activeMesoContext.mesoIdx];
+  if(!m||m.phase!=='training')return null;
+  const adjArr=getMesoSetAdjustments(m,exId);
+  if(!adjArr||!adjArr.length)return null;
+  const sets=(workoutEx&&workoutEx.sets)||[];
+  let normalIdx=0;
+  for(let i=0;i<setIdx&&i<sets.length;i++){if(!sets[i].type||sets[i].type==='normal')normalIdx++;}
+  return adjArr[normalIdx]||adjArr[adjArr.length-1]||null;
+}
 // Computes a genuine progression TARGET for a set (double progression: add reps within the
 // range, then bump weight and reset to the bottom of the range) rather than just copying
 // last session's numbers. Falls back to an 8–12 default range when none is set anywhere.
@@ -4583,7 +4645,10 @@ function getSetTarget(exId,workoutEx,setIdx,exData,routineId){
     if(liveTarget)return liveTarget;
   }
   const prevSets=getLastSets(exId,routineId);
-  const ps=prevSets[setIdx]||prevSets[prevSets.length-1];
+  // Set 1 anchors on the best working set from last session (highest weight, then most reps) —
+  // same choice suggestNextLoad makes for its tip — so the pre-filled number and the tip above it
+  // always agree. Every other slot still anchors on its own slot's own history, unchanged.
+  const ps=setIdx===0?(pickBestWorkingSet(prevSets)||prevSets[0]||prevSets[prevSets.length-1]):(prevSets[setIdx]||prevSets[prevSets.length-1]);
   if(!ps||(!ps.weight&&!ps.reps&&!ps.repsL&&!ps.repsR))return null;
   const isUni=!!(exData&&exData.uni);
   // Don't apply progression math on top of a warm-up/drop-set/etc slot, but DO scale its weight
@@ -4648,6 +4713,20 @@ function getSetTarget(exId,workoutEx,setIdx,exData,routineId){
     targetWeight=w;
     targetReps=repsMetric;
   }
+  // An active meso override (RIR-ramp "true failure minus target RIR" reps, or a pending
+  // reset-baseline weight+reps) takes priority over the plain double-progression number just
+  // computed above — same override startRoutineWorkout already applies once at seed time, now
+  // re-applied here so renderSets/addSet/volume-suggestion sets agree with it too. A null weight
+  // in the override (the RIR-ramp case) means "leave weight to normal progression, only override
+  // reps" — matches getRIRAnchoredReps' own comment.
+  let mesoRepsL=null,mesoRepsR=null;
+  const mesoOverride=getMesoTrainingOverride(exId,workoutEx,setIdx);
+  if(mesoOverride){
+    if(mesoOverride.weight!=null)targetWeight=mesoOverride.weight;
+    if(mesoOverride.reps!=null)targetReps=mesoOverride.reps;
+    if(mesoOverride.repsL!=null)mesoRepsL=mesoOverride.repsL;
+    if(mesoOverride.repsR!=null)mesoRepsR=mesoOverride.repsR;
+  }
   // Pre-workout soreness rating caps the computed target — real auto-regulation touching the
   // actual number, not just a warning banner. A moderate rating prevents progressing further
   // today (but won't undo a step-down the normal logic already decided on its own); an extreme
@@ -4664,7 +4743,32 @@ function getSetTarget(exId,workoutEx,setIdx,exData,routineId){
     const reducedReps=Math.max(1,Math.round(repsMetric*0.85));
     if(targetReps>reducedReps){targetWeight=w;targetReps=reducedReps;}
   }
-  return isUni?{weight:targetWeight,repsL:targetReps,repsR:targetReps}:{weight:targetWeight,reps:targetReps};
+  // Sharp joint pain (jointPain>=2) reported after this exercise's most recent logged session is a
+  // safety signal, not just a Review-tab data point — gate the next target the same way a
+  // soreness-3 rating already does (hold, or step back one increment), regardless of how good the
+  // reps looked on paper. Same plain-cross-session-only scope as the soreness cap above.
+  const lastJointPain=getLastJointPain(exId);
+  if(lastJointPain>=2){
+    if(!isBW){
+      const reduced=Math.max(0,Math.round((w-inc)*100)/100);
+      if(targetWeight>reduced){targetWeight=reduced;targetReps=range.min;}
+    }else{
+      const reducedReps=Math.max(1,Math.round(repsMetric*0.85));
+      if(targetReps>reducedReps){targetWeight=w;targetReps=reducedReps;}
+    }
+  }
+  return isUni?{weight:targetWeight,repsL:mesoRepsL!=null?mesoRepsL:targetReps,repsR:mesoRepsR!=null?mesoRepsR:targetReps}:{weight:targetWeight,reps:targetReps};
+}
+// The most recent logged session's own feedback for THIS exercise — not just muscle-level
+// aggregation. Stops at the first history entry that included this exercise (whether or not
+// feedback was actually given there), since only that session's rating is "the most recent" one;
+// falling through to an older session that happened to have a rating would use stale evidence.
+function getLastJointPain(exId){
+  for(let i=0;i<state.history.length;i++){
+    const ex=(state.history[i].exercises||[]).find(e=>e.exId===exId);
+    if(ex)return ex.feedback&&ex.feedback.jointPain!=null?ex.feedback.jointPain:null;
+  }
+  return null;
 }
 // Pairwise performance comparison between two sets of the same slot: +1 = b is better than a,
 // -1 = b is worse, 0 = equal (or not comparable). Weight first, then reps, then effort as the
@@ -4798,24 +4902,18 @@ function suggestNextLoad(exId,workoutEx,routineId){
   if(range){
     const atTop=r>=range.max;
     const hasRoom=rpeEq==null||rpeEq<=8;
-    let confirmed=true;
-    if(atTop&&hasRoom&&!anchorIsLive){
-      const prior=getSetAtSessionsAgo(exId,targetIdx,1,routineId);
-      if(prior){
-        const priorReps=repsMetricOf(prior);
-        const priorRpeEq=prior.rpe!=null?(prior.useRIR?(10-prior.rpe):prior.rpe):null;
-        confirmed=priorReps>=range.max&&(priorRpeEq==null||priorRpeEq<=8);
-      }
-    }
+    // No longer waits for a second confirming session before recommending the bump — matches
+    // getSetTarget's own philosophy (see the comment there): hitting the ceiling with room once is
+    // enough. Previously this only agreed with getSetTarget once a same-session live anchor
+    // existed; for a bare set 1 (no live anchor yet) it still asked to "hit it again first" while
+    // the input box above it had already bumped, so tip and target disagreed.
     let stepDown=false;
     if(!atTop&&!isBW&&range.min&&r<range.min&&!anchorIsLive){
       const prior=getSetAtSessionsAgo(exId,targetIdx,1,routineId);
       if(prior)stepDown=repsMetricOf(prior)<range.min;
     }
-    if(atTop&&hasRoom&&confirmed){
+    if(atTop&&hasRoom){
       tip=inc?('Go up to '+(Math.round((w+inc)*100)/100)+'kg \u00d7 '+range.min+(range.min!==range.max?'\u2013'+range.max:'')+' reps'):('Push past '+range.max+' reps next time');
-    }else if(atTop&&hasRoom&&!confirmed){
-      tip='Hit it again at '+(w?w+'kg \u00d7 ':'')+r+' \u2014 one more like this and the weight goes up';
     }else if(stepDown){
       tip=inc?('Missed '+range.min+'+ twice \u2014 back off to '+Math.max(0,Math.round((w-inc)*100)/100)+'kg \u00d7 '+range.min):('Missed '+range.min+'+ twice \u2014 consider backing off');
     }else if(r<range.max){
