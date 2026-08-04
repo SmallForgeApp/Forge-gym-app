@@ -173,6 +173,12 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .complete-btn{width:24px;height:24px;border-radius:7px;border:2px solid var(--border);background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s;color:transparent;font-size:12px;flex-shrink:0;}
 .complete-btn.done{background:var(--green);border-color:var(--green);color:#fff;}
 .exercise-actions{padding:7px 16px 11px;display:flex;gap:6px;flex-wrap:wrap;}
+.add-set-pill{display:flex;border-radius:999px;overflow:hidden;border:1px solid var(--border);height:32px;flex:1 1 auto;min-width:200px;}
+.add-set-pill-half{flex:1;border:none;font-size:11px;font-weight:700;padding:0 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.add-set-pill-routine{background:var(--accent)1f;color:var(--accent);}
+.add-set-pill-routine:active{background:var(--accent)3d;}
+.add-set-pill-workout{background:var(--accent2)1f;color:var(--accent2);border-left:1px solid var(--border);}
+.add-set-pill-workout:active{background:var(--accent2)3d;}
 .timer-bar{position:fixed;bottom:56px;left:0;right:0;background:var(--bg3);border-top:2px solid var(--accent);padding:10px 20px;display:flex;align-items:center;gap:14px;z-index:100;transform:translateY(100%);transition:transform 0.3s ease;}
 .timer-bar.visible{transform:translateY(0);}
 .timer-display{font-family:'DM Mono',monospace;font-size:28px;font-weight:500;color:var(--accent);flex:1;}
@@ -572,7 +578,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-03.5</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-03.7</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -4255,7 +4261,15 @@ function startRoutineWorkout(i,sorenessScores){
   let mesoNote=null;
   const exercises=(r.exerciseIds||[]).map((id,idx)=>{
     const ex=getExercise(id);if(!ex)return null;
-    const prev=getLastSets(id,r.id);
+    const prevRaw=getLastSets(id,r.id);
+    // Sets logged as "This Workout Only" (routineSet===false, see addSet's split pill) never
+    // seed forward into a future workout — that's the entire point of the distinction. Every
+    // other consumer of getLastSets (progression targets, trend, PR, volume) still sees them —
+    // they were real training that happened — this filter applies ONLY to determining how many
+    // rows a brand-new workout starts with. routineSet undefined (all pre-existing history, and
+    // every routine-seeded set) defaults true, so nothing about current behavior changes for
+    // sets that already exist.
+    const prev=prevRaw.filter(s=>s.routineSet!==false);
     // Restore saved superset group from routine
     const sg=(r.supersetGroups&&r.supersetGroups[idx])||null;
     const slotOverride=(activeMesoContext&&activeMeso&&activeMeso.slotRepRanges&&activeMesoContext.routinePos!=null&&activeMeso.slotRepRanges[activeMesoContext.routinePos])
@@ -5164,7 +5178,10 @@ function buildExerciseCard(exIdx){
     +'</tr></thead><tbody id="sets-body-'+exIdx+'"></tbody></table>'
     +'<div class="small text3" style="padding:4px 16px 0">Swipe a set left to delete it</div>'
     +'<div class="exercise-actions">'
-    +'<button class="btn btn-ghost btn-sm" onclick="addSet('+exIdx+')">＋ Set</button>'
+    +'<div class="add-set-pill" role="group" aria-label="Add a set">'
+    +'<button class="add-set-pill-half add-set-pill-routine" onclick="addSet('+exIdx+',true)" title="Carries forward — future workouts from this routine will start with this set too">＋ Routine Set</button>'
+    +'<button class="add-set-pill-half add-set-pill-workout" onclick="addSet('+exIdx+',false)" title="This workout only — won\'t be seeded into future workouts from this routine">＋ This Workout Only</button>'
+    +'</div>'
     +'<button class="btn btn-accent2 btn-sm" onclick="openTimerModal()">⏱</button>'
     +'<button class="btn btn-ghost btn-sm" onclick="openEditExerciseModal('+exIdx+')">✏️</button>'
     +'</div>'
@@ -5446,7 +5463,7 @@ function addExerciseToWorkout(exId){
   // Scroll to new exercise
   setTimeout(()=>{const cards=document.querySelectorAll('.exercise-card');if(cards.length)cards[cards.length-1].scrollIntoView({behavior:'smooth',block:'nearest'});},100);
 }
-function addSet(exIdx){
+function addSet(exIdx,toRoutine=true){
   const ex=activeWorkout.exercises[exIdx];
   const last=ex.sets[ex.sets.length-1];
   const newSetIdx=ex.sets.length; // index of the set about to be added
@@ -5482,10 +5499,10 @@ function addSet(exIdx){
 
   ex.sets.push(isUni?{
     type, weight:0, repsL:0, repsR:0, reps:0, rpe:null, done:false,
-    prevWeight:pw, prevRepsL:prL, prevRepsR:prR, prevRpe:rpe,
+    prevWeight:pw, prevRepsL:prL, prevRepsR:prR, prevRpe:rpe, routineSet:!!toRoutine,
   }:{
     type, weight:0, reps:0, rpe:null, done:false,
-    prevWeight:pw, prevReps:pr, prevRpe:rpe,
+    prevWeight:pw, prevReps:pr, prevRpe:rpe, routineSet:!!toRoutine,
   });
   renderSets(exIdx);updateWorkoutStats();updateWorkoutEstimate();
 }
@@ -6475,11 +6492,25 @@ function confirmFinishWorkout(){
   const anySetDone=cleanExercises.some(ex=>ex.sets.some(s=>s.done));
 
   if(anySetDone){
+    // Snapshot which rotation/pass this workout was actually performed in — must happen HERE,
+    // before advanceMesoProgress (below) mutates rotationsDone/repeatsDone, or every history
+    // entry would show whatever the CURRENT rotation is instead of the one it really happened in.
+    // A caught-up/revisited session (activeMesoContext.catchUp) doesn't cleanly map to a single
+    // rotation number — it's whichever routine slot was originally skipped, logged without
+    // advancing anything — so it's deliberately left untagged rather than mislabeled.
+    const mForTag=(activeMesoContext&&!activeMesoContext.catchUp)?state.mesocycles[activeMesoContext.mesoIdx]:null;
+    const mesoProgress=mForTag?{
+      rotation:(mForTag.rotationsDone||0)+1,
+      rotationTotal:mForTag.rotationsPerMeso||1,
+      repeat:(mForTag.repeatsDone||0)+1,
+      repeatTotal:mForTag.mesoRepeats||0
+    }:null;
     const workout={id:uid(),name,date:new Date().toISOString(),
       duration:Math.floor((Date.now()-activeWorkout.startTime)/1000),
       notes:activeWorkout.notes||'',exercises:cleanExercises,
       routineId:activeWorkout.sourceRoutineId||null,
       mesoId:activeMesoContext?state.mesocycles[activeMesoContext.mesoIdx]?.id:null,
+      mesoProgress,
       muscleSoreness:activeWorkout.muscleSoreness||{},
       sorenessImpact:activeWorkout.sorenessImpact||{}};
     state.history.unshift(workout);invalidatePRCache();
@@ -7111,12 +7142,19 @@ function renderHistory(){
     const names=w.exercises.slice(0,3).map(ex=>{const e=getExercise(ex.exId);return e?e.name:'?';}).join(', ')+(w.exercises.length>3?' +'+(w.exercises.length-3)+' more':'');
     const muscles=[...new Set(w.exercises.map(ex=>{const e=getExercise(ex.exId);return e?e.muscle:'';}).filter(Boolean))];
 
-    // Mesocycle tag for this workout
+    // Mesocycle tag for this workout — includes the specific rotation/pass it was performed in
+    // when available (mesoProgress, saved 2026-08-03.6), so a plateau is traceable to exactly
+    // when it started rather than just "somewhere in this mesocycle." Older history entries
+    // logged before this existed won't have mesoProgress — falls back to the meso name alone.
     const mesoInfo=w.mesoId&&mesoMap[w.mesoId]?mesoMap[w.mesoId]:null;
+    const rotationTxt=w.mesoProgress
+      ?' &middot; Rotation '+w.mesoProgress.rotation+' of '+w.mesoProgress.rotationTotal
+        +(w.mesoProgress.repeatTotal!==1?' &middot; Pass '+w.mesoProgress.repeat+(w.mesoProgress.repeatTotal>0?' of '+w.mesoProgress.repeatTotal:''):'')
+      :'';
     const mesoHtml=mesoInfo
       ?'<div style="display:inline-flex;align-items:center;gap:5px;background:var(--accent)14;border:1px solid var(--accent)33;border-radius:6px;padding:2px 8px;margin-top:6px">'
         +'<span style="font-size:9px;font-weight:800;letter-spacing:0.8px;color:var(--accent);text-transform:uppercase">'+escHtml(mesoInfo.name)+'</span>'
-        +'<span style="font-size:10px;color:var(--text3)">&middot; '+mesoInfo.count+' workout'+(mesoInfo.count!==1?'s':'')+' done'+(mesoInfo.days!=null?' &middot; '+mesoInfo.days+' days running':'')+'</span>'
+        +'<span style="font-size:10px;color:var(--text3)">&middot; '+mesoInfo.count+' workout'+(mesoInfo.count!==1?'s':'')+' done'+(mesoInfo.days!=null?' &middot; '+mesoInfo.days+' days running':'')+rotationTxt+'</span>'
         +'</div>'
       :'';
 
@@ -7142,9 +7180,15 @@ function openHistoryDetail(id){
   const d=new Date(w.date);
   document.getElementById('history-detail-title').textContent=w.name;
   let html='<div class="small text2" style="margin-bottom:10px">'+d.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'})+'</div>';
+  if(w.mesoProgress){
+    const mp=w.mesoProgress;
+    html+='<div class="small text3" style="margin-bottom:10px">Rotation '+mp.rotation+' of '+mp.rotationTotal
+      +(mp.repeatTotal!==1?' &middot; Pass '+mp.repeat+(mp.repeatTotal>0?' of '+mp.repeatTotal:''):'')+'</div>';
+  }
   if(w.notes)html+='<div class="small" style="color:var(--accent2);margin-bottom:10px">📝 '+escHtml(w.notes)+'</div>';
   let allEff=[]; // canonical RIR-equivalent, so mixed RIR/RPE exercises still average meaningfully
-  w.exercises.forEach(ex=>{
+  const trendTargets=[]; // {canvasId, exId} — drawn after innerHTML is actually in the DOM
+  w.exercises.forEach((ex,exIdx)=>{
     const exData=getExercise(ex.exId);
     const useRIR=!!ex.useRIR;
     html+='<div class="bold mt12">'+(exData?escHtml(exData.name):'Unknown')+'</div>';
@@ -7158,11 +7202,56 @@ function openHistoryDetail(id){
         if(s.rpe!=null)allEff.push(useRIR?(10-s.rpe):s.rpe);
       }
     });
+    // Trend AS OF this workout's own date — not the live/current trend — so you can compare this
+    // snapshot against today's full Progress Chart and see exactly where a plateau started,
+    // instead of only ever viewing the trend with hindsight already baked in.
+    if(ex.sets.some(s=>s.done)){
+      const canvasId='history-trend-'+exIdx+'-'+ex.exId;
+      trendTargets.push({canvasId,exId:ex.exId});
+      html+='<div class="small text3" style="margin-top:4px">Trend as of this workout (e1RM)</div>'
+        +'<canvas id="'+canvasId+'" style="width:100%;height:36px;display:block;margin-top:2px"></canvas>';
+    }
   });
   if(allEff.length)html+='<div class="mt12 small" style="color:var(--orange)">Avg effort (RPE-equivalent): '+(allEff.reduce((a,b)=>a+b,0)/allEff.length).toFixed(1)+'</div>';
   document.getElementById('history-detail-body').innerHTML=html;
+  trendTargets.forEach(t=>drawHistoryTrendSparkline(t.canvasId,t.exId,d));
   document.getElementById('history-delete-btn').onclick=()=>{if(confirm('Delete this workout?')){state.history=state.history.filter(h=>h.id!==id);invalidatePRCache();save();renderHistory();closeModal('modal-history-detail');}};
   openModal('modal-history-detail');
+}
+// Small trend line for one exercise, using history up to and including `cutoffDate` only — a
+// snapshot of what the trend looked like AS OF that specific past workout, not the live trend.
+// Same e1RM metric (calcORM) as the main Progress Chart's default, just capped in time and drawn
+// compact (no axes/labels) to fit inline in the History detail modal.
+function drawHistoryTrendSparkline(canvasId,exId,cutoffDate){
+  const canvas=document.getElementById(canvasId);if(!canvas)return;
+  const ctx=canvas.getContext('2d');
+  const wrap=canvas.parentElement;
+  canvas.width=(wrap&&wrap.clientWidth)||280;canvas.height=36;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const points=[];
+  state.history.slice().reverse().forEach(hw=>{
+    if(new Date(hw.date)>cutoffDate)return;
+    const found=hw.exercises.find(e=>e.exId===exId);if(!found)return;
+    const done=found.sets.filter(s=>s.done);if(!done.length)return;
+    const val=Math.max(...done.map(s=>calcORM(s.weight||0,repsMetricOf(s))));
+    if(val>0)points.push(val);
+  });
+  if(points.length<2){
+    ctx.fillStyle='rgba(136,136,170,0.6)';ctx.font='10px DM Sans';ctx.textAlign='left';
+    ctx.fillText('Not enough history yet at this point',2,20);
+    return;
+  }
+  const mn=Math.min(...points),mx=Math.max(...points);
+  const pad=3,w=canvas.width-pad*2,h=canvas.height-pad*2;
+  const xS=w/(points.length-1);
+  const accentRgb=(getComputedStyle(document.documentElement).getPropertyValue('--accent-rgb')||'217,119,87').trim();
+  const yOf=v=>pad+h-(mx===mn?h/2:h*(v-mn)/(mx-mn));
+  ctx.beginPath();ctx.strokeStyle='rgb('+accentRgb+')';ctx.lineWidth=1.5;ctx.lineJoin='round';
+  points.forEach((v,i)=>{const x=pad+i*xS,y=yOf(v);if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);});
+  ctx.stroke();
+  // Mark this workout's own point distinctly — it's the last point in the capped series
+  const lastX=pad+(points.length-1)*xS,lastY=yOf(points[points.length-1]);
+  ctx.beginPath();ctx.fillStyle='rgb('+accentRgb+')';ctx.arc(lastX,lastY,2.5,0,Math.PI*2);ctx.fill();
 }
 function exportHistory(){
   if(!state.history.length){alert('No workout history to export.');return;}
