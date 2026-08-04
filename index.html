@@ -572,7 +572,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-03.2</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-03.5</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1604,7 +1604,10 @@ function getPR(exId){
   let bw=0,br=0,bo=0;
   state.history.forEach(w=>w.exercises.forEach(ex=>{
     if(ex.exId!==exId)return;
-    ex.sets.filter(s=>s.done&&s.type!=='partials').forEach(s=>{
+    // Only a genuine top-set effort counts as a record — a dropset or myo-rep set chases extra
+    // reps via fatigue/rest-pause rather than a fresh max attempt, same standard as
+    // getSessionsForExercise/getWeeklyMuscleVolume.
+    ex.sets.filter(s=>s.done&&(!s.type||s.type==='normal')).forEach(s=>{
       if((s.weight||0)>bw)bw=s.weight||0;
       const r=repsMetricOf(s);
       if(r>br)br=r;
@@ -3050,7 +3053,7 @@ function getRIRAnchoredReps(m,exId,targetRIR){
     const reps=s.reps!=null?Math.max(1,Math.round(s.reps-targetRIR)):undefined;
     const repsL=s.repsL!=null?Math.max(1,Math.round(s.repsL-targetRIR)):undefined;
     const repsR=s.repsR!=null?Math.max(1,Math.round(s.repsR-targetRIR)):undefined;
-    return{weight:null,reps,repsL,repsR}; // weight:null → passes through to normal progression untouched
+    return{weight:null,reps,repsL,repsR}; // weight left null here on purpose — getMesoSetAdjustments (the only caller) fills in the real double-progression or reset-baseline weight itself right after calling this
   });
 }
 // Returns an array of {weight,reps,repsL,repsR} — one per set — to seed this exercise's sets
@@ -3062,7 +3065,7 @@ function getRIRAnchoredReps(m,exId,targetRIR){
 // number of sets and leaves weight/reps exactly as resolved — with the target effort
 // (deloadTargetRIR) shown as guidance rather than mechanically enforced, since RIR is
 // self-reported everywhere else in the app too.
-function getMesoSetAdjustments(m,exId){
+function getMesoSetAdjustments(m,exId,routineId,repRange){
   if(!m)return null;
   const exData=getExercise(exId)||{};
   const isBW=exData.bw==='bw';
@@ -3091,21 +3094,47 @@ function getMesoSetAdjustments(m,exId){
     });
   }
   if(m.phase==='training'){
-    // RIR-anchored rep prediction takes priority when enabled — it's a more useful "what rep
-    // count should I aim for today" than the reset-baseline override, which only answers "what
-    // to resume the first workout of a pass at". Falls through to the reset-baseline override
-    // (or null, i.e. normal history-based progression) if disabled, or if there's no anchor yet
-    // (e.g. this mesocycle hasn't completed a pass yet).
-    if(m.rirRampEnabled&&m.rirRepTargetEnabled){
-      const rirInfo=getMesoTargetRIR(m);
-      if(rirInfo&&!rirInfo.deload){
-        const predicted=getRIRAnchoredReps(m,exId,rirInfo.rir);
-        if(predicted)return predicted;
+    // BUG FIX (was the most serious of the batch): weight used to be left null here with a comment
+    // claiming it "passes through to normal progression untouched" — but nothing ever actually ran
+    // that normal progression for weight once this branch fired, because the RIR-ramp and
+    // reset-baseline branches were mutually exclusive `if`s, and this one wins as soon as an anchor
+    // exists (i.e. from pass 2 onward under default settings). So weight just silently carried
+    // forward as a literal copy of last session's logged number forever — progressive overload
+    // stalled completely, and the deload reset baseline below could never apply either, since it
+    // only ran when this branch returned null.
+    //
+    // Fix: reps and weight are now resolved independently instead of as one exclusive package.
+    // Reps: the RIR ramp wins whenever it has an anchor (a live, per-rotation target beats a
+    // one-time resume number) — falls back to the reset baseline's own reps otherwise.
+    // Weight: the reset baseline explicitly wins, but ONLY on the very first session of a new
+    // pass — that's the actual point of a deload reset (resume at a deliberately lighter number,
+    // not wherever double-progression would've continued the deload session's reduced weight from).
+    // Every session after that runs real double-progression, chaining off whatever that first
+    // session logged — same as it would with the RIR ramp disabled entirely.
+    const rirActive=m.rirRampEnabled&&m.rirRepTargetEnabled;
+    const rirInfo=rirActive?getMesoTargetRIR(m):null;
+    const rirReps=(rirInfo&&!rirInfo.deload)?getRIRAnchoredReps(m,exId,rirInfo.rir):null;
+    const isFirstOfPass=(m.passWorkoutCount||0)===0;
+    const resetBase=isFirstOfPass?((m.pendingResetBaseline||{})[exId]||null):null;
+    if(!rirReps&&!resetBase)return null; // no override — normal history-based progression applies
+    const len=rirReps?rirReps.length:resetBase.length;
+    const out=[];
+    for(let i=0;i<len;i++){
+      const rirEntry=rirReps?(rirReps[i]||rirReps[rirReps.length-1]):null;
+      const baseEntry=resetBase?(resetBase[i]||resetBase[resetBase.length-1]):null;
+      const reps=rirEntry?rirEntry.reps:(baseEntry?baseEntry.reps:undefined);
+      const repsL=rirEntry?rirEntry.repsL:(baseEntry?baseEntry.repsL:undefined);
+      const repsR=rirEntry?rirEntry.repsR:(baseEntry?baseEntry.repsR:undefined);
+      let weight;
+      if(baseEntry&&baseEntry.weight!=null){
+        weight=baseEntry.weight;
+      }else{
+        const computed=getPlainProgressionWeight(exId,repRange,i,routineId);
+        weight=computed!=null?computed:null;
       }
+      out.push({weight,reps,repsL,repsR});
     }
-    if((m.passWorkoutCount||0)===0&&m.pendingResetBaseline&&m.pendingResetBaseline[exId]){
-      return m.pendingResetBaseline[exId];
-    }
+    return out;
   }
   return null;
 }
@@ -4237,7 +4266,7 @@ function startRoutineWorkout(i,sorenessScores){
     // it must never leak into a rotation other than the one it was actually added for.
     let sets=(prev.length?prev.map(s=>({...s,done:false})):[newSet()]).filter(s=>s.type!=='partials');
     if(!sets.length)sets=[newSet()];
-    const adjArr=activeMeso?getMesoSetAdjustments(activeMeso,id):null;
+    const adjArr=activeMeso?getMesoSetAdjustments(activeMeso,id,r.id,repRange):null;
     if(adjArr&&adjArr.length){
       // adjArr only covers NORMAL-type sets (baselines are snapshotted normal-only) — it must be
       // mapped onto just the normal-type positions in `sets`, not by raw array index, or a
@@ -4294,6 +4323,12 @@ function startRoutineWorkout(i,sorenessScores){
                      :{...withPrev,weight:tgt.weight,reps:tgt.reps};
       });
     }
+    // Nothing written into weight/reps/repsL/repsR up to this point (whichever branch above
+    // supplied it — raw history carry-over, a meso override, or a computed target) was typed by
+    // the user this session — mark it all auto-filled so renderSets' guard is still free to
+    // refresh it with fresher live-session evidence later. updateSet clears the specific flag the
+    // moment the user actually edits a field for real.
+    sets=sets.map(s=>({...s,autoWeight:true,autoReps:true,autoRepsL:true,autoRepsR:true}));
     if(mesoRIRInfo&&mesoRIRInfo.rir!=null){
       const aimRIR=mesoRIRInfo.rir;
       sets=sets.map(s=>(!s.type||s.type==='normal')?{...s,rpe:useRIR?aimRIR:(10-aimRIR)}:s);
@@ -4564,6 +4599,62 @@ function checkMissedRepRange(exId,repRange,routineId){
   return null;
 }
 const DEFAULT_REP_RANGE={min:8,max:12};
+// Same as getSetAtSessionsAgo but indexed against the NORMAL-only view of a session's sets —
+// i.e. the same indexing scheme adjArr/anchor arrays use throughout (they only ever cover
+// working sets). Needed by getPlainProgressionWeight's stepdown check below.
+function getNormalSetAtSessionsAgo(exId,normalIdx,n,routineId){
+  const exData=getExercise(exId);
+  const muscle=exData&&exData.muscle;
+  let count=0;
+  for(let i=0;i<state.history.length;i++){
+    const w=state.history[i];
+    if(routineId&&w.routineId!==routineId)continue;
+    if(muscle&&w.sorenessImpact&&w.sorenessImpact[muscle]===2)continue;
+    const ex=(w.exercises||[]).find(e=>e.exId===exId);
+    if(ex&&ex.sets&&ex.sets.length){
+      if(count===n){
+        const normal=ex.sets.filter(s=>!s.type||s.type==='normal');
+        const s=normal[normalIdx]||normal[normal.length-1];
+        return s?{...s,useRIR:!!ex.useRIR}:null;
+      }
+      count++;
+    }
+  }
+  return null;
+}
+// The WEIGHT half of getSetTarget's own double-progression math, working off the normal-only
+// set index (matching adjArr's convention), and deliberately NOT meso-aware — it must not call
+// getSetTarget or getMesoProgressionOverride, since getMesoSetAdjustments (below) calls THIS to fill
+// in a real weight for the RIR-ramp branch, and that branch is itself what getMesoProgressionOverride
+// consults. Calling back into the meso-aware path here would recurse infinitely. Kept as a
+// separate small function (some logic unavoidably mirrors getSetTarget's) rather than trying to
+// share code across that recursion boundary.
+function getPlainProgressionWeight(exId,repRange,normalIdx,routineId){
+  const exData=getExercise(exId)||{};
+  const prevAll=getLastSets(exId,routineId);
+  const prevNormal=prevAll.filter(s=>!s.type||s.type==='normal');
+  const ps=(normalIdx===0?pickBestWorkingSet(prevAll):prevNormal[normalIdx])||prevNormal[prevNormal.length-1];
+  if(!ps||(!ps.weight&&!ps.reps))return null;
+  const range=(repRange&&repRange.max)?repRange:DEFAULT_REP_RANGE;
+  const useRIR=!!ps.useRIR;
+  const raw=ps.rpe;
+  const rpeEq=raw!=null?(useRIR?(10-raw):raw):null;
+  const hasRoom=rpeEq==null||rpeEq<=8;
+  const isBW=exData.bw==='bw';
+  const inc=getEquipmentIncrement(exData);
+  const w=ps.weight||0;
+  const repsMetric=repsMetricOf(ps);
+  if(!isBW&&repsMetric>=range.max&&hasRoom)return Math.round((w+inc)*100)/100;
+  if(repsMetric<range.max||(isBW&&hasRoom)){
+    let stepDown=false;
+    if(!isBW&&range.min&&repsMetric<range.min){
+      const prior=getNormalSetAtSessionsAgo(exId,normalIdx,1,routineId);
+      if(prior)stepDown=repsMetricOf(prior)<range.min;
+    }
+    return stepDown?Math.max(0,Math.round((w-inc)*100)/100):w;
+  }
+  return w;
+}
 // The set at a given position from N sessions back for this exercise (n=0 = most recent
 // session, n=1 = the one before that). Mirrors getLastSets' own setIdx-or-fallback-to-last
 // tolerance for sessions with a different set count, and attaches useRIR the same way (mode can
@@ -4591,7 +4682,7 @@ function getSetAtSessionsAgo(exId,setIdx,n,routineId){
 // opposed to getSetTarget's normal history-based logic). Same-day evidence of hitting the rep
 // ceiling with room to spare is trusted immediately — no need to wait for a second session to
 // "confirm" it the way cross-session progression does, since we just watched it happen.
-function getLiveProgressionTarget(loggedSet,workoutEx,exData){
+function getLiveProgressionTarget(loggedSet,workoutEx,exData,exId,setIdx,routineId){
   const range=(workoutEx&&workoutEx.repRange&&workoutEx.repRange.max)?workoutEx.repRange:DEFAULT_REP_RANGE;
   const isUni=!!(exData&&exData.uni);
   const isBW=!!(exData&&exData.bw==='bw');
@@ -4606,24 +4697,43 @@ function getLiveProgressionTarget(loggedSet,workoutEx,exData){
     const targetWeight=Math.round((w+inc)*100)/100;
     return isUni?{weight:targetWeight,repsL:range.min,repsR:range.min}:{weight:targetWeight,reps:range.min};
   }
-  // Otherwise just carry today's own numbers forward as the suggestion — fresher and more
-  // relevant than falling back to last session's stale target now that we have live data.
-  return isUni?{weight:w,repsL:loggedSet.repsL,repsR:loggedSet.repsR}:{weight:w,reps:repsMetric};
+  // Below the ceiling — mirrors suggestNextLoad's own full logic (not just its headline "+1
+  // rep" case): a same-session live anchor is real evidence, but blindly adding a rep through
+  // set 3, 4, 5 ignores both how hard the set that was just done already felt, and how this
+  // exact slot has performed historically. Hold at today's own number (not a forced reduction —
+  // matching what was just done, on a later, more fatigued set, is still real progress) whenever
+  // either signal says to back off: near failure already (RIR<=1/RPE>=9), or this slot has
+  // historically done fewer reps than what was just hit live. Otherwise, add a rep.
+  const nearFailure=rpeEq!=null&&rpeEq>=9;
+  let holdInstead=false;
+  if(setIdx>0){
+    const priorSameSlot=getSetAtSessionsAgo(exId,setIdx,1,routineId);
+    const priorSlotReps=priorSameSlot?repsMetricOf(priorSameSlot):null;
+    if(nearFailure||(priorSlotReps!=null&&repsMetric<priorSlotReps))holdInstead=true;
+  }
+  const targetReps=holdInstead?repsMetric:repsMetric+1;
+  return isUni?{weight:w,repsL:targetReps,repsR:targetReps}:{weight:w,reps:targetReps};
 }
-// Re-derives the SAME training-phase meso override (RIR-ramp reps, or pending-reset-baseline
-// weight+reps) that startRoutineWorkout applies once at seed time — so getSetTarget can apply it
-// too, and every caller (initial build, renderSets, addSet, and the volume-suggestion auto-added
-// set) agrees on the number rather than only the very first render knowing the override exists.
-// Deliberately skips the deload branch of getMesoSetAdjustments — that trimming logic stays
-// exclusively at the original seed call site (startRoutineWorkout), untouched.
+// Re-derives the SAME meso override (RIR-ramp reps / pending-reset-baseline weight+reps during
+// training, or the deload-reduced weight+reps during an active deload) that startRoutineWorkout
+// applies once at seed time — so getSetTarget can apply it too, and every caller (initial build,
+// renderSets, addSet, and the volume-suggestion auto-added set) agrees, in EITHER phase — not just
+// the very first render, and not just training rotations. Originally scoped to phase==='training'
+// only; broadened after realizing the identical gap applied to deload — tapping "+ Set" mid-deload
+// would otherwise fall through to plain double-progression off pre-deload history instead of the
+// deload's actual reduced weight. The seed call site's own set-COUNT trimming for deload (deciding
+// how many sets to build in the first place) is untouched and stays exclusively there; this only
+// re-applies the per-position weight/reps values getMesoSetAdjustments already resolves for
+// whichever phase is active, same as it always did for training.
 // adjArr only covers NORMAL-type set positions, so setIdx (which walks the raw sets array,
 // warmups included) has to first be converted to a normal-only index the same way the seed
 // call site does it.
-function getMesoTrainingOverride(exId,workoutEx,setIdx){
+function getMesoProgressionOverride(exId,workoutEx,setIdx,routineId){
   if(!activeMesoContext)return null;
   const m=state.mesocycles[activeMesoContext.mesoIdx];
-  if(!m||m.phase!=='training')return null;
-  const adjArr=getMesoSetAdjustments(m,exId);
+  if(!m)return null;
+  const repRange=(workoutEx&&workoutEx.repRange&&workoutEx.repRange.max)?workoutEx.repRange:DEFAULT_REP_RANGE;
+  const adjArr=getMesoSetAdjustments(m,exId,routineId,repRange);
   if(!adjArr||!adjArr.length)return null;
   const sets=(workoutEx&&workoutEx.sets)||[];
   let normalIdx=0;
@@ -4641,7 +4751,7 @@ function getSetTarget(exId,workoutEx,setIdx,exData,routineId){
   // session to notice the pattern.
   const liveAbove=(workoutEx&&workoutEx.sets&&setIdx>0)?workoutEx.sets[setIdx-1]:null;
   if(liveAbove&&liveAbove.done&&(liveAbove.weight||liveAbove.reps||liveAbove.repsL||liveAbove.repsR)&&(!liveAbove.type||liveAbove.type==='normal')){
-    const liveTarget=getLiveProgressionTarget(liveAbove,workoutEx,exData);
+    const liveTarget=getLiveProgressionTarget(liveAbove,workoutEx,exData,exId,setIdx,routineId);
     if(liveTarget)return liveTarget;
   }
   const prevSets=getLastSets(exId,routineId);
@@ -4720,7 +4830,7 @@ function getSetTarget(exId,workoutEx,setIdx,exData,routineId){
   // in the override (the RIR-ramp case) means "leave weight to normal progression, only override
   // reps" — matches getRIRAnchoredReps' own comment.
   let mesoRepsL=null,mesoRepsR=null;
-  const mesoOverride=getMesoTrainingOverride(exId,workoutEx,setIdx);
+  const mesoOverride=getMesoProgressionOverride(exId,workoutEx,setIdx,routineId);
   if(mesoOverride){
     if(mesoOverride.weight!=null)targetWeight=mesoOverride.weight;
     if(mesoOverride.reps!=null)targetReps=mesoOverride.reps;
@@ -4729,32 +4839,38 @@ function getSetTarget(exId,workoutEx,setIdx,exData,routineId){
   }
   // Pre-workout soreness rating caps the computed target — real auto-regulation touching the
   // actual number, not just a warning banner. A moderate rating prevents progressing further
-  // today (but won't undo a step-down the normal logic already decided on its own); an extreme
-  // rating backs off by one increment unless the normal logic was already more conservative than
-  // that. Only applies to this plain cross-session path — a live same-session anchor (you already
-  // lifted more THIS session) is real-time evidence and takes priority over a pre-workout guess.
+  // today relative to last session's own raw numbers (but won't undo a step-down the normal logic
+  // already decided on its own, and doesn't apply when a meso override already moved the number
+  // for its own reasons — see below). An extreme rating instead shaves one further increment off
+  // WHATEVER the target currently is — plain double-progression's own number, or a meso override's
+  // (e.g. a deload reset baseline) — so it still has teeth right after a reset already lowered the
+  // number for a different reason, rather than comparing only against the stale pre-override
+  // weight and silently becoming a no-op. Only applies to this plain cross-session path — a live
+  // same-session anchor (you already lifted more THIS session) is real-time evidence and takes
+  // priority over a pre-workout guess.
   const sorenessScore=(activeWorkout&&activeWorkout.muscleSoreness&&exData)?activeWorkout.muscleSoreness[exData.muscle]:null;
-  if(sorenessScore===2&&targetWeight>w){
+  const mesoOverrodeWeight=!!(mesoOverride&&mesoOverride.weight!=null);
+  if(sorenessScore===2&&!mesoOverrodeWeight&&targetWeight>w){
     targetWeight=w;targetReps=repsMetric;
   }else if(sorenessScore===3&&!isBW){
-    const reduced=Math.max(0,Math.round((w-inc)*100)/100);
-    if(targetWeight>reduced){targetWeight=reduced;targetReps=range.min;}
+    targetWeight=Math.max(0,Math.round((targetWeight-inc)*100)/100);
+    targetReps=range.min;
   }else if(sorenessScore===3&&isBW){
-    const reducedReps=Math.max(1,Math.round(repsMetric*0.85));
-    if(targetReps>reducedReps){targetWeight=w;targetReps=reducedReps;}
+    targetReps=Math.max(1,Math.round(targetReps*0.85));
+    targetWeight=w;
   }
   // Sharp joint pain (jointPain>=2) reported after this exercise's most recent logged session is a
   // safety signal, not just a Review-tab data point — gate the next target the same way a
-  // soreness-3 rating already does (hold, or step back one increment), regardless of how good the
-  // reps looked on paper. Same plain-cross-session-only scope as the soreness cap above.
+  // soreness-3 rating already does (stacking off whatever's currently the target, same as above),
+  // regardless of how good the reps looked on paper. Same plain-cross-session-only scope.
   const lastJointPain=getLastJointPain(exId);
   if(lastJointPain>=2){
     if(!isBW){
-      const reduced=Math.max(0,Math.round((w-inc)*100)/100);
-      if(targetWeight>reduced){targetWeight=reduced;targetReps=range.min;}
+      targetWeight=Math.max(0,Math.round((targetWeight-inc)*100)/100);
+      targetReps=range.min;
     }else{
-      const reducedReps=Math.max(1,Math.round(repsMetric*0.85));
-      if(targetReps>reducedReps){targetWeight=w;targetReps=reducedReps;}
+      targetReps=Math.max(1,Math.round(targetReps*0.85));
+      targetWeight=w;
     }
   }
   return isUni?{weight:targetWeight,repsL:mesoRepsL!=null?mesoRepsL:targetReps,repsR:mesoRepsR!=null?mesoRepsR:targetReps}:{weight:targetWeight,reps:targetReps};
@@ -5084,14 +5200,17 @@ function renderSets(exIdx){
     const target=getSetTarget(ex.exId,ex,setIdx,exData,activeWorkout.sourceRoutineId);
     // Actually fill the target into the real data, not just a passive greyed-out hint — matches
     // how targets are meant to work everywhere else in this app (pre-filled and overridable, not
-    // just suggested). Only touches a field that's genuinely untouched (falsy) on a set that
-    // isn't done yet, so it never clobbers something the user already typed or already logged.
+    // just suggested). Only touches a field that's genuinely untouched (falsy), OR one the app
+    // itself auto-filled and the user hasn't actually typed over (set.auto* flags — see updateSet,
+    // which clears the relevant flag the moment the user edits a field for real) — so a fresher
+    // live-anchor target can still legitimately refresh its own earlier guess, while a value the
+    // user actually typed is never touched.
     if(target&&!set.done){
-      if(!isUni&&!isBW&&!set.weight&&target.weight!=null)set.weight=target.weight;
-      if(!isUni&&!set.reps&&target.reps!=null)set.reps=target.reps;
-      if(isUni&&!isBW&&!set.weight&&target.weight!=null)set.weight=target.weight;
-      if(isUni&&!set.repsL&&target.repsL!=null)set.repsL=target.repsL;
-      if(isUni&&!set.repsR&&target.repsR!=null)set.repsR=target.repsR;
+      if(!isUni&&!isBW&&(!set.weight||set.autoWeight)&&target.weight!=null){set.weight=target.weight;set.autoWeight=true;}
+      if(!isUni&&(!set.reps||set.autoReps)&&target.reps!=null){set.reps=target.reps;set.autoReps=true;}
+      if(isUni&&!isBW&&(!set.weight||set.autoWeight)&&target.weight!=null){set.weight=target.weight;set.autoWeight=true;}
+      if(isUni&&(!set.repsL||set.autoRepsL)&&target.repsL!=null){set.repsL=target.repsL;set.autoRepsL=true;}
+      if(isUni&&(!set.repsR||set.autoRepsR)&&target.repsR!=null){set.repsR=target.repsR;set.autoRepsR=true;}
     }
     const phWeight=target?target.weight:(set.prevWeight||null);
     const phReps=target?target.reps:(set.prevReps||null);
@@ -5199,6 +5318,12 @@ function updateSet(exIdx,setIdx,field,value,inputEl){
   if(v<0){v=0;if(inputEl)inputEl.value=0;}
   const set=activeWorkout.exercises[exIdx].sets[setIdx];
   set[field]=v;
+  // This field is now genuinely user-entered, not just an app guess — never let a later
+  // live-anchor refresh (see renderSets) touch it again, whatever it started out as.
+  if(field==='weight')set.autoWeight=false;
+  if(field==='reps')set.autoReps=false;
+  if(field==='repsL')set.autoRepsL=false;
+  if(field==='repsR')set.autoRepsR=false;
   if(field==='repsL'||field==='repsR'){
     // Keep an aggregate 'reps' in sync so PR/volume/history logic (which reads set.reps) still works for unilateral sets
     set.reps=(set.repsL||0)+(set.repsR||0);
@@ -7057,8 +7182,11 @@ function exportHistory(){
 
 // ── WEEKLY REVIEW ──
 // Shared muscle-volume tally: rolling window of `windowDays`, counting done normal/working sets
-// (partials excluded) per primary muscle, plus half-credit toward secondary muscles. Used by both
-// the Review tab's display and getVolumeRecommendation() below, so the two stay consistent.
+// only (warmup/dropset/myo/failure/1rm/partials all excluded — same standard as
+// getSessionsForExercise and the meso baseline-snapshotting logic: only a genuine working-set
+// effort reflects real training volume/progress) per primary muscle, plus half-credit toward
+// secondary muscles. Used by both the Review tab's display and getVolumeRecommendation() below,
+// so the two stay consistent.
 function getWeeklyMuscleVolume(windowDays){
   windowDays=windowDays||7;
   const now=new Date();const wa=new Date(now-windowDays*864e5);
@@ -7066,7 +7194,7 @@ function getWeeklyMuscleVolume(windowDays){
   const ms={};MUSCLE_GROUPS.forEach(m=>ms[m]=0);
   ww.forEach(w=>w.exercises.forEach(ex=>{
     const exData=getExercise(ex.exId);if(!exData)return;
-    const done=ex.sets.filter(s=>s.done&&s.type!=='partials').length;
+    const done=ex.sets.filter(s=>s.done&&(!s.type||s.type==='normal')).length;
     if(exData.muscle)ms[exData.muscle]=(ms[exData.muscle]||0)+done;
     if(exData.secondary)exData.secondary.split(',').forEach(sm=>{const t=sm.trim();if(t&&ms[t]!==undefined)ms[t]=(ms[t]||0)+Math.ceil(done*0.5);});
   }));
