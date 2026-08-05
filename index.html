@@ -578,7 +578,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-05.9</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-05.10</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1074,7 +1074,6 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
 
       <div class="input-label mt12">Early deload detection</div>
       <select id="meso-set-early-deload">
-        <option value="off">Off</option>
         <option value="suggest">Suggest — ask before deloading early</option>
         <option value="auto">Automatic — deload early with no prompt</option>
       </select>
@@ -1424,7 +1423,8 @@ function load(){
     if(m.rirRampEnabled==null)m.rirRampEnabled=true;
     if(m.rirEnd==null)m.rirEnd=0;
     if(m.rirStartCap==null)m.rirStartCap=4;
-    if(!m.earlyDeloadDetection)m.earlyDeloadDetection='suggest'; // 'off' | 'suggest' | 'auto'
+    if(!m.earlyDeloadDetection)m.earlyDeloadDetection='suggest'; // 'suggest' | 'auto'
+    if(m.earlyDeloadDetection==='off')m.earlyDeloadDetection='auto'; // migration (2026-08-05.9): 'off' used to skip detection entirely, but a deload-enabled meso has no other way to end training now — user chose auto-fall-back over asking, so 'off' just becomes 'auto'
     if(m.earlyDeloadDeclineCount==null)m.earlyDeloadDeclineCount=2;
     if(!m.deloadMethod)m.deloadMethod='weight'; // 'weight' | 'sets'
     if(!m.slotRepRanges)m.slotRepRanges={}; // keyed by sequence position (index) -> {exId:{min,max}} override
@@ -2965,14 +2965,12 @@ function advanceMesoProgress(m,loggedExercises){
 
   // A normal training rotation just completed
   m.rotationsDone++;
-  // Guard against a rotationsPerMeso lowered mid-pass leaving rotationsDone stranded above it
-  if(m.rotationsDone>(m.rotationsPerMeso||1))m.rotationsDone=m.rotationsPerMeso||1;
-  if(m.rotationsDone<(m.rotationsPerMeso||1))return; // more training rotations left in this pass
-
-  // All training rotations for this pass are done
-  if(m.deloadEnabled){
-    enterDeloadPhase(m);
-  }else{
+  if(!m.deloadEnabled){
+    // No deload configured for this meso — the MV\u2192MRV redesign only changes how the
+    // deload-enabled path decides when to reset (see below); a meso with deload turned off keeps
+    // its original fixed-rotation-count pass boundary exactly as before.
+    if(m.rotationsDone>(m.rotationsPerMeso||1))m.rotationsDone=m.rotationsPerMeso||1;
+    if(m.rotationsDone<(m.rotationsPerMeso||1))return; // more training rotations left in this pass
     m.repeatsDone++;
     reassessVolumeLandmarks(m);
     m.pendingResetBaseline=resolvePendingResetBaseline(m);
@@ -2984,7 +2982,15 @@ function advanceMesoProgress(m,loggedExercises){
     m.rirRampAnchorTotal=null; // fresh pass — ramp computes against its own rotationsPerMeso, not a carried-over extension anchor
     if(m.baseRotationsPerMeso!=null){m.rotationsPerMeso=m.baseRotationsPerMeso;m.baseRotationsPerMeso=null;} // an extension only ever applies to the pass it was granted for
     m.phase=(totalRepeats>0&&m.repeatsDone>=totalRepeats)?'finished':'training';
+    return;
   }
+  // MV\u2192MRV redesign: deload-enabled mesos no longer end the training phase on reaching a
+  // fixed rotationsPerMeso count — the only trigger is the unified stall check
+  // (checkEarlyDeloadSignals, called from confirmFinishWorkout on every completed training-phase
+  // workout, not just "before schedule" as it used to be gated). rotationsPerMeso still paces the
+  // volume ramp (getMesoRampFraction) and the RIR ramp, but is no longer itself an end condition.
+  // rotationsDone simply keeps counting here; entering deload happens explicitly via
+  // enterDeloadPhase() from the stall-check caller once it actually fires.
 }
 // Averages a chosen rotation's captured baseline with whichever of its immediate neighbors
 // (rotation-1, rotation+1) were actually captured — a single rotation's numbers can be a noisy
@@ -3079,11 +3085,13 @@ function resolvePendingResetBaseline(m){
 // pendingResetBaseline null or stale from a previous pass.
 function enterDeloadPhase(m){
   m.preDeloadBaselines=snapshotPreDeloadBaselines(m);
-  // Freeze this pass's true-failure reference (final rotation, smoothed against its neighbor
-  // and outlier-checked the same way a chosen reset rotation is) before rotationBaselines gets
-  // cleared — used by the RIR-anchored weight prescription to convert "aim for N RIR" into an
-  // actual weight for the whole NEXT pass, not just this transition.
-  m.trueFailureAnchor=getSmoothedRotationBaseline(m,m.rotationsPerMeso||1);
+  // Freeze this pass's true-failure reference (the rotation that ACTUALLY just finished, not the
+  // configured rotationsPerMeso target — those diverge whenever deload is triggered by the stall
+  // check rather than a fixed count, which under the MV\u2192MRV redesign is every time), smoothed
+  // against its neighbor and outlier-checked the same way a chosen reset rotation is — used by
+  // the RIR-anchored weight prescription to convert "aim for N RIR" into an actual weight for
+  // the whole NEXT pass, not just this transition.
+  m.trueFailureAnchor=getSmoothedRotationBaseline(m,m.rotationsDone||1);
   m.phase='deload';
   // Prompt a measurements check-in (weight, bicep, etc.) before the deload's first workout —
   // shown in place of the next routine on home/mesocycles until the user starts or skips it.
@@ -3328,16 +3336,26 @@ function getRecentNormalTopSets(exId,count){
 // declining is more likely already at its ceiling for this pass, and more volume there would
 // just add fatigue without payoff. Purely a suggestion shown at workout start; never changes
 // the routine itself.
-function getMesoVolumeSuggestions(m,routineId){
-  if(!m||m.phase!=='training')return null;
+// MV\u2192MRV redesign: how far through this pass's volume ramp the CURRENT rotation sits, as a
+// 0-1 fraction from MEV to MRV. rotationsDone+1 is the rotation about to be trained. Capped at 1
+// so a pass that's still going past its configured rotationsPerMeso (because the stall check
+// hasn't fired yet) holds at the MRV ceiling rather than extrapolating the ramp past 100%.
+function getMesoRampFraction(m){
   const total=m.rotationsPerMeso||1;
   const rotNum=(m.rotationsDone||0)+1;
-  // ASSUMPTION (flagging back per your request): "midpoint onward" implemented as the ceiling of
-  // half the pass length, e.g. rotation 3 of 5, or 2 of 3 — so a muscle can gain a set gradually
-  // across several rotations instead of at most once right before deload. No cooldown between
-  // additions was added; let me know if you want a different fraction or a cooldown.
-  const midpoint=Math.ceil(total/2);
-  if(total<2||rotNum<midpoint)return null;
+  return total<=1?1:Math.min(1,(rotNum-1)/(total-1));
+}
+// The volume ramp's target TOTAL weekly-equivalent set count for one muscle at the current
+// rotation \u2014 the actual primary progression axis under this redesign, not a bonus layered on
+// top of the RIR ramp. Linearly interpolates the muscle's own MEV\u2192MRV landmarks by the ramp
+// fraction above, so early rotations sit near MEV and later ones climb toward MRV.
+function getMesoMuscleVolumeTarget(m,muscle){
+  const lm=getMuscleLandmarks(muscle);
+  const frac=getMesoRampFraction(m);
+  return Math.round(lm.mev+(lm.mrv-lm.mev)*frac);
+}
+function getMesoVolumeSuggestions(m,routineId){
+  if(!m||m.phase!=='training')return null;
   const r=getRoutine(routineId);
   if(!r)return null;
   const groups={};
@@ -3345,52 +3363,37 @@ function getMesoVolumeSuggestions(m,routineId){
     const exData=getExercise(exId);
     if(!exData)return;
     const muscle=exData.muscle||'Other';
-    const recent=getRecentNormalTopSets(exId,3);
-    if(recent.length<2)return; // not enough logged history to judge a trend yet
-    const isUni=!!exData.uni;
-    const points=[...recent].reverse(); // oldest → newest
-    let up=0,down=0;
-    for(let i=1;i<points.length;i++){
-      const c=comparePerf(points[i-1],points[i],isUni);
-      if(c>0)up++;else if(c<0)down++;
-    }
-    if(!groups[muscle])groups[muscle]={up:0,down:0,flat:0,names:[],exIds:[]};
-    if(up>down)groups[muscle].up++;
-    else if(down>up)groups[muscle].down++;
-    else groups[muscle].flat++;
+    if(!groups[muscle])groups[muscle]={names:[],exIds:[]};
     groups[muscle].names.push(exData.name);
     groups[muscle].exIds.push(exId);
   });
   const suggestions=[];
   Object.keys(groups).forEach(muscle=>{
     const g=groups[muscle];
-    const n=g.up+g.down+g.flat;
-    if(!n)return;
+    if(!g.exIds.length)return;
     const priority=state.musclePriority[muscle]||'normal';
     const rec=getVolumeRecommendation(muscle);
     const overreached=rec.status==='at-or-above-mrv'||rec.status==='pain-flag'||rec.status==='high-fatigue';
-    // Trend-based eligibility, adjusted by priority: Low priority requires the muscle to
-    // actually be under-stimulated (below MEV) before an up-trend earns it more volume — a
-    // muscle you're not trying to grow shouldn't keep accumulating sets just because it happens
-    // to have more exercises assigned to it and so trends well by default. High priority is more
-    // generous the other way — even a flat trend earns a set as long as there's room below MAV,
-    // since the goal is to actively push volume toward these muscles rather than wait for proof.
-    const trendUp=g.up>g.down&&g.up>=Math.ceil(n/2);
-    const eligible=priority==='low'?(trendUp&&rec.vol<rec.landmarks.mev)
-      :priority==='high'?(!overreached&&rec.vol<rec.landmarks.mav)
-      :trendUp;
-    if(eligible&&!overreached){
-      suggestions.push({muscle,action:'add_set',exerciseNames:g.names,exIds:g.exIds,priority});
-    }else if(trendUp&&overreached){
-      // Trend alone says "add a set" — but check this isn't recommending more volume for a
-      // muscle the landmark/SFR-based system has already flagged as overreached. Downgrade
-      // rather than silently dropping the note, so the reason is visible instead of the
-      // suggestion just disappearing.
+    const target=getMesoMuscleVolumeTarget(m,muscle);
+    const belowTarget=rec.vol<target;
+    // Priority still shapes how the ramp target gets pursued, same spirit as the old trend-based
+    // version: Low priority only chases the target once genuinely under MEV \u2014 a muscle
+    // shouldn't keep climbing toward MRV just because routine design happens to assign it more
+    // exercises; High pursues the target right up to the point of actual overreach rather than
+    // holding back.
+    const eligible=priority==='low'?(belowTarget&&rec.vol<rec.landmarks.mev)
+      :(belowTarget&&!overreached);
+    if(eligible){
+      suggestions.push({muscle,action:'add_set',exerciseNames:g.names,exIds:g.exIds,priority,target,current:rec.vol});
+    }else if(belowTarget&&overreached){
+      // The ramp says "add a set" but the landmark/SFR-based system already flags this muscle as
+      // overreached \u2014 downgrade rather than silently dropping the note.
       suggestions.push({muscle,action:'hold',exerciseNames:g.names,overrideReason:rec.action});
-    }else if(priority==='low'&&trendUp&&rec.vol>=rec.landmarks.mev){
-      suggestions.push({muscle,action:'hold',exerciseNames:g.names,overrideReason:muscle+' is Low priority and already past MEV — holding volume steady even though it\u2019s trending up, to leave recovery room for higher-priority muscles.'});
+    }else if(priority==='low'&&belowTarget&&rec.vol>=rec.landmarks.mev){
+      suggestions.push({muscle,action:'hold',exerciseNames:g.names,overrideReason:muscle+' is Low priority and already past MEV \u2014 holding volume steady even though this rotation\u2019s ramp target is higher, to leave recovery room for higher-priority muscles.'});
+    }else if(!belowTarget){
+      suggestions.push({muscle,action:'hold',exerciseNames:g.names,overrideReason:muscle+' has reached this rotation\u2019s ramp target ('+rec.vol+'/'+target+' sets) \u2014 holding steady.'});
     }
-    else if(g.down>=g.up&&g.down>0)suggestions.push({muscle,action:'hold',exerciseNames:g.names});
   });
   return suggestions.length?suggestions:null;
 }
@@ -3398,11 +3401,9 @@ function formatMesoVolumeNote(suggestions){
   if(!suggestions||!suggestions.length)return null;
   const adds=suggestions.filter(s=>s.action==='add_set').map(s=>s.muscle);
   const overridden=suggestions.filter(s=>s.action==='hold'&&s.overrideReason);
-  const holds=suggestions.filter(s=>s.action==='hold'&&!s.overrideReason).map(s=>s.muscle);
   const parts=[];
-  if(adds.length)parts.push('Added a set to '+adds.join(' & ')+' (still trending up).');
-  overridden.forEach(s=>parts.push(s.muscle+' was trending up, but '+s.overrideReason.charAt(0).toLowerCase()+s.overrideReason.slice(1)));
-  if(holds.length)parts.push(holds.join(' & ')+' flat/declining — held steady.');
+  if(adds.length)parts.push('Added a set to '+adds.join(' & ')+' (this rotation\u2019s volume ramp target).');
+  overridden.forEach(s=>parts.push(s.muscle+': '+s.overrideReason.charAt(0).toLowerCase()+s.overrideReason.slice(1)));
   return parts.length?parts.join(' '):null;
 }
 // Looks for two independent early-warning signs that a mesocycle's remaining training
@@ -3411,8 +3412,11 @@ function formatMesoVolumeNote(suggestions){
 // exercises' top sets are a genuine decline versus their last two sessions. Only called on a
 // workout that was just logged (and already saved to history) while still mid-pass.
 function checkEarlyDeloadSignals(m,workoutExercises){
-  const mode=m.earlyDeloadDetection||'off';
-  if(mode==='off')return null;
+  // 'off' no longer means "skip detection" \u2014 for a deload-enabled meso under the MV\u2192MRV
+  // redesign there's no other way to ever end a training phase, so 'off' now behaves exactly
+  // like 'auto' (compute the signal, deload automatically on it, no confirmation dialog) rather
+  // than silently never firing. Per user's explicit choice (2026-08-05): auto-fall-back based on
+  // the data rather than asking or doing nothing.
   let rirChecked=0,rirHits=0,declineHits=0;
   const declineNames=[];
   (workoutExercises||[]).forEach(ex=>{
@@ -3522,7 +3526,7 @@ function openMesoSettingsModal(){
   document.getElementById('meso-rir-rep-fields').style.display=m.rirRepTargetEnabled?'':'none';
   document.getElementById('meso-set-early-deload').value=m.earlyDeloadDetection||'suggest';
   document.getElementById('meso-set-decline-count').value=m.earlyDeloadDeclineCount||2;
-  document.getElementById('meso-early-deload-fields').style.display=(m.earlyDeloadDetection==='off')?'none':'';
+  document.getElementById('meso-early-deload-fields').style.display=''; // relevant for every mode now — 'off' drives detection the same as 'auto' (see checkEarlyDeloadSignals)
   openModal('modal-meso-settings');
 }
 document.getElementById('meso-set-deload-enabled').onchange=function(){
@@ -6624,58 +6628,28 @@ function confirmFinishWorkout(){
     const m=state.mesocycles[activeMesoContext.mesoIdx];
     if(m){
       const wasTrainingBefore=m.phase==='training';
-      const rotNumBefore=(m.rotationsDone||0)+1;
-      const totalBefore=m.rotationsPerMeso||1;
-      // Snapshot before advancing — if a scheduled deload triggers and the readiness check below
-      // says it isn't actually needed yet, "extend training" restores this wholesale rather than
-      // trying to manually reverse enterDeloadPhase's several interdependent mutations
-      // (preDeloadBaselines, trueFailureAnchor, pendingResetBaseline, etc.) one field at a time.
-      const mesoSnapshotBefore=JSON.parse(JSON.stringify(m));
       advanceMesoProgress(m,cleanExercises);
       if(!m.startedAt)m.startedAt=new Date().toISOString();
       m.completedWorkouts=(m.completedWorkouts||0)+1;
-      // A scheduled deload (not the separate early-trigger path below) just fired — check whether
-      // the fatigue data this app already collects actually supports it, or whether this pass
-      // just ran at a lower frequency than usual and hasn't really accumulated the fatigue a
-      // fixed rotation count assumes.
-      if(wasTrainingBefore&&m.phase==='deload'){
-        const readiness=getMesoDeloadReadiness(m);
-        if(readiness.needsCheck){
-          const reasons=[];
-          if(readiness.freqDropped)reasons.push('you\u2019ve trained about '+readiness.freq.sessionsPerWeek.toFixed(1)+'x/week this block, vs your usual '+readiness.overallFreq.toFixed(1)+'x/week \u2014 likely more recovery between sessions than the schedule assumes.');
-          if(readiness.lowFatigue)reasons.push('fatigue/soreness signals across '+m.name+'\u2019s trained muscles have mostly looked fine ('+readiness.concerning+' of '+readiness.total+' muscles showing any real fatigue flag).');
-          forgeConfirm(
-            'Deload Due \u2014 But Do You Need It?',
-            'A deload is scheduled for '+m.name+', but '+reasons.join(' Also, ')+' Extend training by one more rotation instead, or go ahead with the deload as planned?',
-            ()=>{save();renderMesocycles();},
-            {okLabel:'Deload As Planned',cancelLabel:'Extend Training',danger:false,onCancel:()=>{
-              const completedWorkouts=m.completedWorkouts,startedAt=m.startedAt;
-              // Anchor the RIR ramp AND the original rotation count to what this pass had BEFORE
-              // this extension — but only if not already anchored (a second extension in the
-              // same pass still anchors to the very first original values, not shifting forward).
-              // baseRotationsPerMeso is what gets restored once this pass actually finishes, so
-              // extending only affects THIS pass — not every future pass of this mesocycle too.
-              const anchorTotal=m.rirRampAnchorTotal||mesoSnapshotBefore.rotationsPerMeso;
-              const baseRotations=m.baseRotationsPerMeso||mesoSnapshotBefore.rotationsPerMeso;
-              Object.assign(m,mesoSnapshotBefore);
-              m.completedWorkouts=completedWorkouts;m.startedAt=startedAt; // this workout genuinely happened regardless of the deload/extend choice
-              m.rotationsPerMeso=(m.rotationsPerMeso||1)+1;
-              m.rirRampAnchorTotal=anchorTotal;
-              m.baseRotationsPerMeso=baseRotations;
-              save();renderMesocycles();
-            }}
-          );
-        }
-      }
-      // Only worth checking if we were mid-pass and didn't just naturally hit deload/finished —
-      // no point suggesting an "early" deload on the same workout that triggers it on schedule.
-      if(wasTrainingBefore&&m.phase==='training'&&m.deloadEnabled&&rotNumBefore<totalBefore){
+      // MV\u2192MRV redesign: this is now the ONLY trigger that ends a deload-enabled meso's
+      // training phase — there's no more separate "scheduled deload, but do signals actually
+      // support it" check, since there's no schedule left to question (the old Deload Readiness
+      // Check/getMesoDeloadReadiness dialog is removed — it can never fire anymore, because
+      // advanceMesoProgress no longer flips a deload-enabled meso to 'deload' on its own). Runs
+      // on every completed training-phase workout now, not just "before the scheduled total" as
+      // it used to be gated — under this model every deload is effectively "early" relative to
+      // any fixed count, so the gate no longer makes sense.
+      if(wasTrainingBefore&&m.phase==='training'&&m.deloadEnabled){
         const signal=checkEarlyDeloadSignals(m,activeWorkout.exercises);
         if(signal){
-          if(m.earlyDeloadDetection==='auto'){
+          if(m.earlyDeloadDetection==='auto'||m.earlyDeloadDetection==='off'){
+            // 'off' is intentionally treated the same as 'auto' here, per the user's explicit
+            // choice: auto-fall-back to deload based on the data rather than asking, since a
+            // deload-enabled meso has no other way to end its training phase under this model.
             enterDeloadPhase(m);
+            save();renderMesocycles();
           }else if(m.earlyDeloadDetection==='suggest'){
-            forgeConfirm('Early Deload Suggested',signal.reasons.join(' ')+' Start the deload rotation now instead of continuing training?',()=>{
+            forgeConfirm('Deload Suggested',signal.reasons.join(' ')+' Start the deload rotation now instead of continuing training?',()=>{
               enterDeloadPhase(m);
               save();renderMesocycles();
             },{okLabel:'Deload Now',cancelLabel:'Keep Training',danger:false});
@@ -7477,47 +7451,6 @@ function getPriorityImbalanceNotes(){
   return notes;
 }
 // Average sessions/week during the CURRENT pass of a mesocycle (from its first workout to its
-// most recent), vs the person's overall average across their last 30 sessions regardless of
-// mesocycle. A pass trained at a much lower frequency than usual accumulates less real fatigue
-// per rotation than a fixed rotation count assumes — this is the frequency half of the
-// deload-readiness check.
-function getMesoPassFrequency(m){
-  const passWorkouts=state.history.filter(w=>w.mesoId===m.id).slice(0,m.passWorkoutCount||0).map(w=>new Date(w.date)).sort((a,b)=>a-b);
-  if(passWorkouts.length<2)return null;
-  const spanDays=(passWorkouts[passWorkouts.length-1]-passWorkouts[0])/864e5;
-  return spanDays>0?{sessionsPerWeek:7*(passWorkouts.length-1)/spanDays,workoutCount:passWorkouts.length}:null;
-}
-function getOverallFrequency(){
-  const all=state.history.slice(0,30).map(w=>new Date(w.date)).sort((a,b)=>a-b);
-  if(all.length<2)return null;
-  const spanDays=(all[all.length-1]-all[0])/864e5;
-  return spanDays>0?7*(all.length-1)/spanDays:null;
-}
-// The actual readiness check: does the accumulated-fatigue data this app already collects (SFR
-// feedback, soreness, confirmed impact, volume vs landmarks) support that a scheduled deload is
-// actually needed right now, or has this pass just been going for a while without real fatigue
-// building up — e.g. because training frequency dropped and more recovery happened between
-// rotations than a fixed rotation count assumes.
-function getMesoDeloadReadiness(m){
-  const muscles=new Set();
-  (m.routineIds||[]).forEach(rid=>{
-    const r=getRoutine(rid);
-    (r&&r.exerciseIds||[]).forEach(id=>{const ex=getExercise(id);if(ex&&ex.muscle)muscles.add(ex.muscle);});
-  });
-  let concerning=0,total=0;
-  muscles.forEach(mu=>{
-    if(!state.volumeLandmarks[mu])return;
-    total++;
-    const status=getVolumeRecommendation(mu).status;
-    if(status==='high-fatigue'||status==='at-or-above-mrv'||status==='pain-flag')concerning++;
-  });
-  const freq=getMesoPassFrequency(m);
-  const overallFreq=getOverallFrequency();
-  const freqDropped=!!(freq&&overallFreq&&freq.sessionsPerWeek<overallFreq*0.7);
-  const lowFatigue=total>0&&(concerning/total)<0.34;
-  return{lowFatigue,freqDropped,freq,overallFreq,concerning,total,
-    needsCheck:total>0&&(lowFatigue||freqDropped)};
-}
 function getVolumeRecommendation(muscle){
   const lm=getMuscleLandmarks(muscle);
   const{sets:vol,windowDays}=getMuscleVolume(muscle);
