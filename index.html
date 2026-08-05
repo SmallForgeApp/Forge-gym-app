@@ -578,7 +578,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-03.7</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-05.9</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -2851,6 +2851,58 @@ function loggedOrHistoryFallback(loggedExercises,routine){
 // rotation → meso-pass → deload → repeat lifecycle. A "rotation" = one full pass through
 // every routine in the sequence. loggedExercises (optional) is the just-finished workout's
 // exercise/set data, used to capture "start of this meso pass" baselines.
+// Adaptive MEV/MAV/MRV (per user spec, 2026-08-04): reassessed once per completed pass, using
+// ONLY that pass's own logged sessions (workout.mesoProgress.repeat === the pass that just
+// finished) — not the rolling 14-day window getMuscleSFRSignal/getVolumeRecommendation use
+// elsewhere, since this is specifically asking "how did the whole pass that just ended go,"
+// not "how do things look right now." Auto-applies silently (user's explicit choice) — small,
+// bounded nudges only:
+//   - Sharp joint pain reported anywhere in the pass for a muscle → pull MRV in (ceiling was too high)
+//   - A confirmed severe-soreness-impact session, without ever reaching the OLD MRV → pull MRV in
+//     (fatigue capped things before even reaching the assumed ceiling)
+//   - Peak weekly volume reached/exceeded MRV with neither of the above → raise MRV (tolerated
+//     the full ramp cleanly — there's room to raise the ceiling)
+// MEV is deliberately left alone here — per the literature discussion, not reaching a lower
+// landmark with no complaints just means the floor is already sufficient, not that it needs to
+// rise. MAV is recomputed as the midpoint, matching how it's generally treated as "the zone"
+// rather than an independently-tracked landmark.
+function reassessVolumeLandmarks(m){
+  const justFinishedRepeat=m.repeatsDone; // already incremented by the caller — this IS the pass that just ended
+  const passSessions=state.history.filter(w=>w.mesoId===m.id&&w.mesoProgress&&w.mesoProgress.repeat===justFinishedRepeat);
+  if(!passSessions.length)return;
+  const muscles=new Set();
+  (m.routineIds||[]).forEach(rid=>{
+    const r=getRoutine(rid);if(!r)return;
+    (r.exerciseIds||[]).forEach(id=>{const ex=getExercise(id);if(ex&&ex.muscle)muscles.add(ex.muscle);});
+  });
+  muscles.forEach(muscle=>{
+    const lm=getMuscleLandmarks(muscle);
+    const oldMRV=lm.mrv;
+    let anyHold=false,anyJointPain=false;
+    const perWeek={};
+    passSessions.forEach(w=>{
+      const wk=Math.floor(new Date(w.date).getTime()/(7*864e5));
+      (w.exercises||[]).forEach(ex=>{
+        const exData=getExercise(ex.exId);if(!exData||exData.muscle!==muscle)return;
+        perWeek[wk]=(perWeek[wk]||0)+ex.sets.filter(s=>s.done&&(!s.type||s.type==='normal')).length;
+        if(ex.feedback&&ex.feedback.jointPain>=2)anyJointPain=true;
+      });
+      if(w.sorenessImpact&&w.sorenessImpact[muscle]===2)anyHold=true;
+    });
+    const weeks=Object.values(perWeek);
+    if(!weeks.length)return;
+    const peakSets=Math.max(...weeks);
+    if(anyJointPain){
+      lm.mrv=Math.max(lm.mev+2,oldMRV-2);
+    }else if(anyHold&&peakSets<oldMRV){
+      lm.mrv=Math.max(lm.mev+2,oldMRV-1);
+    }else if(peakSets>=oldMRV&&!anyHold){
+      lm.mrv=oldMRV+1;
+    }
+    lm.mav=Math.round((lm.mev+lm.mrv)/2);
+    state.volumeLandmarks[muscle]=lm;
+  });
+}
 function advanceMesoProgress(m,loggedExercises){
   const ids=m.routineIds||[];
   if(!ids.length)return;
@@ -2898,6 +2950,7 @@ function advanceMesoProgress(m,loggedExercises){
     // deload's own sets — keep that same value here so there's no jump between the deload and
     // the pass that follows it, for either deload method.
     m.repeatsDone++;
+    reassessVolumeLandmarks(m);
     m.rotationsDone=0;
     m.passWorkoutCount=0;
     m.baselines={};
@@ -2921,6 +2974,7 @@ function advanceMesoProgress(m,loggedExercises){
     enterDeloadPhase(m);
   }else{
     m.repeatsDone++;
+    reassessVolumeLandmarks(m);
     m.pendingResetBaseline=resolvePendingResetBaseline(m);
     m.rotationsDone=0;
     m.passWorkoutCount=0;
@@ -3123,7 +3177,25 @@ function getMesoSetAdjustments(m,exId,routineId,repRange){
     const isFirstOfPass=(m.passWorkoutCount||0)===0;
     const resetBase=isFirstOfPass?((m.pendingResetBaseline||{})[exId]||null):null;
     if(!rirReps&&!resetBase)return null; // no override — normal history-based progression applies
-    const len=rirReps?rirReps.length:resetBase.length;
+    let len=rirReps?rirReps.length:resetBase.length;
+    if(isFirstOfPass){
+      // Sets reset toward MEV at the start of a fresh pass (per user spec, 2026-08-04) — the
+      // ramp-toward-MRV within a pass should begin from the floor each time, not carry the
+      // previous pass's peak forward as the new starting point (that was the actual gap in the
+      // MEV/MRV framework this app follows — see reassessVolumeLandmarks below for the other
+      // half: the landmarks themselves adapting). MEV is a MUSCLE-level weekly figure; split it
+      // across however many exercises in THIS routine train the same muscle, floor 1 set each.
+      // Only ever trims len DOWN (Math.min) — never invents sets beyond what history/the RIR
+      // anchor actually has.
+      const muscle=exData.muscle;
+      if(muscle){
+        const lm=getMuscleLandmarks(muscle);
+        const r=getRoutine(routineId);
+        const siblingCount=r?Math.max(1,(r.exerciseIds||[]).filter(sid=>{const e=getExercise(sid);return e&&e.muscle===muscle;}).length):1;
+        const mevShare=Math.max(1,Math.round(lm.mev/siblingCount));
+        len=Math.min(len,mevShare);
+      }
+    }
     const out=[];
     for(let i=0;i<len;i++){
       const rirEntry=rirReps?(rirReps[i]||rirReps[rirReps.length-1]):null;
@@ -7289,6 +7361,55 @@ function getWeeklyMuscleVolume(windowDays){
   }));
   return{ww,ms};
 }
+// Derives how many days apart a muscle actually gets trained, from real logged history —
+// instead of assuming a fixed calendar week. Averages the gaps between the last few sessions
+// that hit this muscle (primary or secondary, same crediting rule as volume counting below).
+// Falls back to a 7-day default until there's enough history for this specific muscle to
+// calculate a real cadence — same cold-start pattern already used for myo-rep calibration and
+// the time estimator elsewhere in the app.
+function getMuscleTrainingCadence(muscle){
+  const dates=[];
+  state.history.forEach(w=>{
+    const hit=w.exercises.some(ex=>{
+      const exData=getExercise(ex.exId);
+      if(!exData)return false;
+      if(exData.muscle===muscle)return true;
+      if(exData.secondary)return exData.secondary.split(',').some(s=>s.trim()===muscle);
+      return false;
+    });
+    if(hit)dates.push(new Date(w.date));
+  });
+  dates.sort((a,b)=>a-b);
+  const recent=dates.slice(-5); // last few sessions reflect current cadence without over-weighting stale history
+  if(recent.length<3)return 7; // not enough history for THIS muscle yet — cold-start default
+  const gaps=[];
+  for(let i=1;i<recent.length;i++)gaps.push((recent[i]-recent[i-1])/864e5);
+  const avg=gaps.reduce((a,b)=>a+b,0)/gaps.length;
+  return Math.max(3,Math.round(avg)); // floor guards against a same-day double-session collapsing the window toward 0
+}
+// Per-muscle equivalent of the set tally in getWeeklyMuscleVolume above, but sized to this
+// muscle's own actual training cadence rather than a fixed calendar week — accurate for anyone
+// who doesn't train on a fixed weekly schedule (the app's own skip/catch-up session system
+// already assumes exactly this, so the volume count should too). Used anywhere volume gets
+// compared against MEV/MAV/MRV landmarks; getWeeklyMuscleVolume's ww/fixed-window output is
+// kept separately for genuine "this calendar week" display stats (workout count, total volume,
+// avg RPE) which are a different, deliberately calendar-bound concept.
+function getMuscleVolume(muscle){
+  const windowDays=getMuscleTrainingCadence(muscle);
+  const cutoff=new Date(Date.now()-windowDays*864e5);
+  let sets=0;
+  state.history.filter(w=>new Date(w.date)>=cutoff).forEach(w=>w.exercises.forEach(ex=>{
+    const exData=getExercise(ex.exId);if(!exData)return;
+    const done=ex.sets.filter(s=>s.done&&(!s.type||s.type==='normal')).length;
+    if(exData.muscle===muscle)sets+=done;
+    else if(exData.secondary&&exData.secondary.split(',').some(s=>s.trim()===muscle))sets+=Math.ceil(done*0.5);
+  }));
+  return{sets,windowDays};
+}
+function getMuscleGroupVolumes(){
+  const ms={};MUSCLE_GROUPS.forEach(m=>{ms[m]=getMuscleVolume(m).sets;});
+  return ms;
+}
 function getMuscleLandmarks(muscle){
   return state.volumeLandmarks[muscle]||{mv:0,mev:8,mav:16,mrv:22}; // sane fallback for an untracked muscle
 }
@@ -7337,7 +7458,7 @@ function getMuscleSFRSignal(muscle){
 // since routine design (more exercises assigned to one muscle than another) can easily produce
 // this kind of imbalance without it being intentional.
 function getPriorityImbalanceNotes(){
-  const{ms}=getWeeklyMuscleVolume(7);
+  const ms=getMuscleGroupVolumes();
   const muscles=Object.keys(state.volumeLandmarks).filter(m=>ms[m]>0);
   const withPct=muscles.map(m=>{
     const lm=state.volumeLandmarks[m];
@@ -7399,8 +7520,7 @@ function getMesoDeloadReadiness(m){
 }
 function getVolumeRecommendation(muscle){
   const lm=getMuscleLandmarks(muscle);
-  const{ms}=getWeeklyMuscleVolume(7);
-  const vol=ms[muscle]||0;
+  const{sets:vol,windowDays}=getMuscleVolume(muscle);
   const sfr=getMuscleSFRSignal(muscle);
   let status,action;
   if(sfr.maxJointPain!=null&&sfr.maxJointPain>=2){
@@ -7408,7 +7528,7 @@ function getVolumeRecommendation(muscle){
     action='Sharp joint pain reported recently for '+muscle+' \u2014 consider swapping the exercise or resting this muscle, regardless of volume.';
   }else if(lm.mrv>0&&vol>=lm.mrv){
     status='at-or-above-mrv';
-    action=muscle+' is at/above your MRV ('+vol+'/'+lm.mrv+' sets this week) \u2014 back off volume to avoid overreaching.';
+    action=muscle+' is at/above your MRV ('+vol+'/'+lm.mrv+' sets over your last '+windowDays+' days) \u2014 back off volume to avoid overreaching.';
   }else if(sfr.impactSampleCount>=2&&sfr.avgConfirmedImpact!=null&&sfr.avgConfirmedImpact>=1.2){
     status='high-fatigue';
     action=muscle+' soreness has been confirmed to actually limit sessions recently (not just predicted beforehand) \u2014 recovery may be lagging even at '+vol+'/'+lm.mrv+' sets. Consider holding or reducing.';
@@ -7417,7 +7537,7 @@ function getVolumeRecommendation(muscle){
     action=muscle+' has been rating consistently sore before sessions \u2014 recovery may be lagging even at '+vol+'/'+lm.mrv+' sets. Consider holding or reducing.';
   }else if(vol<lm.mev){
     status='below-mev';
-    action=muscle+' is below MEV ('+vol+'/'+lm.mev+' sets this week) \u2014 likely too little stimulus for growth. Consider adding sets.';
+    action=muscle+' is below MEV ('+vol+'/'+lm.mev+' sets over your last '+windowDays+' days) \u2014 likely too little stimulus for growth. Consider adding sets.';
   }else if(vol<lm.mav){
     if(sfr.sampleCount>=2&&sfr.avgPump!=null&&sfr.avgChallenge!=null&&sfr.avgPump<=0.5&&sfr.avgChallenge<=0.5){
       status='building-poor-sfr';
@@ -7428,13 +7548,14 @@ function getVolumeRecommendation(muscle){
     }
   }else{
     status='mav-to-mrv';
-    action=muscle+' is in the MAV\u2013MRV range ('+vol+'/'+lm.mrv+' sets) \u2014 a strong weekly volume; hold here unless recovery signals say otherwise.';
+    action=muscle+' is in the MAV\u2013MRV range ('+vol+'/'+lm.mrv+' sets over your last '+windowDays+' days) \u2014 a strong volume; hold here unless recovery signals say otherwise.';
   }
-  return{muscle,vol,landmarks:lm,sfr,status,action};
+  return{muscle,vol,windowDays,landmarks:lm,sfr,status,action};
 }
 function renderReview(){
   const c=document.getElementById('review-content');c.innerHTML='';
-  const{ww,ms}=getWeeklyMuscleVolume(7);
+  const{ww}=getWeeklyMuscleVolume(7); // genuine calendar-week stats below (workout count, total volume, RPE, streak) stay on a fixed week on purpose
+  const ms=getMuscleGroupVolumes(); // muscle-vs-landmark comparisons use each muscle's own actual training cadence instead
   const now=new Date();
   let vol=0,sets=0,rpeAll=[];const days=new Set();let consec=0;
   ww.forEach(w=>{days.add(new Date(w.date).toDateString());w.exercises.forEach(ex=>{const useRIR=!!ex.useRIR;ex.sets.forEach(s=>{if(s.done&&s.type!=='partials'){sets++;vol+=(s.weight||0)*(s.reps||0);if(s.rpe!=null)rpeAll.push(useRIR?(10-s.rpe):s.rpe);}});});});
@@ -7452,7 +7573,7 @@ function renderReview(){
   const barsHtml=MUSCLE_GROUPS.filter(m=>ms[m]>0).sort((a,b)=>ms[b]-ms[a]).map(m=>{
     const lm=state.volumeLandmarks[m];
     const lmCaption=lm?'<span class="text3 small" style="display:block;text-align:right">MEV '+lm.mev+' \u00b7 MAV '+lm.mav+' \u00b7 MRV '+lm.mrv+'</span>':'';
-    return '<div class="muscle-bar-wrap"><div class="muscle-bar-label"><span style="font-weight:600">'+m+'</span><span class="text3 small">'+ms[m]+' sets</span></div><div class="muscle-bar-track"><div class="muscle-bar-fill" style="width:'+Math.round(ms[m]/maxS*100)+'%;background:'+(MUSCLE_COLORS[m]||'#aaa')+'"></div></div>'+lmCaption+'</div>';
+    return '<div class="muscle-bar-wrap"><div class="muscle-bar-label"><span style="font-weight:600">'+m+'</span><span class="text3 small">'+ms[m]+' sets / '+getMuscleTrainingCadence(m)+'d</span></div><div class="muscle-bar-track"><div class="muscle-bar-fill" style="width:'+Math.round(ms[m]/maxS*100)+'%;background:'+(MUSCLE_COLORS[m]||'#aaa')+'"></div></div>'+lmCaption+'</div>';
   }).join('');
   const untrained=MUSCLE_GROUPS.filter(m=>!ms[m]&&m!=='Full Body');
   const sugg=[];
@@ -7461,7 +7582,7 @@ function renderReview(){
     if(needsDeload)sugg.push({i:'😮‍💨',t:'Effort has been high for '+highRPECount+' sessions. Consider a deload week — reduce weights by 40-50% and focus on form and recovery.'});
     Object.entries(MUSCLE_PAIRS).forEach(([a,b])=>{
       const ra=ms[a]||0,rb=ms[b]||0;
-      if(ra>0&&rb===0)sugg.push({i:'⚖️',t:'Trained '+a+' but skipped '+b+' this week. Balancing these reduces injury risk.'});
+      if(ra>0&&rb===0)sugg.push({i:'⚖️',t:'Trained '+a+' but skipped '+b+' recently. Balancing these reduces injury risk.'});
       else if(ra>0&&rb>0&&ra/rb>2.5)sugg.push({i:'⚠️',t:a+' volume ('+ra+' sets) is much higher than '+b+' ('+rb+' sets). Add more '+b+' work.'});
     });
     Object.keys(state.volumeLandmarks).forEach(m=>{
@@ -7471,7 +7592,7 @@ function renderReview(){
     });
     getPriorityImbalanceNotes().forEach(note=>sugg.push({i:'🎯',t:note}));
     if(consec>=5)sugg.push({i:'😴',t:consec+' consecutive days training. Schedule a rest day — muscles grow during recovery.'});
-    if(!ms['Core'])sugg.push({i:'🔷',t:'No core work this week. 5 minutes of planks or crunches transfers to every lift.'});
+    if(!ms['Core'])sugg.push({i:'🔷',t:'No recent core work. 5 minutes of planks or crunches transfers to every lift.'});
     if(!ms['Calves']&&(ms['Quads']>0||ms['Hamstrings']>0))sugg.push({i:'🦵',t:'Hitting legs but skipping calves. Easy to bolt calf raises onto any session.'});
     if(ww.length===1)sugg.push({i:'📅',t:'Training 2-4x per week produces significantly better results. Try splitting push/pull/legs.'});
     if(rpeAll.length){
@@ -7483,7 +7604,7 @@ function renderReview(){
     if(!sugg.length)sugg.push({i:'🏆',t:'Excellent week! Great muscle balance and consistent frequency. Keep it up.'});
   }
   c.innerHTML=statsHtml
-    +'<div class="section-label">This Week\'s Muscle Volume</div>'
+    +'<div class="section-label">Muscle Volume (your cadence)</div>'
     +'<div class="review-card" style="margin:0 16px 10px">'
     +(!ww.length?'<div class="small text2" style="text-align:center;padding:14px 0">Complete workouts to see your breakdown</div>':'')
     +barsHtml
