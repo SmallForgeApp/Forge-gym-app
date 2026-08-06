@@ -580,7 +580,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-06.13</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-06.14</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -831,6 +831,18 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost flex-1" onclick="closeModal('modal-merge-exercise')">Cancel</button>
+    </div>
+  </div>
+</div>
+<div class="modal-overlay" id="modal-set-equipment">
+  <div class="modal"><div class="modal-handle"></div><div class="modal-title">Set Equipment</div>
+    <div class="modal-body">
+      <div class="small text2" style="margin-bottom:10px" id="set-equipment-label"></div>
+      <div class="small text3" style="margin-bottom:10px">Determines which Efficient Volume mechanism (if any) this exercise supports — see 'i' for details.</div>
+      <div id="set-equipment-options" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost flex-1" onclick="closeModal('modal-set-equipment')">Cancel</button>
     </div>
   </div>
 </div>
@@ -1472,16 +1484,38 @@ function load(){
   if(!state.progressionIncrements)state.progressionIncrements={Dumbbell:2,Cable:5,Other:2.5};
   if(!state.weeklyWorkoutTarget)state.weeklyWorkoutTarget=4;
   if(!state.volumeLandmarks||!Object.keys(state.volumeLandmarks).length){
-    // Approximate, widely-cited starting points for weekly set landmarks — MV (maintenance),
-    // MEV (minimum effective), MAV (maximum adaptive), MRV (maximum recoverable). These vary a
-    // lot person to person; treat as a reasonable default to tune from, not a prescription.
+    // "Bottom end" starting points (2026-08-06, per user's request as an experienced lifter who
+    // found the original wider-range defaults too high to see the ramp actually move) — MEV
+    // floor unchanged from the original defaults (the ramp already starts every pass there
+    // regardless), new MRV = what used to be MAV (roughly halves the ceiling's headroom), MAV
+    // recomputed as the midpoint. The adaptive landmark system (reassessVolumeLandmarks) still
+    // bumps MRV +1 after any pass hit cleanly with no fatigue flags — this is a conservative
+    // starting point to earn upward from, not a permanent ceiling.
     state.volumeLandmarks={
-      Chest:{mv:4,mev:8,mav:16,mrv:22},Back:{mv:6,mev:10,mav:18,mrv:25},
-      Shoulders:{mv:4,mev:8,mav:20,mrv:26},Biceps:{mv:4,mev:8,mav:16,mrv:26},
-      Triceps:{mv:2,mev:6,mav:12,mrv:18},Quads:{mv:4,mev:8,mav:15,mrv:20},
-      Hamstrings:{mv:2,mev:6,mav:12,mrv:20},Glutes:{mv:0,mev:4,mav:10,mrv:16},
-      Core:{mv:0,mev:6,mav:14,mrv:20},Calves:{mv:4,mev:8,mav:14,mrv:20}
+      Chest:{mv:4,mev:8,mav:12,mrv:16},Back:{mv:6,mev:10,mav:14,mrv:18},
+      Shoulders:{mv:4,mev:8,mav:14,mrv:20},Biceps:{mv:4,mev:8,mav:12,mrv:16},
+      Triceps:{mv:2,mev:6,mav:9,mrv:12},Quads:{mv:4,mev:8,mav:11.5,mrv:15},
+      Hamstrings:{mv:2,mev:6,mav:9,mrv:12},Glutes:{mv:0,mev:4,mav:7,mrv:10},
+      Core:{mv:0,mev:6,mav:10,mrv:14},Calves:{mv:4,mev:8,mav:11,mrv:14}
     };
+  }
+  // One-time forced migration (2026-08-06, user's explicit request): existing installs still
+  // sitting on the ORIGINAL wider-range defaults (not a custom edit — checked by exact match on
+  // every muscle's mrv) get moved to the new "bottom end" table above. Gated so it only ever
+  // fires once and never touches anyone who's actually customized their landmarks in Settings.
+  if(!state.volumeLandmarksBottomEndMigrated){
+    const oldDefaultMrv={Chest:22,Back:25,Shoulders:26,Biceps:26,Triceps:18,Quads:20,Hamstrings:20,Glutes:16,Core:20,Calves:20};
+    const stillOnOldDefaults=Object.keys(oldDefaultMrv).every(m=>state.volumeLandmarks[m]&&state.volumeLandmarks[m].mrv===oldDefaultMrv[m]);
+    if(stillOnOldDefaults){
+      state.volumeLandmarks={
+        Chest:{mv:4,mev:8,mav:12,mrv:16},Back:{mv:6,mev:10,mav:14,mrv:18},
+        Shoulders:{mv:4,mev:8,mav:14,mrv:20},Biceps:{mv:4,mev:8,mav:12,mrv:16},
+        Triceps:{mv:2,mev:6,mav:9,mrv:12},Quads:{mv:4,mev:8,mav:11.5,mrv:15},
+        Hamstrings:{mv:2,mev:6,mav:9,mrv:12},Glutes:{mv:0,mev:4,mav:7,mrv:10},
+        Core:{mv:0,mev:6,mav:10,mrv:14},Calves:{mv:4,mev:8,mav:11,mrv:14}
+      };
+    }
+    state.volumeLandmarksBottomEndMigrated=true;
   }
   if(!state.musclePriority)state.musclePriority={};
   Object.keys(state.volumeLandmarks).forEach(m=>{if(!state.musclePriority[m])state.musclePriority[m]='normal';});
@@ -7031,6 +7065,7 @@ function renderExRow(r,muscle,list){
   if(soloEx){
     const excluded=!!soloEx.excludePartials;
     dropdownItems+='<div class="r-dropdown-item" onclick="event.stopPropagation();toggleExcludePartials(\''+soloEx.id+'\');closeAllDropdowns()">'+(excluded?'☑':'☐')+' Exclude from Partials (pre-deload)</div>';
+    dropdownItems+='<div class="r-dropdown-item" onclick="event.stopPropagation();openSetEquipmentModal(\''+soloEx.id+'\');closeAllDropdowns()">'+uiIcon('merge',15,'currentColor')+' Set Equipment</div>';
     dropdownItems+='<div class="r-dropdown-item" onclick="event.stopPropagation();openMergeExerciseModal(\''+soloEx.id+'\');closeAllDropdowns()">'+uiIcon('merge',15,'currentColor')+' Merge into...</div>';
   }
 
@@ -7278,6 +7313,27 @@ function toggleExcludePartials(exId){
   save();renderExerciseDB();
 }
 let mergeSourceExId=null;
+// Lets an already-created exercise have its equipment set/changed after the fact — there was
+// previously no way to do this at all once an exercise existed (only at creation, via the guided
+// picker's chips), which left any manually-added exercise permanently stuck with no equipment
+// value. Matters now because Efficient Volume treats unset equipment as excluded rather than
+// guessing (see getEfficientVolumeMechanism).
+const EFFICIENT_VOLUME_EQUIPMENT_LIST=['Barbell','Dumbbell','Cable','Machine','Smith Machine','Bodyweight','Weighted','EZ Bar','Trap Bar','Kettlebell','Leg Press Machine','Plate','Resistance Band','Ab Wheel'];
+function openSetEquipmentModal(exId){
+  const ex=getExercise(exId);if(!ex)return;
+  document.getElementById('set-equipment-label').textContent=ex.name+' — currently: '+(ex.equipment||'not set');
+  document.getElementById('set-equipment-options').innerHTML=EFFICIENT_VOLUME_EQUIPMENT_LIST.map(eq=>
+    '<button class="btn btn-sm'+(ex.equipment===eq?' btn-primary':' btn-ghost')+'" onclick="setExerciseEquipment(\''+exId+'\',\''+eq+'\')">'+eq+'</button>'
+  ).join('');
+  document.getElementById('modal-set-equipment').classList.add('open');
+}
+function setExerciseEquipment(exId,equipment){
+  const ex=getExercise(exId);if(!ex)return;
+  ex.equipment=equipment;
+  save();
+  closeModal('modal-set-equipment');
+  renderExerciseDB();
+}
 function openMergeExerciseModal(exId){
   const ex=getExercise(exId);if(!ex)return;
   mergeSourceExId=exId;
@@ -7624,13 +7680,14 @@ function getMuscleTrainingCadence(muscle){
 // compared against MEV/MAV/MRV landmarks; getWeeklyMuscleVolume's ww/fixed-window output is
 // kept separately for genuine "this calendar week" display stats (workout count, total volume,
 // avg RPE) which are a different, deliberately calendar-bound concept.
-// EFFICIENT VOLUME feature: a drop set or myo-rep continuation earns partial volume credit, not
-// a full set's worth and not zero — capped below 1.0 so it never counts as much as a genuine
-// full working set, but never invisible either (zero credit would let real fatigue accumulate
-// unrecorded). Applies uniformly whether the drop set was auto-added by Efficient Volume or
-// added by hand — same mechanic, same credit, per the handoff's own instruction not to build two
-// different treatments of the same thing.
-const EFFICIENT_VOLUME_CREDIT_CAP=0.75;
+// EFFICIENT VOLUME feature: a drop set or myo-rep continuation earns credit based on what it
+// actually achieves relative to the set it replaces — full credit (not a discount) if it hits
+// that target, since the whole point of this feature is matching the same volume while saving
+// time, not delivering a lesser version of it (corrected 2026-08-06 from an initial 0.75 cap,
+// which was carried over from the ORIGINAL "deliver extra volume" framing and no longer applied
+// once the feature became "match this set's volume, don't add to it"). Still genuinely partial
+// (honest, ratio-based) credit if it falls short — never inflated above 1.0 for an overshoot.
+const EFFICIENT_VOLUME_CREDIT_CAP=1.0;
 // One exercise's total volume credit for a session: each genuine normal/working set = 1 full
 // set; a drop set = a fraction of the reps it achieved relative to the most recent normal set
 // before it (its own natural reference point — a drop set always follows a real top set); a
@@ -7661,9 +7718,11 @@ function getExerciseVolumeCredit(ex){
 // dumbbells): Dumbbell goes in the fast-reload bucket alongside Cable/Machine. Bodyweight is
 // excluded entirely (user's explicit choice) since neither mechanism suits it well.
 function getEfficientVolumeMechanism(equipment){
-  if(equipment==='Bodyweight')return null;
-  if(equipment==='Barbell'||equipment==='Smith Machine'||equipment==='Weighted')return 'myo';
-  return 'dropset'; // Cable, Machine, Dumbbell
+  if(!equipment)return null; // unset equipment is NOT a safe default to any mechanism — must be explicitly set on the exercise
+  if(['Bodyweight','Resistance Band','Ab Wheel'].includes(equipment))return null;
+  if(['Barbell','Smith Machine','Weighted','EZ Bar','Trap Bar','Plate'].includes(equipment))return 'myo';
+  if(['Cable','Machine','Dumbbell','Kettlebell','Leg Press Machine'].includes(equipment))return 'dropset';
+  return null; // any other/unrecognized value — don't guess
 }
 function getMuscleVolume(muscle){
   const windowDays=getMuscleTrainingCadence(muscle);
@@ -7791,9 +7850,6 @@ function renderReview(){
   ww.forEach(w=>{days.add(new Date(w.date).toDateString());w.exercises.forEach(ex=>{const useRIR=!!ex.useRIR;ex.sets.forEach(s=>{if(s.done&&s.type!=='partials'){sets++;vol+=(s.weight||0)*(s.reps||0);if(s.rpe!=null)rpeAll.push(useRIR?(10-s.rpe):s.rpe);}});});});
   for(let i=0;i<7;i++){const d=new Date(now-i*864e5);if(days.has(d.toDateString()))consec++;else break;}
   const avgRPE=rpeAll.length?(rpeAll.reduce((a,b)=>a+b,0)/rpeAll.length).toFixed(1):'—';
-  const recentWW=state.history.slice(0,14);
-  const highRPECount=recentWW.filter(w=>{const rpes=[];w.exercises.forEach(ex=>{const useRIR=!!ex.useRIR;ex.sets.forEach(s=>{if(s.done&&s.type!=='partials'&&s.rpe!=null)rpes.push(useRIR?(10-s.rpe):s.rpe);});});return rpes.length&&rpes.reduce((a,b)=>a+b,0)/rpes.length>7.5;}).length;
-  const needsDeload=highRPECount>=3;
   const statsHtml='<div class="week-stat-row" style="padding:14px 16px 0">'
     +'<div class="week-stat"><div class="week-stat-val">'+ww.length+'</div><div class="week-stat-lbl">Workouts</div></div>'
     +'<div class="week-stat"><div class="week-stat-val">'+sets+'</div><div class="week-stat-lbl">Sets</div></div>'
@@ -7809,7 +7865,11 @@ function renderReview(){
   const sugg=[];
   if(!ww.length){sugg.push({i:'💪',t:'No workouts this week yet. Start a session to begin tracking!'});}
   else{
-    if(needsDeload)sugg.push({i:'😮‍💨',t:'Effort has been high for '+highRPECount+' sessions. Consider a deload week — reduce weights by 40-50% and focus on form and recovery.'});
+    // REMOVED (2026-08-06, user's explicit choice): a generic "3+ high-RPE sessions -> consider
+    // a 40-50% deload" tip used to live here. Deleted entirely — it had zero awareness of the
+    // mesocycle's own RIR ramp, which intentionally pushes toward near-failure late in a pass;
+    // it could fire and contradict the ramp's own (much more sophisticated, signal-aware)
+    // stall check at exactly the point where high effort is correct and expected, not a problem.
     Object.entries(MUSCLE_PAIRS).forEach(([a,b])=>{
       const ra=ms[a]||0,rb=ms[b]||0;
       if(ra>0&&rb===0)sugg.push({i:'⚖️',t:'Trained '+a+' but skipped '+b+' recently. Balancing these reduces injury risk.'});
@@ -7828,8 +7888,8 @@ function renderReview(){
     if(rpeAll.length){
       const a=parseFloat(avgRPE);
       if(a<5)sugg.push({i:'🎯',t:'Average RPE '+avgRPE+' is low. Increase intensity to drive adaptation.'});
-      else if(a>8.5&&!needsDeload)sugg.push({i:'🎯',t:'High average RPE '+avgRPE+'. Consider a lighter session next time.'});
-      else if(!needsDeload)sugg.push({i:'🎯',t:'Average RPE '+avgRPE+' is ideal for hypertrophy. Well managed!'});
+      else if(a>8.5)sugg.push({i:'🎯',t:'High average RPE '+avgRPE+'. Consider a lighter session next time.'});
+      else sugg.push({i:'🎯',t:'Average RPE '+avgRPE+' is ideal for hypertrophy. Well managed!'});
     }
     if(!sugg.length)sugg.push({i:'🏆',t:'Excellent week! Great muscle balance and consistent frequency. Keep it up.'});
   }
