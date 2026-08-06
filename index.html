@@ -204,6 +204,8 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .soreness-btn.active[data-score="1"]{background:#2ed573;border-color:#2ed573;color:#fff;}
 .soreness-btn.active[data-score="2"]{background:#ff8c00;border-color:#ff8c00;color:#fff;}
 .soreness-btn.active[data-score="3"]{background:var(--red);border-color:var(--red);color:#fff;}
+.volume-mode-btn{background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:8px 10px;}
+.volume-mode-btn.active{border-color:var(--accent);background:var(--bg3);border-width:2px;}
 .exercise-soreness-warn{margin:2px 16px 10px;padding:8px 12px;border-radius:10px;font-size:12.5px;line-height:1.5;}
 .exercise-soreness-warn.mod{background:rgba(255,140,0,0.14);border:1px solid #ff8c00;color:#ff8c00;}
 .exercise-soreness-warn.severe{background:rgba(255,71,87,0.14);border:1px solid var(--red);color:var(--red);}
@@ -578,7 +580,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-05.10</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-06.13</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -603,6 +605,15 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div class="modal-body">
       <div class="small text2" style="margin-bottom:10px">Rate soreness for each muscle you're about to train — this only adjusts today's on-screen guidance, nothing is changed automatically.</div>
       <div id="soreness-list"></div>
+      <div id="volume-mode-section" style="display:none">
+        <div class="input-label mt12">This session's extra volume</div>
+        <div id="volume-mode-options"></div>
+      </div>
+      <div id="efficient-volume-section" style="display:none">
+        <div class="input-label mt12">Efficient Volume</div>
+        <div class="text3 small" style="margin-bottom:6px">Swap each exercise's last set for a myo-rep burst chain or drop-set chain matching the same volume — same intended training, less time.</div>
+        <div id="efficient-volume-options"></div>
+      </div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost flex-1" onclick="closeSorenessModal()">Cancel</button>
@@ -1554,6 +1565,35 @@ function estimateRoutineTime(exerciseIds,routineId){
     predictedSets+=sc;
   });
   return formatMinRange(estimateSecondsForSets(predictedSets,exerciseIds,routineId));
+}
+// EFFICIENT VOLUME feature (redesigned 2026-08-06): a myo-burst or drop-set chain replacing one
+// full normal set takes meaningfully less time than that set would have — no fresh rest period,
+// much shorter gaps between bursts/drops (see buildMyoBurstChain/buildDropSetChain) — used to
+// show the picker toggle an honest estimate of time actually saved, not the same number twice.
+const SET_TYPE_TIME_FACTOR={dropset:0.55,myo:0.3}; // fraction of a normal set's average time the WHOLE replacement chain costs
+function getAvgSecondsPerSet(routineId){
+  const sessions=getRoutineHistorySessions(routineId,8);
+  if(sessions.length>=2){
+    let totalSec=0,totalDoneSets=0;
+    sessions.forEach(w=>{
+      const doneSets=w.exercises.reduce((a,ex)=>a+ex.sets.filter(s=>s.done).length,0);
+      if(doneSets>0){totalSec+=w.duration;totalDoneSets+=doneSets;}
+    });
+    if(totalDoneSets>0)return totalSec/totalDoneSets;
+  }
+  return 90; // sane fallback matching the formula estimator's typical set+rest time
+}
+// Total seconds saved by swapping the last set of each given exercise for its equipment's
+// mechanism — used only by the picker toggle's time label.
+function estimateEfficientVolumeSavings(exIds,mechanismByExId,routineId){
+  const perSet=getAvgSecondsPerSet(routineId);
+  let saved=0;
+  (exIds||[]).forEach(exId=>{
+    const type=mechanismByExId?mechanismByExId[exId]:null;
+    const factor=type&&SET_TYPE_TIME_FACTOR[type]!=null?SET_TYPE_TIME_FACTOR[type]:1;
+    saved+=perSet*(1-factor);
+  });
+  return saved;
 }
 function updateWorkoutStats(){
   if(!activeWorkout)return;
@@ -3239,11 +3279,11 @@ function getMesoTargetRIR(m,rotNumOverride){
   const end=m.rirEnd!=null?m.rirEnd:0;
   const cap=m.rirStartCap!=null?m.rirStartCap:4;
   const rotNum=Math.min(rotNumOverride!=null?rotNumOverride:(m.rotationsDone||0)+1,total);
-  // If this pass was extended past its original planned length (Deload Readiness Check → Extend
-  // Training), the ramp curve itself stays anchored to the ORIGINAL total — an extended rotation
-  // continues at the same (deepest) RIR the ramp had already earned, rather than recalculating a
-  // shallower point on a now-longer curve. rotNum/total below still reflect the true count for
-  // display ("Rotation 4 of 5"); only the ramp math uses the anchor.
+  // NOTE: this anchor mechanism (rirRampAnchorTotal) is currently inert — its only writer was
+  // the old Deload Readiness Check's "Extend Training" button, removed in the MV\u2192MRV
+  // redesign (2026-08-05.9), so it's always null now and this always resolves to the plain
+  // total/rotNum below. Left in place rather than stripped (harmless no-op), flagged as a minor
+  // cleanup opportunity.
   const rampTotal=Math.min(total,m.rirRampAnchorTotal||total);
   const rampRotNum=Math.min(rotNum,rampTotal);
   const start=Math.min(cap,end+rampTotal-1);
@@ -3397,13 +3437,48 @@ function getMesoVolumeSuggestions(m,routineId){
   });
   return suggestions.length?suggestions:null;
 }
-function formatMesoVolumeNote(suggestions){
+// EFFICIENT VOLUME feature (redesigned per user correction 2026-08-06): this is NOT about
+// delivering extra ramp-due volume cheaply — that's a separate, unrelated, already-existing
+// mechanism (getMesoVolumeSuggestions/addSetExIds) which keeps running exactly as before,
+// completely untouched by this toggle. This is purely about HOW the LAST planned set of an
+// eligible exercise gets delivered: swapped for a myo-rep burst chain or drop-set chain sized to
+// match roughly the same volume, once the workout's real set counts are already decided (by the
+// ramp, same as always) — saving time, not changing intended volume. Per-exercise, not
+// per-muscle. Three gates: (1) the session's PLANNED RIR target for this rotation (known before
+// the workout starts) must be at/near failure (\u22641 RIR) — early in a pass there's no fatigue
+// yet for a burst/drop chain to meaningfully stand in for a full set. No RIR ramp running →
+// never offered, no guessing. (2) equipment must support a mechanism (excludes Bodyweight
+// entirely — see getEfficientVolumeMechanism). (3) needs \u22652 predicted normal sets — a swap
+// needs a REAL set to reference (myo extends it, a drop set drops from it); user's explicit
+// choice for a single-set exercise: skip it rather than swap using stale last-session numbers.
+// Predicted set count uses the same last-real-session lookback the time estimator already uses
+// — an approximation only, since the ramp's actual seeded count isn't known until
+// startRoutineWorkout actually builds it; the real ≥2 check runs again there before applying.
+function getEfficientVolumeEligibility(m,routineId){
+  if(!m||m.phase!=='training'||!m.rirRampEnabled)return null;
+  const rirInfo=getMesoTargetRIR(m);
+  if(!rirInfo||rirInfo.deload||rirInfo.rir==null||rirInfo.rir>1)return null;
+  const r=getRoutine(routineId);if(!r)return null;
+  const exIds=[];
+  (r.exerciseIds||[]).forEach(exId=>{
+    const exData=getExercise(exId);if(!exData)return;
+    if(!getEfficientVolumeMechanism(exData.equipment))return;
+    let sc=3;
+    for(let i=state.history.length-1;i>=0;i--){const f=state.history[i].exercises.find(e=>e.exId===exId);if(f){sc=f.sets.filter(s=>s.done).length||3;break;}}
+    if(sc>=2)exIds.push(exId);
+  });
+  return exIds.length?exIds:null;
+}
+function formatMesoVolumeNote(suggestions,mode){
   if(!suggestions||!suggestions.length)return null;
   const adds=suggestions.filter(s=>s.action==='add_set').map(s=>s.muscle);
   const overridden=suggestions.filter(s=>s.action==='hold'&&s.overrideReason);
   const parts=[];
-  if(adds.length)parts.push('Added a set to '+adds.join(' & ')+' (this rotation\u2019s volume ramp target).');
-  overridden.forEach(s=>parts.push(s.muscle+': '+s.overrideReason.charAt(0).toLowerCase()+s.overrideReason.slice(1)));
+  if(adds.length){
+    if(mode==='plain')parts.push(adds.join(' & ')+' were due more volume this rotation, but held steady (your choice this session).');
+    else parts.push('Added a set to '+adds.join(' & ')+' (this rotation\u2019s volume ramp target).');
+  }
+  overridden.forEach(s=>parts.push(s.overrideReason)); // overrideReason already leads with the muscle's name — don't prepend it again
   return parts.length?parts.join(' '):null;
 }
 // Looks for two independent early-warning signs that a mesocycle's remaining training
@@ -4272,19 +4347,137 @@ function getRoutinePlannedMuscles(routine){
   });
   return seen;
 }
-let sorenessDraft={},pendingSorenessRoutineIdx=null;
+let sorenessDraft={},pendingSorenessRoutineIdx=null,pendingVolumeMode='extra',pendingEfficientEligibility=null,pendingEfficientVolumeOn=false;
+// EFFICIENT VOLUME feature (redesigned 2026-08-06): builds a chain of small myo-rep bursts —
+// minimal rest between each, matching how myo-reps actually work (an activation set, then
+// several short-rest bursts of shrinking size, not one continuation) — sized so their combined
+// reps land close to refReps (the reps of the set being replaced), capped at 4 bursts so it
+// doesn't taper into meaningless 1-rep bursts forever.
+function buildMyoBurstChain(refReps,isUni){
+  const bursts=[];
+  let remaining=refReps,frac=0.4;
+  for(let i=0;i<4&&remaining>0.5;i++){
+    let n=Math.max(1,Math.round(refReps*frac));
+    n=Math.min(n,Math.ceil(remaining));
+    bursts.push(isUni?{reps:null,repsL:n,repsR:n,done:false}:{reps:n,repsL:null,repsR:null,done:false});
+    remaining-=n;
+    frac*=0.55;
+  }
+  return bursts;
+}
+// Builds a chain of REAL appended drop sets (own data, own rows — history/progression assumes
+// set position = fatigue depth, so these are never inserted mid-session), each a further ~20%
+// below the previous weight (ASSUMPTION, doc/user didn't specify a number), sized so their
+// combined reps land close to refReps — capped at 3 drops.
+function buildDropSetChain(refWeight,refReps){
+  const chain=[];
+  let remaining=refReps,w=refWeight;
+  for(let i=0;i<3&&remaining>0.5;i++){
+    w=refWeight>0?Math.round(w*0.8*2)/2:0;
+    let n=Math.max(1,Math.round(refReps*(i===0?0.6:0.4)));
+    n=Math.min(n,Math.ceil(remaining));
+    chain.push({type:'dropset',weight:w,reps:n,repsL:0,repsR:0,rpe:null,done:false,
+      prevWeight:0,prevReps:0,prevRepsL:0,prevRepsR:0});
+    remaining-=n;
+  }
+  return chain;
+}
+// Swaps the LAST planned normal set for a myo-burst chain (attached to the new-last set, which
+// becomes the real activation set the bursts extend) or a drop-set chain (real appended sets
+// replacing the removed one) — sized to match roughly the same volume as the set it replaces,
+// not add anything beyond what the volume ramp already decided this workout needed. Requires
+// \u22652 normal sets (checked again here, not just at eligibility time, since the ramp's real
+// seeded count is only known now) — with only 1, there's no real set left to reference/extend,
+// so per the user's explicit choice this is skipped entirely rather than swapped anyway.
+function applyEfficientVolumeSwap(exIdx,mechanism){
+  const ex=activeWorkout.exercises[exIdx];if(!ex)return;
+  const normalSets=ex.sets.filter(s=>!s.type||s.type==='normal');
+  if(normalSets.length<2)return;
+  const refSet=normalSets[normalSets.length-1];
+  const isUni=refSet.repsL!=null||refSet.repsR!=null;
+  const refReps=repsMetricOf(refSet)||0;
+  const refWeight=refSet.weight||0;
+  if(!refReps)return; // nothing logged/predicted to match volume against — leave the set alone rather than guess
+  if(mechanism==='myo'){
+    const newTop=normalSets[normalSets.length-2];
+    newTop.myoBursts=buildMyoBurstChain(refReps,isUni);
+    ex.sets=ex.sets.filter(s=>s!==refSet);
+  }else if(mechanism==='dropset'){
+    const chain=buildDropSetChain(refWeight,refReps);
+    ex.sets=[...ex.sets.filter(s=>s!==refSet),...chain];
+  }
+}
 // Entry point from the gym-setup preview's Start button. Shows the soreness modal only when
 // there's actually something to ask about; otherwise goes straight into the workout as before.
 function beginRoutineWithSorenessCheck(i){
   const r=state.routines[i];
   const muscles=r?getRoutinePlannedMuscles(r):[];
-  if(!muscles.length){startRoutineWorkout(i);return;}
+  const activeMeso=activeMesoContext?state.mesocycles[activeMesoContext.mesoIdx]:null;
+  const efficientEligibility=(activeMeso&&r)?getEfficientVolumeEligibility(activeMeso,r.id):null;
+  if(!muscles.length&&!efficientEligibility){startRoutineWorkout(i);return;}
   pendingSorenessRoutineIdx=i;
   sorenessDraft={};
   muscles.forEach(m=>sorenessDraft[m]=0);
+  pendingVolumeMode='extra'; // preserves today's existing always-auto-add behavior as the default
+  pendingEfficientEligibility=efficientEligibility;
+  pendingEfficientVolumeOn=false; // off by default — a time-saving swap should be an active choice, not a silent default
   renderSorenessList();
+  renderVolumeModePicker(r,activeMeso);
+  renderEfficientVolumeToggle(r,activeMeso,efficientEligibility);
   document.getElementById('soreness-start-btn').onclick=confirmSorenessAndStart;
   document.getElementById('modal-soreness').classList.add('open');
+}
+// This session's ramp-due volume: Plain (skip it) vs Extra Sets (the existing, always-been-there
+// full-set auto-add) — unrelated to Efficient Volume below; shown whenever the ramp actually has
+// something due this rotation, regardless of whether Efficient Volume's own gates are met.
+function renderVolumeModePicker(r,activeMeso){
+  const el=document.getElementById('volume-mode-section');if(!el)return;
+  const volSuggestions=activeMeso?getMesoVolumeSuggestions(activeMeso,r.id):null;
+  const hasAdds=!!(volSuggestions&&volSuggestions.some(s=>s.action==='add_set'));
+  if(!hasAdds){el.style.display='none';return;}
+  el.style.display='';
+  const opts=[
+    {id:'plain',label:'Plain',desc:'Skip the extra volume this session'},
+    {id:'extra',label:'Extra Sets',desc:'Full extra set(s), as usual'}
+  ];
+  document.getElementById('volume-mode-options').innerHTML=opts.map(o=>
+    '<button class="btn btn-sm volume-mode-btn'+(pendingVolumeMode===o.id?' active':'')+'" onclick="setPendingVolumeMode(\''+o.id+'\')" style="display:block;width:100%;text-align:left;margin-bottom:6px">'
+    +'<span class="bold">'+o.label+'</span> — <span class="text3 small">'+o.desc+'</span></button>'
+  ).join('');
+}
+function setPendingVolumeMode(mode){
+  pendingVolumeMode=mode;
+  const r=pendingSorenessRoutineIdx!=null?state.routines[pendingSorenessRoutineIdx]:null;
+  const activeMeso=activeMesoContext?state.mesocycles[activeMesoContext.mesoIdx]:null;
+  if(r)renderVolumeModePicker(r,activeMeso);
+}
+// EFFICIENT VOLUME toggle (redesigned 2026-08-06): independent of the ramp-due-volume picker
+// above — swaps the LAST planned set of each eligible exercise for a myo/drop-set chain, once
+// this session's real set counts are decided (by whichever of Plain/Extra was picked, same as
+// always). Only rendered when getEfficientVolumeEligibility found something eligible; otherwise
+// hidden entirely, per the handoff's original "don't show the picker if nothing's eligible" spec.
+function renderEfficientVolumeToggle(r,activeMeso,eligibility){
+  const el=document.getElementById('efficient-volume-section');if(!el)return;
+  if(!eligibility){el.style.display='none';return;}
+  el.style.display='';
+  const mechanismByExId={};
+  eligibility.forEach(exId=>{
+    const exData=getExercise(exId);
+    mechanismByExId[exId]=exData?getEfficientVolumeMechanism(exData.equipment):null;
+  });
+  const savedSec=estimateEfficientVolumeSavings(eligibility,mechanismByExId,r.id);
+  const savedLabel=savedSec>=60?Math.round(savedSec/60)+' min':Math.round(savedSec)+' sec';
+  document.getElementById('efficient-volume-options').innerHTML=
+    '<button class="btn btn-sm volume-mode-btn'+(!pendingEfficientVolumeOn?' active':'')+'" onclick="setPendingEfficientVolumeOn(false)" style="display:block;width:100%;text-align:left;margin-bottom:6px">'
+    +'<span class="bold">Off</span> — <span class="text3 small">Last set trained as normal</span></button>'
+    +'<button class="btn btn-sm volume-mode-btn'+(pendingEfficientVolumeOn?' active':'')+'" onclick="setPendingEfficientVolumeOn(true)" style="display:block;width:100%;text-align:left">'
+    +'<span class="bold">On</span> — <span class="text3 small">Swap last set for myo-rep/drop-set, same volume, saves ~'+savedLabel+'</span></button>';
+}
+function setPendingEfficientVolumeOn(on){
+  pendingEfficientVolumeOn=on;
+  const r=pendingSorenessRoutineIdx!=null?state.routines[pendingSorenessRoutineIdx]:null;
+  const activeMeso=activeMesoContext?state.mesocycles[activeMesoContext.mesoIdx]:null;
+  if(r)renderEfficientVolumeToggle(r,activeMeso,pendingEfficientEligibility);
 }
 function renderSorenessList(){
   const el=document.getElementById('soreness-list');if(!el)return;
@@ -4308,23 +4501,35 @@ function setSorenessScoreByIndex(i,score){
 function closeSorenessModal(){
   document.getElementById('modal-soreness').classList.remove('open');
   pendingSorenessRoutineIdx=null;
+  pendingEfficientEligibility=null;
 }
 function confirmSorenessAndStart(){
   const i=pendingSorenessRoutineIdx;
   const scores={...sorenessDraft};
+  const volumeMode=pendingVolumeMode;
+  const efficientVolumeOn=pendingEfficientVolumeOn;
   document.getElementById('modal-soreness').classList.remove('open');
   pendingSorenessRoutineIdx=null;
-  if(i!=null)startRoutineWorkout(i,scores);
+  pendingEfficientEligibility=null;
+  if(i!=null)startRoutineWorkout(i,scores,volumeMode,efficientVolumeOn);
 }
-function startRoutineWorkout(i,sorenessScores){
+function startRoutineWorkout(i,sorenessScores,volumeMode,efficientVolumeOn){
+  volumeMode=volumeMode||'extra'; // other direct entry points (meso quick-start, Revisit, Routine Detail Start) bypass the picker — default preserves today's existing always-auto-add behavior for them
   const r=state.routines[i];
   const activeMeso=activeMesoContext?state.mesocycles[activeMesoContext.mesoIdx]:null;
   // The Partials set (beyond-failure partials) only ever gets auto-added on the final training
   // rotation of a pass, right before a deload — never saved to the routine, never carried into
   // any other rotation. rotationsDone is the count of ALREADY-completed rotations, so the one
-  // about to start is rotationsDone+1; when that equals rotationsPerMeso, this is the last one.
+  // about to start is rotationsDone+1; when that equals rotationsPerMeso, this is treated as the
+  // likely last one. BUG FIXED (2026-08-05): under the MV\u2192MRV redesign, deload-enabled mesos
+  // no longer end training on reaching rotationsPerMeso (see advanceMesoProgress) — it's now
+  // stall-check triggered, so this used to stay true on every rotation PAST the configured count
+  // too (>= never resets), adding Partials repeatedly instead of once. Changed to ===, an exact
+  // one-shot match at the configured count. NOTE this is now a best guess, not a guarantee — the
+  // actual last rotation is only known retroactively once the stall check fires on a completed
+  // workout, which can't be known in advance at the start of the NEXT one.
   const lastCycleBeforeDeload=!!(activeMeso&&activeMeso.phase==='training'&&activeMeso.deloadEnabled
-    &&((activeMeso.rotationsDone||0)+1)>=(activeMeso.rotationsPerMeso||1));
+    &&((activeMeso.rotationsDone||0)+1)===(activeMeso.rotationsPerMeso||1));
   // Same target used for the "aim for N RIR today" banner — reused below to pre-fill each
   // working set's RPE/RIR field to what THIS cycle is actually asking for, rather than whatever
   // was hit last session (which reflects last session's effort, not today's target).
@@ -4438,8 +4643,21 @@ function startRoutineWorkout(i,sorenessScores){
   beginWorkout(r.name,exercises,r.id,[...(r.exerciseIds||[])]);
   if(activeWorkout&&activeWorkout.sourceRoutineId===r.id){
     activeWorkout.muscleSoreness=sorenessScores||{};
-    if(addSetExIds.size){
+    if(volumeMode!=='plain'&&addSetExIds.size){
       activeWorkout.exercises.forEach((ex,exIdx)=>{if(addSetExIds.has(ex.exId))addSet(exIdx);});
+    }
+    // EFFICIENT VOLUME feature (redesigned 2026-08-06): a SEPARATE pass, independent of the
+    // ramp-due-volume add above — runs AFTER the workout's real set counts are fully decided
+    // (including anything just added), swapping the last set of each equipment-eligible exercise
+    // for a myo/drop-set chain. Re-derives the mechanism per exercise here rather than reusing
+    // pendingEfficientEligibility's predicted list, since the real seeded set count (not the
+    // prediction) is what applyEfficientVolumeSwap's own \u22652 check needs to see.
+    if(efficientVolumeOn&&activeMeso&&mesoRIRInfo&&!mesoRIRInfo.deload&&mesoRIRInfo.rir!=null&&mesoRIRInfo.rir<=1){
+      activeWorkout.exercises.forEach((ex,exIdx)=>{
+        const exData=getExercise(ex.exId);
+        const mechanism=exData?getEfficientVolumeMechanism(exData.equipment):null;
+        if(mechanism)applyEfficientVolumeSwap(exIdx,mechanism);
+      });
     }
   }
   const noteEl=document.getElementById('workout-meso-note');
@@ -4455,7 +4673,7 @@ function startRoutineWorkout(i,sorenessScores){
   }
   const volNoteEl=document.getElementById('workout-volume-note');
   if(volNoteEl){
-    const volText=formatMesoVolumeNote(volSuggestions);
+    const volText=formatMesoVolumeNote(volSuggestions,volumeMode);
     if(volText){volNoteEl.textContent=volText;volNoteEl.style.display='';}
     else volNoteEl.style.display='none';
   }
@@ -5333,6 +5551,28 @@ function renderSets(exIdx){
     tr.ontouchmove=(e)=>setSwipeMove(e);
     tr.ontouchend=()=>setSwipeEnd();
     tr.ontouchcancel=()=>setSwipeEnd();
+    // EFFICIENT VOLUME feature: the myo-rep continuation is a CHAIN of bursts living on the top
+    // set as its own field (see applyEfficientVolumeSwap/buildMyoBurstChain) — minimal rest
+    // between each, matching how myo-reps actually work — never separate set rows in the real
+    // sense, just compact summary rows for entering/confirming each burst's reps.
+    if(set.myoBursts&&set.myoBursts.length){
+      set.myoBursts.forEach((mb,burstIdx)=>{
+        const mbIsUni=mb.repsL!=null||mb.repsR!=null;
+        const mtr=document.createElement('tr');
+        mtr.className='set-row myo-burst-row'+(mb.done?' completed':'');
+        mtr.innerHTML='<td></td>'
+          +'<td><span class="btn btn-sm set-type-btn badge-myo" style="pointer-events:none">Burst '+(burstIdx+1)+'</span></td>'
+          +'<td class="text3 small">extends #'+(setIdx+1)+'</td>'
+          +(mbIsUni
+            ?('<td></td><td><input class="set-input" type="number" inputmode="numeric" value="'+(mb.repsL||'')+'" onchange="updateMyoBurst('+exIdx+','+setIdx+','+burstIdx+',\'repsL\',this.value)" style="width:38px"/></td>'
+              +'<td><input class="set-input" type="number" inputmode="numeric" value="'+(mb.repsR||'')+'" onchange="updateMyoBurst('+exIdx+','+setIdx+','+burstIdx+',\'repsR\',this.value)" style="width:38px"/></td>')
+            :'<td></td><td><input class="set-input" type="number" inputmode="numeric" value="'+(mb.reps||'')+'" onchange="updateMyoBurst('+exIdx+','+setIdx+','+burstIdx+',\'reps\',this.value)"/></td>')
+          +'<td></td>'
+          +'<td><button class="complete-btn'+(mb.done?' done':'')+'" onclick="toggleMyoBurstDone('+exIdx+','+setIdx+','+burstIdx+')">✓</button></td>'
+          +'<td></td>';
+        tbody.appendChild(mtr);
+      });
+    }
   });
   updateExerciseTip(exIdx);
 }
@@ -5422,6 +5662,22 @@ function updateSet(exIdx,setIdx,field,value,inputEl){
     set.reps=(set.repsL||0)+(set.repsR||0);
   }
   if(field==='rpe')renderSets(exIdx);
+  updateWorkoutStats();
+}
+function updateMyoBurst(exIdx,setIdx,burstIdx,field,value){
+  const set=activeWorkout.exercises[exIdx].sets[setIdx];
+  if(!set||!set.myoBursts||!set.myoBursts[burstIdx])return;
+  let v=value===''?null:parseInt(value);
+  if(v!=null&&isNaN(v))v=null;
+  if(v!=null&&v<0)v=0;
+  set.myoBursts[burstIdx][field]=v;
+  updateWorkoutStats();
+}
+function toggleMyoBurstDone(exIdx,setIdx,burstIdx){
+  const set=activeWorkout.exercises[exIdx].sets[setIdx];
+  if(!set||!set.myoBursts||!set.myoBursts[burstIdx])return;
+  set.myoBursts[burstIdx].done=!set.myoBursts[burstIdx].done;
+  renderSets(exIdx);
   updateWorkoutStats();
 }
 function updateRPE(exIdx,setIdx,input){
@@ -7368,17 +7624,58 @@ function getMuscleTrainingCadence(muscle){
 // compared against MEV/MAV/MRV landmarks; getWeeklyMuscleVolume's ww/fixed-window output is
 // kept separately for genuine "this calendar week" display stats (workout count, total volume,
 // avg RPE) which are a different, deliberately calendar-bound concept.
+// EFFICIENT VOLUME feature: a drop set or myo-rep continuation earns partial volume credit, not
+// a full set's worth and not zero — capped below 1.0 so it never counts as much as a genuine
+// full working set, but never invisible either (zero credit would let real fatigue accumulate
+// unrecorded). Applies uniformly whether the drop set was auto-added by Efficient Volume or
+// added by hand — same mechanic, same credit, per the handoff's own instruction not to build two
+// different treatments of the same thing.
+const EFFICIENT_VOLUME_CREDIT_CAP=0.75;
+// One exercise's total volume credit for a session: each genuine normal/working set = 1 full
+// set; a drop set = a fraction of the reps it achieved relative to the most recent normal set
+// before it (its own natural reference point — a drop set always follows a real top set); a
+// myo-rep burst (attached to the top set it extends, NOT a separate set row — see
+// startRoutineWorkout/renderSets) = a fraction of ITS reps relative to that same top set. Both
+// fractions capped at EFFICIENT_VOLUME_CREDIT_CAP.
+function getExerciseVolumeCredit(ex){
+  let credit=0,refReps=0;
+  (ex.sets||[]).forEach(s=>{
+    const isNormal=!s.type||s.type==='normal';
+    if(isNormal&&s.done){credit+=1;refReps=repsMetricOf(s)||refReps;}
+    else if(s.type==='dropset'&&s.done){
+      const r=repsMetricOf(s);
+      credit+=refReps>0?Math.min(EFFICIENT_VOLUME_CREDIT_CAP,r/refReps):EFFICIENT_VOLUME_CREDIT_CAP;
+    }
+    if(s.myoBursts&&s.myoBursts.length){
+      const baseReps=repsMetricOf(s)||refReps;
+      const burstReps=s.myoBursts.filter(b=>b.done).reduce((a,b)=>a+repsMetricOf(b),0);
+      if(burstReps>0)credit+=baseReps>0?Math.min(EFFICIENT_VOLUME_CREDIT_CAP,burstReps/baseReps):0;
+    }
+  });
+  return credit;
+}
+// Equipment → which Efficient Volume mechanism applies, if any. Myo-rep continuation doesn't
+// require changing the load at all (same weight, brief rest, extra reps) so plate-loaded gear
+// can still use it even though a drop set (which DOES need a fast weight change) is impractical
+// for it — these are two different constraints, not one. Per user's own equipment (adjustable
+// dumbbells): Dumbbell goes in the fast-reload bucket alongside Cable/Machine. Bodyweight is
+// excluded entirely (user's explicit choice) since neither mechanism suits it well.
+function getEfficientVolumeMechanism(equipment){
+  if(equipment==='Bodyweight')return null;
+  if(equipment==='Barbell'||equipment==='Smith Machine'||equipment==='Weighted')return 'myo';
+  return 'dropset'; // Cable, Machine, Dumbbell
+}
 function getMuscleVolume(muscle){
   const windowDays=getMuscleTrainingCadence(muscle);
   const cutoff=new Date(Date.now()-windowDays*864e5);
   let sets=0;
   state.history.filter(w=>new Date(w.date)>=cutoff).forEach(w=>w.exercises.forEach(ex=>{
     const exData=getExercise(ex.exId);if(!exData)return;
-    const done=ex.sets.filter(s=>s.done&&(!s.type||s.type==='normal')).length;
-    if(exData.muscle===muscle)sets+=done;
-    else if(exData.secondary&&exData.secondary.split(',').some(s=>s.trim()===muscle))sets+=Math.ceil(done*0.5);
+    const credit=getExerciseVolumeCredit(ex);
+    if(exData.muscle===muscle)sets+=credit;
+    else if(exData.secondary&&exData.secondary.split(',').some(s=>s.trim()===muscle))sets+=credit*0.5;
   }));
-  return{sets,windowDays};
+  return{sets:Math.round(sets*10)/10,windowDays};
 }
 function getMuscleGroupVolumes(){
   const ms={};MUSCLE_GROUPS.forEach(m=>{ms[m]=getMuscleVolume(m).sets;});
