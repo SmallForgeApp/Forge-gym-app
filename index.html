@@ -393,6 +393,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div id="workout-meso-note" style="margin-top:4px;font-size:11px;color:#ff8c00;display:none"></div>
     <div id="workout-rir-note" style="margin-top:4px;font-size:11px;color:var(--accent);font-weight:700;display:none"></div>
     <div id="workout-volume-note" style="margin-top:4px;font-size:11px;color:#2ed573;display:none"></div>
+    <div id="workout-session-set-warning" style="margin-top:4px;font-size:11px;color:#ff4757;font-weight:700;display:none"></div>
     <div id="workout-review-note" style="margin-top:4px;font-size:11px;color:var(--text2);display:none;cursor:pointer;text-decoration:underline"></div>
     <input id="workout-notes" placeholder="Session notes..." style="margin-top:6px;font-size:12px;padding:6px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px"/>
   </div>
@@ -580,7 +581,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-06.14</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-07.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -834,18 +835,6 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     </div>
   </div>
 </div>
-<div class="modal-overlay" id="modal-set-equipment">
-  <div class="modal"><div class="modal-handle"></div><div class="modal-title">Set Equipment</div>
-    <div class="modal-body">
-      <div class="small text2" style="margin-bottom:10px" id="set-equipment-label"></div>
-      <div class="small text3" style="margin-bottom:10px">Determines which Efficient Volume mechanism (if any) this exercise supports — see 'i' for details.</div>
-      <div id="set-equipment-options" style="display:flex;flex-wrap:wrap;gap:8px"></div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost flex-1" onclick="closeModal('modal-set-equipment')">Cancel</button>
-    </div>
-  </div>
-</div>
 <div class="modal-overlay" id="modal-manage-equipment">
   <div class="modal"><div class="modal-handle"></div><div class="modal-title">My Gym Equipment</div>
     <div class="modal-body">
@@ -1045,16 +1034,9 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
         </div>
 
         <div id="meso-deload-sets-fields">
-          <div class="input-label mt12">Reduce sets to</div>
-          <select id="meso-set-deload-set-mode">
-            <option value="flat">A fixed number of sets</option>
-            <option value="relative">This many fewer than normal</option>
-          </select>
-          <input id="meso-set-deload-set-value" type="number" inputmode="numeric" min="1"/>
-
           <div class="input-label mt12">Target effort (RIR)</div>
           <input id="meso-set-deload-rir" type="number" inputmode="numeric" min="0" max="10"/>
-          <div class="small text3 mt4" style="line-height:1.5">Only the number of sets drops. Weight and reps come from the "starting point for the next mesocycle" setting below — not the heaviest cycle of this mesocycle — so the deload is never accidentally programmed too heavy. This RIR is shown as guidance at the top of each deload workout; it isn't mechanically enforced, the same way your normal RIR target isn't.</div>
+          <div class="small text3 mt4" style="line-height:1.5">Set count is auto-derived from each exercise's muscle MV (maintenance volume), split across sibling exercises training that muscle in this routine — not a number you set. Weight and reps come from the "starting point for the next mesocycle" setting below — not the heaviest cycle of this mesocycle — so the deload is never accidentally programmed too heavy. This RIR is shown as guidance at the top of each deload workout; it isn't mechanically enforced, the same way your normal RIR target isn't.</div>
         </div>
 
         <div id="meso-deload-reset-mode-wrap">
@@ -1451,8 +1433,8 @@ function load(){
     if(m.earlyDeloadDeclineCount==null)m.earlyDeloadDeclineCount=2;
     if(!m.deloadMethod)m.deloadMethod='weight'; // 'weight' | 'sets'
     if(!m.slotRepRanges)m.slotRepRanges={}; // keyed by sequence position (index) -> {exId:{min,max}} override
-    if(!m.deloadSetMode)m.deloadSetMode='flat'; // 'flat' | 'relative'
-    if(m.deloadSetValue==null)m.deloadSetValue=1;
+    // deloadSetMode/deloadSetValue removed (Decision 1) — deload set count is now always
+    // MV-derived (see getMesoSetAdjustments), no user-set fields to sanitize.
     if(m.deloadTargetRIR==null)m.deloadTargetRIR=4;
     if(m.rirRepTargetEnabled==null)m.rirRepTargetEnabled=true; // default on — falls through to normal progression until there's an anchor to work from anyway
     if(!m.trueFailureAnchor)m.trueFailureAnchor={};
@@ -2990,6 +2972,7 @@ function advanceMesoProgress(m,loggedExercises){
   if(!m.rotationBaselines)m.rotationBaselines={};
   if(!m.preDeloadBaselines)m.preDeloadBaselines={};
   if(!m.skipLog)m.skipLog=[];
+  if(!m.extraRotationCredits)m.extraRotationCredits={}; // Decision 2 (Phase B) — reset at pass boundaries below
   // Any further progress (a finished workout, or another skip) invalidates the previous skip's
   // undo window — undo only ever applies to the single most recent skip, and only until
   // something else happens to this mesocycle.
@@ -3031,6 +3014,7 @@ function advanceMesoProgress(m,loggedExercises){
     m.rotationBaselines={};
     m.preDeloadBaselines={};
     m.skipLog=[]; // a new pass starts — any still-open catch-up window from the last pass no longer applies
+    m.extraRotationCredits={}; // Decision 2 (Phase B) — fresh pass, no extra-rotation credits carried over
     m.rirRampAnchorTotal=null; // fresh pass — ramp computes against its own rotationsPerMeso, not a carried-over extension anchor
     if(m.baseRotationsPerMeso!=null){m.rotationsPerMeso=m.baseRotationsPerMeso;m.baseRotationsPerMeso=null;} // an extension only ever applies to the pass it was granted for
     m.phase=(totalRepeats>0&&m.repeatsDone>=totalRepeats)?'finished':'training';
@@ -3053,6 +3037,7 @@ function advanceMesoProgress(m,loggedExercises){
     m.baselines={};
     m.rotationBaselines={};
     m.skipLog=[]; // a new pass starts — any still-open catch-up window from the last pass no longer applies
+    m.extraRotationCredits={}; // Decision 2 (Phase B) — fresh pass, no extra-rotation credits carried over
     m.rirRampAnchorTotal=null; // fresh pass — ramp computes against its own rotationsPerMeso, not a carried-over extension anchor
     if(m.baseRotationsPerMeso!=null){m.rotationsPerMeso=m.baseRotationsPerMeso;m.baseRotationsPerMeso=null;} // an extension only ever applies to the pass it was granted for
     m.phase=(totalRepeats>0&&m.repeatsDone>=totalRepeats)?'finished':'training';
@@ -3216,9 +3201,19 @@ function getMesoSetAdjustments(m,exId,routineId,repRange){
     if(!base||!base.length)return null;
     const method=m.deloadMethod||'weight';
     if(method==='sets'){
-      const setMode=m.deloadSetMode||'flat';
-      const setVal=m.deloadSetValue!=null?m.deloadSetValue:1;
-      const targetCount=setMode==='flat'?Math.max(1,Math.min(setVal,base.length)):Math.max(1,base.length-setVal);
+      // MV-derived (was: user-typed flat/relative count, unrelated to the muscle's actual
+      // landmark — see Decision 1). Split the muscle's MV across sibling exercises training it
+      // in this routine, same convention as the pass-start MEV-split below. Floors at 1 set;
+      // never invents sets beyond what the resolved baseline (`base`) actually has.
+      const muscle=exData.muscle;
+      const lm=muscle?getMuscleLandmarks(muscle):null;
+      let targetCount=1;
+      if(lm){
+        const r=getRoutine(routineId);
+        const siblingCount=r?Math.max(1,(r.exerciseIds||[]).filter(sid=>{const e=getExercise(sid);return e&&e.muscle===muscle;}).length):1;
+        targetCount=Math.max(1,Math.round(lm.mv/siblingCount));
+      }
+      targetCount=Math.min(targetCount,base.length);
       return base.slice(0,targetCount).map(s=>({weight:s.weight,reps:s.reps,repsL:s.repsL,repsR:s.repsR}));
     }
     const pct=(m.deloadPercent||0)/100;
@@ -3419,6 +3414,25 @@ function getMesoRampFraction(m){
   const rotNum=(m.rotationsDone||0)+1;
   return total<=1?1:Math.min(1,(rotNum-1)/(total-1));
 }
+// Decision 2 (Phase B): 0 while still within the configured rotationsPerMeso ramp (Phase A,
+// untouched — see getMesoRampFraction/getMesoMuscleVolumeTarget above). Once a deload-enabled
+// pass runs past that configured count (because the stall check hasn't fired yet — see
+// advanceMesoProgress), returns the 1-based count of how many rotations past it we are: 1 on the
+// first extra rotation, 2 on the second, etc. Used to pace the separate +1-set-per-extra-rotation
+// mechanism in getMesoVolumeSuggestions, which is deliberately NOT the same code path as the
+// Phase A ramp-target check.
+function getMesoExtraRotationIndex(m){
+  const total=m.rotationsPerMeso||1;
+  const rotNum=(m.rotationsDone||0)+1;
+  return Math.max(0,rotNum-total);
+}
+// Ordered list of exercise ids in this routine that train `muscle`, in routine order — the pool
+// Decision 1 (deload MV-split) and Decision 2 (Phase B round-robin) both cycle/split across.
+function getMesoRoutineSiblingExIds(routineId,muscle){
+  const r=getRoutine(routineId);
+  if(!r||!muscle)return[];
+  return(r.exerciseIds||[]).filter(sid=>{const e=getExercise(sid);return e&&e.muscle===muscle;});
+}
 // The volume ramp's target TOTAL weekly-equivalent set count for one muscle at the current
 // rotation \u2014 the actual primary progression axis under this redesign, not a bonus layered on
 // top of the RIR ramp. Linearly interpolates the muscle's own MEV\u2192MRV landmarks by the ramp
@@ -3441,6 +3455,7 @@ function getMesoVolumeSuggestions(m,routineId){
     groups[muscle].names.push(exData.name);
     groups[muscle].exIds.push(exId);
   });
+  const extraIdx=getMesoExtraRotationIndex(m);
   const suggestions=[];
   Object.keys(groups).forEach(muscle=>{
     const g=groups[muscle];
@@ -3448,6 +3463,29 @@ function getMesoVolumeSuggestions(m,routineId){
     const priority=state.musclePriority[muscle]||'normal';
     const rec=getVolumeRecommendation(muscle);
     const overreached=rec.status==='at-or-above-mrv'||rec.status==='pain-flag'||rec.status==='high-fatigue';
+    if(extraIdx>0){
+      // Phase B — past the configured rotationsPerMeso, still training (stall check hasn't fired).
+      // Deliberately NOT the Phase A logic below: instead of "add a set every eligible workout
+      // while under target", this grants at most ONE set per muscle per extra rotation, cycling
+      // round-robin through the muscle's sibling exercises in this routine (user spec,
+      // 2026-08-07) — see Decision 2 in the handover. Read-only here (preview-safe, this function
+      // is also called just to render the pre-workout note); the credit itself is only committed
+      // in startRoutineWorkout, once the workout actually begins.
+      const credit=(m.extraRotationCredits&&m.extraRotationCredits[muscle])||{granted:0,cycleIdx:0};
+      const mrv=rec.landmarks.mrv;
+      const atMRV=rec.vol>=mrv;
+      if(!atMRV&&!overreached&&credit.granted<extraIdx){
+        const siblings=getMesoRoutineSiblingExIds(routineId,muscle);
+        const targetExId=siblings.length?siblings[credit.cycleIdx%siblings.length]:g.exIds[0];
+        const targetEx=getExercise(targetExId);
+        suggestions.push({muscle,action:'add_set',exerciseNames:[targetEx?targetEx.name:g.names[0]],exIds:[targetExId],priority,target:mrv,current:rec.vol,phaseB:true});
+      }else if(atMRV||overreached){
+        suggestions.push({muscle,action:'hold',exerciseNames:g.names,overrideReason:muscle+' has reached its MRV for this pass — holding steady.'});
+      }else{
+        suggestions.push({muscle,action:'hold',exerciseNames:g.names,overrideReason:muscle+' already got this extra rotation\u2019s set — holding until the next one.'});
+      }
+      return;
+    }
     const target=getMesoMuscleVolumeTarget(m,muscle);
     const belowTarget=rec.vol<target;
     // Priority still shapes how the ramp target gets pursued, same spirit as the old trend-based
@@ -3496,7 +3534,7 @@ function getEfficientVolumeEligibility(m,routineId){
   const exIds=[];
   (r.exerciseIds||[]).forEach(exId=>{
     const exData=getExercise(exId);if(!exData)return;
-    if(!getEfficientVolumeMechanism(exData.equipment))return;
+    if(!getEfficientVolumeMechanism(normalizeEquipmentTag(exData)))return;
     let sc=3;
     for(let i=state.history.length-1;i>=0;i--){const f=state.history[i].exercises.find(e=>e.exId===exId);if(f){sc=f.sets.filter(s=>s.done).length||3;break;}}
     if(sc>=2)exIds.push(exId);
@@ -3584,7 +3622,7 @@ function saveNewMesocycle(){
   state.mesocycles.push({id:uid(),name,routineIds:[],currentPos:0,startedAt:null,completedWorkouts:0,
     rotationsPerMeso:4,mesoRepeats:1,deloadEnabled:true,deloadPercent:40,deloadSetsDrop:0,resetMode:'preDeload',resetRotationNumber:1,resetFallbackNote:null,
     rirRampEnabled:true,rirEnd:0,rirStartCap:4,earlyDeloadDetection:'suggest',earlyDeloadDeclineCount:2,
-    deloadMethod:'weight',deloadSetMode:'flat',deloadSetValue:1,deloadTargetRIR:4,slotRepRanges:{},
+    deloadMethod:'weight',deloadTargetRIR:4,slotRepRanges:{},
     rirRepTargetEnabled:true,trueFailureAnchor:{},
     rotationsDone:0,repeatsDone:0,phase:'training',passWorkoutCount:0,rotationWorkoutCount:0,baselines:{},rotationBaselines:{},preDeloadBaselines:{},pendingResetBaseline:null,measurementsPending:false,skipLog:[],undoSkip:null});
   save();renderMesocycles();closeModal('modal-new-mesocycle');
@@ -3616,8 +3654,6 @@ function openMesoSettingsModal(){
   document.getElementById('meso-set-deload-method').value=m.deloadMethod||'weight';
   document.getElementById('meso-set-deload-pct').value=m.deloadPercent||40;
   document.getElementById('meso-set-deload-sets-drop').value=m.deloadSetsDrop||0;
-  document.getElementById('meso-set-deload-set-mode').value=m.deloadSetMode||'flat';
-  document.getElementById('meso-set-deload-set-value').value=m.deloadSetValue!=null?m.deloadSetValue:1;
   document.getElementById('meso-set-deload-rir').value=m.deloadTargetRIR!=null?m.deloadTargetRIR:4;
   document.getElementById('meso-set-reset-mode').value=m.resetMode||'preDeload';
   document.getElementById('meso-set-reset-rotation').value=m.resetRotationNumber||1;
@@ -3671,9 +3707,6 @@ function saveMesoSettings(){
   m.deloadPercent=(!isNaN(pct)&&pct>0)?pct:(m.deloadPercent||40);
   const setsDrop=parseInt(document.getElementById('meso-set-deload-sets-drop').value);
   m.deloadSetsDrop=(!isNaN(setsDrop)&&setsDrop>=0)?setsDrop:0;
-  m.deloadSetMode=document.getElementById('meso-set-deload-set-mode').value||'flat';
-  const setVal=parseInt(document.getElementById('meso-set-deload-set-value').value);
-  m.deloadSetValue=(!isNaN(setVal)&&setVal>=1)?setVal:1;
   const deloadRIR=parseInt(document.getElementById('meso-set-deload-rir').value);
   m.deloadTargetRIR=(!isNaN(deloadRIR)&&deloadRIR>=0)?deloadRIR:4;
   m.resetMode=document.getElementById('meso-set-reset-mode').value||'preDeload';
@@ -4465,25 +4498,12 @@ function beginRoutineWithSorenessCheck(i){
 // full-set auto-add) — unrelated to Efficient Volume below; shown whenever the ramp actually has
 // something due this rotation, regardless of whether Efficient Volume's own gates are met.
 function renderVolumeModePicker(r,activeMeso){
+  // MV\u2192MRV redesign (automation decision): ramp-due volume now applies automatically rather
+  // than as an opt-in choice — the Plain/Extra Sets picker that let a session skip the added set
+  // is removed. pendingVolumeMode stays fixed at its long-standing 'extra' default so
+  // startRoutineWorkout's volumeMode plumbing (and the note text below) needs no other changes.
   const el=document.getElementById('volume-mode-section');if(!el)return;
-  const volSuggestions=activeMeso?getMesoVolumeSuggestions(activeMeso,r.id):null;
-  const hasAdds=!!(volSuggestions&&volSuggestions.some(s=>s.action==='add_set'));
-  if(!hasAdds){el.style.display='none';return;}
-  el.style.display='';
-  const opts=[
-    {id:'plain',label:'Plain',desc:'Skip the extra volume this session'},
-    {id:'extra',label:'Extra Sets',desc:'Full extra set(s), as usual'}
-  ];
-  document.getElementById('volume-mode-options').innerHTML=opts.map(o=>
-    '<button class="btn btn-sm volume-mode-btn'+(pendingVolumeMode===o.id?' active':'')+'" onclick="setPendingVolumeMode(\''+o.id+'\')" style="display:block;width:100%;text-align:left;margin-bottom:6px">'
-    +'<span class="bold">'+o.label+'</span> — <span class="text3 small">'+o.desc+'</span></button>'
-  ).join('');
-}
-function setPendingVolumeMode(mode){
-  pendingVolumeMode=mode;
-  const r=pendingSorenessRoutineIdx!=null?state.routines[pendingSorenessRoutineIdx]:null;
-  const activeMeso=activeMesoContext?state.mesocycles[activeMesoContext.mesoIdx]:null;
-  if(r)renderVolumeModePicker(r,activeMeso);
+  el.style.display='none';
 }
 // EFFICIENT VOLUME toggle (redesigned 2026-08-06): independent of the ramp-due-volume picker
 // above — swaps the LAST planned set of each eligible exercise for a myo/drop-set chain, once
@@ -4497,7 +4517,7 @@ function renderEfficientVolumeToggle(r,activeMeso,eligibility){
   const mechanismByExId={};
   eligibility.forEach(exId=>{
     const exData=getExercise(exId);
-    mechanismByExId[exId]=exData?getEfficientVolumeMechanism(exData.equipment):null;
+    mechanismByExId[exId]=exData?getEfficientVolumeMechanism(normalizeEquipmentTag(exData)):null;
   });
   const savedSec=estimateEfficientVolumeSavings(eligibility,mechanismByExId,r.id);
   const savedLabel=savedSec>=60?Math.round(savedSec/60)+' min':Math.round(savedSec)+' sec';
@@ -4573,6 +4593,21 @@ function startRoutineWorkout(i,sorenessScores,volumeMode,efficientVolumeOn){
   const volSuggestions=activeMeso?getMesoVolumeSuggestions(activeMeso,r.id):null;
   const addSetExIds=new Set();
   (volSuggestions||[]).forEach(s=>{if(s.action==='add_set')(s.exIds||[]).forEach(id=>addSetExIds.add(id));});
+  // Decision 2 (Phase B): commit the extra-rotation credit now that the workout is actually
+  // starting (getMesoVolumeSuggestions itself stays read-only/preview-safe — it's also called
+  // just to render the pre-workout note, so mutating there would over-grant on every re-render).
+  if(activeMeso&&volSuggestions){
+    if(!activeMeso.extraRotationCredits)activeMeso.extraRotationCredits={};
+    let creditsChanged=false;
+    volSuggestions.forEach(s=>{
+      if(s.action==='add_set'&&s.phaseB){
+        const c=activeMeso.extraRotationCredits[s.muscle]||{granted:0,cycleIdx:0};
+        activeMeso.extraRotationCredits[s.muscle]={granted:c.granted+1,cycleIdx:c.cycleIdx+1};
+        creditsChanged=true;
+      }
+    });
+    if(creditsChanged)save();
+  }
   let mesoNote=null;
   const exercises=(r.exerciseIds||[]).map((id,idx)=>{
     const ex=getExercise(id);if(!ex)return null;
@@ -4689,7 +4724,7 @@ function startRoutineWorkout(i,sorenessScores,volumeMode,efficientVolumeOn){
     if(efficientVolumeOn&&activeMeso&&mesoRIRInfo&&!mesoRIRInfo.deload&&mesoRIRInfo.rir!=null&&mesoRIRInfo.rir<=1){
       activeWorkout.exercises.forEach((ex,exIdx)=>{
         const exData=getExercise(ex.exId);
-        const mechanism=exData?getEfficientVolumeMechanism(exData.equipment):null;
+        const mechanism=exData?getEfficientVolumeMechanism(normalizeEquipmentTag(exData)):null;
         if(mechanism)applyEfficientVolumeSwap(exIdx,mechanism);
       });
     }
@@ -4710,6 +4745,30 @@ function startRoutineWorkout(i,sorenessScores,volumeMode,efficientVolumeOn){
     const volText=formatMesoVolumeNote(volSuggestions,volumeMode);
     if(volText){volNoteEl.textContent=volText;volNoteEl.style.display='';}
     else volNoteEl.style.display='none';
+  }
+  // Decision 3 — per-session set warning (non-blocking). Counted AFTER ramp/extra-rotation
+  // auto-add above, so it reflects what the session actually contains, not just the routine's
+  // static baseline. Flags, never trims — see Decision 3 in the handover for why a hard cap
+  // would make MRV unreachable for any muscle trained once a week.
+  const sessionWarnEl=document.getElementById('workout-session-set-warning');
+  if(sessionWarnEl&&activeWorkout){
+    const SESSION_SET_WARN_THRESHOLD=10;
+    const sessionMuscleSets={};
+    (activeWorkout.exercises||[]).forEach(ex=>{
+      const exData=getExercise(ex.exId);
+      const muscle=exData&&exData.muscle;
+      if(!muscle)return;
+      const n=(ex.sets||[]).filter(s=>!s.type||s.type==='normal').length;
+      sessionMuscleSets[muscle]=(sessionMuscleSets[muscle]||0)+n;
+    });
+    const over=Object.entries(sessionMuscleSets).filter(([,n])=>n>SESSION_SET_WARN_THRESHOLD);
+    if(over.length){
+      const parts=over.map(([muscle,n])=>muscle+' ('+n+' sets)');
+      sessionWarnEl.textContent='Heads up — '+parts.join(', ')+' concentrated in one session. Consider spreading across more training days.';
+      sessionWarnEl.style.display='';
+    }else{
+      sessionWarnEl.style.display='none';
+    }
   }
   const reviewNoteEl=document.getElementById('workout-review-note');
   if(reviewNoteEl){
@@ -7065,7 +7124,6 @@ function renderExRow(r,muscle,list){
   if(soloEx){
     const excluded=!!soloEx.excludePartials;
     dropdownItems+='<div class="r-dropdown-item" onclick="event.stopPropagation();toggleExcludePartials(\''+soloEx.id+'\');closeAllDropdowns()">'+(excluded?'☑':'☐')+' Exclude from Partials (pre-deload)</div>';
-    dropdownItems+='<div class="r-dropdown-item" onclick="event.stopPropagation();openSetEquipmentModal(\''+soloEx.id+'\');closeAllDropdowns()">'+uiIcon('merge',15,'currentColor')+' Set Equipment</div>';
     dropdownItems+='<div class="r-dropdown-item" onclick="event.stopPropagation();openMergeExerciseModal(\''+soloEx.id+'\');closeAllDropdowns()">'+uiIcon('merge',15,'currentColor')+' Merge into...</div>';
   }
 
@@ -7313,27 +7371,12 @@ function toggleExcludePartials(exId){
   save();renderExerciseDB();
 }
 let mergeSourceExId=null;
-// Lets an already-created exercise have its equipment set/changed after the fact — there was
-// previously no way to do this at all once an exercise existed (only at creation, via the guided
-// picker's chips), which left any manually-added exercise permanently stuck with no equipment
-// value. Matters now because Efficient Volume treats unset equipment as excluded rather than
-// guessing (see getEfficientVolumeMechanism).
+// Efficient Volume's equipment vocabulary — what getEfficientVolumeMechanism/normalizeEquipmentTag
+// recognize. There used to be a separate "Set Equipment" modal writing to its own ex.equipment
+// field here, duplicating the choice already made (and stored on ex.machine) when the exercise was
+// built via the guided picker. Removed — normalizeEquipmentTag (near getEfficientVolumeMechanism)
+// now derives this straight from ex.machine, so no separate assignment step exists or is needed.
 const EFFICIENT_VOLUME_EQUIPMENT_LIST=['Barbell','Dumbbell','Cable','Machine','Smith Machine','Bodyweight','Weighted','EZ Bar','Trap Bar','Kettlebell','Leg Press Machine','Plate','Resistance Band','Ab Wheel'];
-function openSetEquipmentModal(exId){
-  const ex=getExercise(exId);if(!ex)return;
-  document.getElementById('set-equipment-label').textContent=ex.name+' — currently: '+(ex.equipment||'not set');
-  document.getElementById('set-equipment-options').innerHTML=EFFICIENT_VOLUME_EQUIPMENT_LIST.map(eq=>
-    '<button class="btn btn-sm'+(ex.equipment===eq?' btn-primary':' btn-ghost')+'" onclick="setExerciseEquipment(\''+exId+'\',\''+eq+'\')">'+eq+'</button>'
-  ).join('');
-  document.getElementById('modal-set-equipment').classList.add('open');
-}
-function setExerciseEquipment(exId,equipment){
-  const ex=getExercise(exId);if(!ex)return;
-  ex.equipment=equipment;
-  save();
-  closeModal('modal-set-equipment');
-  renderExerciseDB();
-}
 function openMergeExerciseModal(exId){
   const ex=getExercise(exId);if(!ex)return;
   mergeSourceExId=exId;
@@ -7723,6 +7766,27 @@ function getEfficientVolumeMechanism(equipment){
   if(['Barbell','Smith Machine','Weighted','EZ Bar','Trap Bar','Plate'].includes(equipment))return 'myo';
   if(['Cable','Machine','Dumbbell','Kettlebell','Leg Press Machine'].includes(equipment))return 'dropset';
   return null; // any other/unrecognized value — don't guess
+}
+// Efficient Volume used to require a SEPARATE ex.equipment value, set one-by-one via a dedicated
+// "Set Equipment" modal — duplicating the equipment choice already made (and stored on ex.machine)
+// when the exercise was built via the guided picker/resolveExercise. That left every exercise
+// permanently "unset" from Efficient Volume's point of view unless the user redundantly re-declared
+// it, and risked the two values silently drifting apart. This normalizes ex.machine (the real,
+// already-populated source of truth) into the fixed vocabulary getEfficientVolumeMechanism expects,
+// so no separate assignment step is needed. Unrecognized/blank machine values return null — same
+// "don't guess" fallback as before — rather than being force-mapped to something possibly wrong.
+function normalizeEquipmentTag(ex){
+  if(!ex)return null;
+  const m=(ex.machine||'').trim();
+  if(!m)return null;
+  if(EFFICIENT_VOLUME_EQUIPMENT_LIST.includes(m))return m;
+  if(m==='Pull-Up Bar')return ex.bw==='yes'?'Bodyweight':'Weighted';
+  if(m==='Cambered Barbell'||m==='SSB')return 'Barbell';
+  if(m==='Cable Machine')return 'Cable';
+  const lower=m.toLowerCase();
+  if(lower.includes('leg press'))return 'Leg Press Machine';
+  if(lower.includes('machine'))return 'Machine'; // e.g. Calf Raise Machine, Hip Thrust Machine, Ab Machine
+  return null;
 }
 function getMuscleVolume(muscle){
   const windowDays=getMuscleTrainingCadence(muscle);
