@@ -196,12 +196,14 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .modal-handle{width:40px;height:4px;background:var(--border);border-radius:2px;margin:12px auto 0;}
 .modal-title{font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:1.5px;padding:14px 20px 4px;}
 .modal-body{padding:12px 20px 20px;}.modal-actions{display:flex;gap:10px;padding:0 20px 8px;}
-.soreness-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);gap:10px;}
+.soreness-row{display:flex;flex-direction:column;padding:10px 0;border-bottom:1px solid var(--border);gap:6px;}
 .soreness-row:last-child{border-bottom:none;}
-.soreness-scale{display:flex;gap:4px;}
-.soreness-btn{width:34px;height:34px;border-radius:50%;border:1px solid var(--border);background:var(--bg);color:var(--text2);font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;}
-.soreness-btn.active[data-score="0"]{background:var(--accent);border-color:var(--accent);color:#fff;}
-.soreness-btn.active[data-score="1"]{background:#2ed573;border-color:#2ed573;color:#fff;}
+.soreness-scale{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;}
+/* Soreness options are full-text labels (recovery-timing framing, 2026-08-07), not bare digits —
+   need real width/line-height for 2-line wrap instead of the old 34px number circle. */
+.soreness-btn{border-radius:9px;border:1px solid var(--border);background:var(--bg);color:var(--text2);font-size:10px;font-weight:600;line-height:1.25;padding:7px 3px;text-align:center;}
+.soreness-btn.active[data-score="0"]{background:#2ed573;border-color:#2ed573;color:#fff;}
+.soreness-btn.active[data-score="1"]{background:#20c997;border-color:#20c997;color:#fff;}
 .soreness-btn.active[data-score="2"]{background:#ff8c00;border-color:#ff8c00;color:#fff;}
 .soreness-btn.active[data-score="3"]{background:var(--red);border-color:var(--red);color:#fff;}
 .volume-mode-btn{background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:8px 10px;}
@@ -217,6 +219,16 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .pef-btn.active[data-score="0"]{background:var(--accent);border-color:var(--accent);color:#fff;}
 .pef-btn.active[data-score="1"]{background:#ff8c00;border-color:#ff8c00;color:#fff;}
 .pef-btn.active[data-score="2"]{background:var(--red);border-color:var(--red);color:#fff;}
+/* 4th tier for Workload (2026-08-07): the only PEF_FIELDS entry with 4 options instead of 3 —
+   see the f.max plumbing in renderPEFPanel. */
+.pef-btn.active[data-score="3"]{background:#c0392b;border-color:#c0392b;color:#fff;}
+/* Workload's buttons carry real label text (Easy/Pretty Good/etc, not a bare digit) — wider than
+   the plain circular pef-btn and left in a row of 4 rather than the shared circle style. */
+.pef-btn.pef-btn-text{width:auto;min-width:0;flex:1;height:auto;border-radius:9px;font-size:10px;line-height:1.25;padding:7px 3px;}
+/* good0: for fields where 0 is the desired/good outcome (Joint Pain, Soreness Impact) rather
+   than a neutral midpoint (Pump, Target Muscle Challenge) — 0 reads green instead of accent,
+   since the default accent color is itself a red/orange hue and misread as a bad-outcome color. */
+.pef-btn.good0.active[data-score="0"]{background:#2ed573;border-color:#2ed573;color:#fff;}
 .pef-summary{margin:2px 16px 12px;padding:8px 12px;background:var(--bg2);border-radius:10px;font-size:12.5px;color:var(--text2);display:flex;align-items:center;justify-content:space-between;gap:8px;}
 .vl-table-row{display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr 1fr;gap:6px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);}
 .vl-table-row:first-child{padding-top:0;}
@@ -246,6 +258,10 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .sort-chip{padding:5px 13px;border-radius:20px;font-size:12px;font-weight:600;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;white-space:nowrap;transition:all 0.15s;}
 .sort-chip.active{background:var(--accent);color:#0a0a0f;border-color:var(--accent);}
 .muscle-bar-wrap{padding:5px 0;}.muscle-bar-label{display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px;}
+.status-chip{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:10px;font-size:10.5px;font-weight:700;white-space:nowrap;flex-shrink:0;}
+.muscle-status-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 0;border-bottom:1px solid var(--border);}
+.muscle-status-row:last-child{border-bottom:none;}
+.muscle-group-header{display:flex;align-items:center;justify-content:space-between;padding:9px 0;cursor:pointer;}
 .muscle-bar-track{height:7px;background:var(--bg4);border-radius:4px;overflow:hidden;}
 .muscle-bar-fill{height:100%;border-radius:4px;transition:width 0.6s ease;}
 .review-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px;box-shadow:var(--shadow);}
@@ -335,6 +351,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
   </div>
   <div class="scroll pb" id="home-scroll" style="display:flex;flex-direction:column;">
     <div id="paused-workout-banner"></div>
+    <div id="google-sync-banner"></div>
     <div class="home-sec" id="home-sec-meso" data-home-key="meso">
       <div id="active-meso-hero"></div>
     </div>
@@ -581,7 +598,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-07.1</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-07.5</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -602,9 +619,9 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
 </div>
 <div class="modal-overlay" id="modal-soreness">
   <div class="modal"><div class="modal-handle"></div>
-    <div class="modal-title">How sore are you today?</div>
+    <div class="modal-title">Soreness Check-In</div>
     <div class="modal-body">
-      <div class="small text2" style="margin-bottom:10px">Rate soreness for each muscle you're about to train — this only adjusts today's on-screen guidance, nothing is changed automatically.</div>
+      <div class="small text2" style="margin-bottom:10px">For each muscle you're about to train — this automatically shapes today's targets (still sore backs things off a little), everything stays editable if you want to override it.</div>
       <div id="soreness-list"></div>
       <div id="volume-mode-section" style="display:none">
         <div class="input-label mt12">This session's extra volume</div>
@@ -1006,7 +1023,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div class="modal-body">
       <div class="input-label">Rotations per mesocycle</div>
       <input id="meso-set-rotations" type="number" inputmode="numeric" min="1"/>
-      <div class="small text3 mt4" style="line-height:1.5">A rotation = completing every routine in the sequence once.</div>
+      <div class="small text3 mt4" style="line-height:1.5">A rotation = completing every routine in the sequence once. Paces the volume and RIR ramps (early rotations near MEV/higher RIR, this one at MRV/your final RIR target) — with deload enabled, it's not a hard cutoff: training keeps going past it until a real decline shows up, gaining a bit more volume each extra rotation.</div>
 
       <div class="input-label mt12">Times to repeat this mesocycle</div>
       <input id="meso-set-repeats" type="number" inputmode="numeric" min="0"/>
@@ -1085,7 +1102,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <div id="meso-early-deload-fields">
         <div class="input-label mt12">Exercises declining (threshold)</div>
         <input id="meso-set-decline-count" type="number" inputmode="numeric" min="1"/>
-        <div class="small text3 mt4" style="line-height:1.5">Triggers early if this many exercises' top sets decline against their last two sessions, or if effort is already hitting your final-rotation RIR target well ahead of schedule — before the mesocycle's planned rotation count runs out.</div>
+        <div class="small text3 mt4" style="line-height:1.5">This is now the only thing that ends a deload-enabled mesocycle's training phase — there's no separate scheduled deload. Main driver: this many exercises' top sets declining against their last two sessions (checked every workout, including past the rotation count above). Effort hitting your final RIR target only counts as a second signal while you're genuinely still earlier than the rotation count above — reaching it on schedule, or training there for extra rotations, is expected and won't by itself trigger a deload.</div>
       </div>
     </div>
     <div class="modal-actions">
@@ -1161,6 +1178,33 @@ const SET_TYPES=[
 const MUSCLE_GROUPS=['Chest','Back','Shoulders','Biceps','Triceps','Quads','Hamstrings','Glutes','Core','Calves','Full Body'];
 const MUSCLE_PAIRS={Chest:'Back',Back:'Chest',Biceps:'Triceps',Triceps:'Biceps',Quads:'Hamstrings',Hamstrings:'Quads'};
 const MUSCLE_COLORS={Chest:'#e8ff47',Back:'#47c8ff',Shoulders:'#ff8c00',Biceps:'#2ed573',Triceps:'#ff4757',Quads:'#cc44ff',Hamstrings:'#c2703d',Glutes:'#ff6b81',Core:'#ffd700',Calves:'#00cec9','Full Body':'#fd79a8'};
+// Shared status vocabulary for both the Review tab (weekly, all mesos) and Manage Meso > Review
+// Progress (one meso's lifetime) — 2026-08-07 redesign, so a muscle's status/trend renders as one
+// small colored chip on its own row instead of the two screens using different, disconnected
+// visual languages, and instead of the old Review tab repeating a full sentence per muscle for
+// the same handful of statuses. 'mav-to-mrv' previously had no icon at all (silently produced no
+// suggestion line) even though "solid volume, nothing wrong" is a real, worth-showing state.
+const VOLUME_STATUS_META={
+  'pain-flag':{icon:'\ud83d\uded1',label:'Pain flagged',color:'#ff4757'},
+  'at-or-above-mrv':{icon:'\ud83d\udea7',label:'At MRV',color:'#ff4757'},
+  'high-fatigue':{icon:'\ud83d\ude2e\u200d\ud83d\udca8',label:'High fatigue',color:'#ff8c00'},
+  'below-mev':{icon:'\ud83d\udcc9',label:'Below MEV',color:'#ff8c00'},
+  'building-poor-sfr':{icon:'\ud83d\udd0d',label:'Low SFR',color:'#ff8c00'},
+  'building':{icon:'\ud83d\udcc8',label:'Building',color:'var(--text2)'},
+  'mav-to-mrv':{icon:'\u2705',label:'Solid volume',color:'#2ed573'}
+};
+// Statuses worth an attention-priority sort AND a spelled-out reason line — the other two
+// ('building','mav-to-mrv') are the expected/fine states and only need the chip, no extra text,
+// to keep the list from re-explaining "everything's fine" once per muscle.
+const VOLUME_STATUS_ORDER=['pain-flag','at-or-above-mrv','high-fatigue','below-mev','building-poor-sfr','building','mav-to-mrv'];
+const TREND_META={
+  up:{icon:'\u25b2',label:'Trending Up',color:'#2ed573'},
+  down:{icon:'\u25bc',label:'Trending Down',color:'#ff4757'},
+  flat:{icon:'\u2013',label:'Holding Steady',color:'var(--text2)'}
+};
+function statusChipHtml(icon,label,color){
+  return '<span class="status-chip" style="color:'+color+';background:'+color+'22;border:1px solid '+color+'55">'+icon+' '+label+'</span>';
+}
 const COMPOUND_MUSCLES=['Quads','Hamstrings','Back','Chest','Glutes','Full Body'];
 // Legacy 'Legs' catalogue names, used only to migrate exercises/history saved before the Quads/Hamstrings split.
 const LEGACY_LEGS_TO_HAMSTRINGS=['Good Morning','Leg Curl','Nordic Curl','Romanian Deadlift'];
@@ -2179,7 +2223,7 @@ function renderModifierChips(containerEl,stateObj,onChange){
 let editingExIdx=null;
 let editExWorkoutMeta={useRIR:false};
 let editExState={muscle:null,exDef:null,equipment:null,position:null,grip:null,isUni:false,modifier:null,modifierCustomMode:false,attachment:null,customValues:{},addingField:null,cablePosition:null,benchBack:null,benchSeat:null,showBenchSetup:false};
-load();initNavs();buildTimerPresets();buildPlateInventoryUI();buildVolumeLandmarksUI();renderHomeScreen();checkForWorkoutDraft();
+load();initNavs();buildTimerPresets();buildPlateInventoryUI();buildVolumeLandmarksUI();renderHomeScreen();checkForWorkoutDraft();initGoogleSyncWhenReady(20);
 document.getElementById('barbell-weight-input').value=state.barbellWeight||20;
 document.getElementById('prog-inc-dumbbell').value=state.progressionIncrements.Dumbbell;
 document.getElementById('prog-inc-cable').value=state.progressionIncrements.Cable;
@@ -2702,6 +2746,7 @@ function renderHomeScreen(){
   applyHomeLayout();
   initHomeDragSort();
   renderPausedWorkoutBanner();
+  renderGoogleSyncBanner();
   renderActiveMesoHero();
   renderWeeklyConsistencyChart();
 }
@@ -3564,6 +3609,19 @@ function checkEarlyDeloadSignals(m,workoutExercises){
   // like 'auto' (compute the signal, deload automatically on it, no confirmation dialog) rather
   // than silently never firing. Per user's explicit choice (2026-08-05): auto-fall-back based on
   // the data rather than asking or doing nothing.
+  //
+  // RIR-based signal is scoped to genuinely AHEAD OF SCHEDULE only (2026-08-07 fix): called after
+  // advanceMesoProgress, so m.rotationsDone already reflects the rotation that just finished.
+  // getMesoTargetRIR clamps its prescribed RIR at rirEnd once rotationsDone reaches
+  // rotationsPerMeso — meaning from the scheduled final rotation onward (including all of Phase
+  // B), training at/near rirEnd is the intended, prescribed effort, not a fatigue red flag. Per
+  // user's explicit correction: training at 0 RIR doesn't mean fatigued, and this signal firing
+  // just because you hit the (expected) final target during or after your scheduled rotation
+  // count was defeating Phase B before it could ever run. Now only counted while still strictly
+  // short of rotationsPerMeso, i.e. actually earlier than planned. The decline signal below is
+  // unaffected by this and remains the main driver once at/past the scheduled count — per user,
+  // downward progression across sessions, not absolute RIR, is what should trigger a deload here.
+  const aheadOfSchedule=(m.rotationsDone||0)<(m.rotationsPerMeso||1);
   let rirChecked=0,rirHits=0,declineHits=0;
   const declineNames=[];
   (workoutExercises||[]).forEach(ex=>{
@@ -3573,7 +3631,7 @@ function checkEarlyDeloadSignals(m,workoutExercises){
     const normalSets=(ex.sets||[]).filter(s=>s.done&&(!s.type||s.type==='normal'));
     if(!normalSets.length)return;
     const top={...normalSets[0],useRIR};
-    if(m.rirRampEnabled&&top.rpe!=null){
+    if(aheadOfSchedule&&m.rirRampEnabled&&top.rpe!=null){
       rirChecked++;
       const actualRIR=useRIR?top.rpe:(10-top.rpe);
       const threshold=m.rirEnd!=null?m.rirEnd:0;
@@ -3592,7 +3650,7 @@ function checkEarlyDeloadSignals(m,workoutExercises){
     }
   });
   const reasons=[];
-  if(rirChecked>0&&rirHits>=Math.ceil(rirChecked/2)){
+  if(aheadOfSchedule&&rirChecked>0&&rirHits>=Math.ceil(rirChecked/2)){
     reasons.push('Several exercises are already at your final-rotation RIR target, well ahead of schedule.');
   }
   const declineThreshold=m.earlyDeloadDeclineCount||2;
@@ -3721,9 +3779,12 @@ function saveMesoSettings(){
   m.earlyDeloadDetection=document.getElementById('meso-set-early-deload').value||'suggest';
   const declineCount=parseInt(document.getElementById('meso-set-decline-count').value);
   m.earlyDeloadDeclineCount=(!isNaN(declineCount)&&declineCount>=1)?declineCount:2;
-  // A lowered rotation count shouldn't leave rotationsDone stranded above the new ceiling —
-  // clamp it so the next completed rotation transitions cleanly instead of skipping ahead.
-  if(m.phase==='training'&&m.rotationsDone>m.rotationsPerMeso)m.rotationsDone=m.rotationsPerMeso;
+  // A lowered rotation count shouldn't leave rotationsDone stranded above the new ceiling — but
+  // only for the fixed-count model (deload disabled), where rotationsPerMeso is a real ceiling.
+  // For a deload-enabled meso, running past rotationsPerMeso is Phase B (Decision 2, 2026-08-07)
+  // — intentional, stall-check-gated extra training, not stranding — so clamping here would
+  // silently erase real progress and desync extraRotationCredits every time Settings is saved.
+  if(!m.deloadEnabled&&m.phase==='training'&&m.rotationsDone>m.rotationsPerMeso)m.rotationsDone=m.rotationsPerMeso;
   save();
   closeModal('modal-meso-settings');
   openMesocycleDetail(viewingMesoIdx);
@@ -3827,6 +3888,7 @@ function getMesoReviewData(m){
   });
   return{exerciseSummaries,muscleSummaries};
 }
+let mesoReviewOpenMuscles=new Set();
 function openMesoReviewFor(mesoIdx){
   viewingMesoIdx=mesoIdx;
   openMesoReview();
@@ -3842,30 +3904,53 @@ function openMesoReview(){
     openModal('modal-meso-review');
     return;
   }
-  let html='';
+  mesoReviewOpenMuscles=new Set(); // fresh collapse state each time the modal is opened
+  renderMesoReviewBody(data);
+  openModal('modal-meso-review');
+}
+// Redesign (2026-08-07): "By Exercise" used to be one long flat list, sorted by muscle but never
+// actually grouped under a muscle heading — every exercise got its own full block even when
+// several in a row belonged to the same muscle. Now grouped under collapsible muscle headers
+// (closed by default), and the trend chip reuses the SAME statusChipHtml/TREND_META the Review
+// tab's muscle bars use, so the two screens read as one visual language instead of two.
+function renderMesoReviewBody(data){
+  const body=document.getElementById('meso-review-body');if(!body)return;
   const muscles=Object.keys(data.muscleSummaries).sort();
-  html+='<div class="section-label">By Muscle</div>';
+  const byMuscle={};
+  data.exerciseSummaries.forEach(s=>{(byMuscle[s.muscle]=byMuscle[s.muscle]||[]).push(s);});
+  let html='<div class="section-label">By Muscle</div>';
   muscles.forEach(muscle=>{
     const g=data.muscleSummaries[muscle];
-    const col=g.up>g.down?'#2ed573':g.down>g.up?'#ff4757':'var(--text2)';
-    const label=g.up>g.down?'Trending up':g.down>g.up?'Trending down':'Holding steady';
-    html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">'
+    const trend=g.up>g.down?'up':g.down>g.up?'down':'flat';
+    const tm=TREND_META[trend];
+    const open=mesoReviewOpenMuscles.has(muscle);
+    const exs=byMuscle[muscle]||[];
+    // Muscle names are a fixed internal set (MUSCLE_GROUPS/'Other'), not free text — safe to
+    // interpolate directly into the onclick, same convention as saveMusclePriority elsewhere.
+    html+='<div class="muscle-group-header" onclick="toggleMesoReviewMuscle(\''+muscle+'\')">'
       +'<span class="bold" style="font-size:13px">'+escHtml(muscle)+'</span>'
-      +'<span class="small" style="color:'+col+'">'+label+' ('+g.up+'↑ '+g.down+'↓ '+g.flat+'–)</span></div>';
-  });
-  html+='<div class="section-label mt12">By Exercise</div>';
-  data.exerciseSummaries.forEach(s=>{
-    const col=s.delta>0?'#2ed573':s.delta<0?'#ff4757':'var(--text2)';
-    const arrow=s.delta>0?'▲':s.delta<0?'▼':'–';
-    const deltaStr=s.delta!==0?(s.delta>0?'+':'')+s.delta+'kg':'no change';
-    html+='<div style="padding:6px 0;border-bottom:1px solid var(--border)">'
-      +'<div style="display:flex;justify-content:space-between"><span class="bold" style="font-size:13px">'+escHtml(s.name)+'</span>'
-      +'<span class="small" style="color:'+col+'">'+arrow+' '+deltaStr+'</span></div>'
-      +'<div class="small text3">'+s.firstWeight+'kg×'+(s.isUni?(s.firstRepsL||0)+'/'+(s.firstRepsR||0):s.firstReps)+' → '+s.lastWeight+'kg×'+(s.isUni?(s.lastRepsL||0)+'/'+(s.lastRepsR||0):s.lastReps)+' across '+s.sessionCount+' session'+(s.sessionCount!==1?'s':'')+'</div>'
+      +'<span style="display:flex;align-items:center;gap:6px">'+statusChipHtml(tm.icon,tm.label+' ('+g.up+'\u2191 '+g.down+'\u2193 '+g.flat+'\u2013)',tm.color)+'<span class="text3">'+(open?'\u25be':'\u25b8')+'</span></span>'
       +'</div>';
+    if(open){
+      html+='<div style="padding:0 0 4px 2px">'+exs.map(s=>{
+        const col=s.delta>0?'#2ed573':s.delta<0?'#ff4757':'var(--text2)';
+        const arrow=s.delta>0?'▲':s.delta<0?'▼':'–';
+        const deltaStr=s.delta!==0?(s.delta>0?'+':'')+s.delta+'kg':'no change';
+        return '<div style="padding:6px 0;border-bottom:1px solid var(--border)">'
+          +'<div style="display:flex;justify-content:space-between"><span class="bold" style="font-size:13px">'+escHtml(s.name)+'</span>'
+          +'<span class="small" style="color:'+col+'">'+arrow+' '+deltaStr+'</span></div>'
+          +'<div class="small text3">'+s.firstWeight+'kg×'+(s.isUni?(s.firstRepsL||0)+'/'+(s.firstRepsR||0):s.firstReps)+' → '+s.lastWeight+'kg×'+(s.isUni?(s.lastRepsL||0)+'/'+(s.lastRepsR||0):s.lastReps)+' across '+s.sessionCount+' session'+(s.sessionCount!==1?'s':'')+'</div>'
+          +'</div>';
+      }).join('')+'</div>';
+    }
   });
   body.innerHTML=html;
-  openModal('modal-meso-review');
+}
+function toggleMesoReviewMuscle(muscle){
+  if(mesoReviewOpenMuscles.has(muscle))mesoReviewOpenMuscles.delete(muscle);else mesoReviewOpenMuscles.add(muscle);
+  if(viewingMesoIdx===null)return;
+  const data=getMesoReviewData(state.mesocycles[viewingMesoIdx]);
+  if(data)renderMesoReviewBody(data);
 }
 // Single-tap preview for a mesocycle sequence row — opens the tight gym-setup preview
 // (exercise order + equipment setup + Start), reached via routine ID (a meso slot) instead
@@ -4470,8 +4555,15 @@ function applyEfficientVolumeSwap(exIdx,mechanism){
     newTop.myoBursts=buildMyoBurstChain(refReps,isUni);
     ex.sets=ex.sets.filter(s=>s!==refSet);
   }else if(mechanism==='dropset'){
+    // BUG FIX (2026-08-07): a naive append put the drop-set chain AFTER a same-workout Partials
+    // set (Partials is appended once during seeding, before this swap ever runs — see
+    // startRoutineWorkout) — Partials is meant to be the true final beyond-failure push, so it
+    // needs to stay last even when a drop-set chain gets appended here. Pull it out, append the
+    // chain, then put it back on the end.
     const chain=buildDropSetChain(refWeight,refReps);
-    ex.sets=[...ex.sets.filter(s=>s!==refSet),...chain];
+    const partialsSet=ex.sets.find(s=>s.type==='partials');
+    const rest=ex.sets.filter(s=>s!==refSet&&s.type!=='partials');
+    ex.sets=partialsSet?[...rest,...chain,partialsSet]:[...rest,...chain];
   }
 }
 // Entry point from the gym-setup preview's Start button. Shows the soreness modal only when
@@ -4535,11 +4627,16 @@ function setPendingEfficientVolumeOn(on){
 }
 function renderSorenessList(){
   const el=document.getElementById('soreness-list');if(!el)return;
-  const labels=['0: None','1: Mild','2: Moderate','3: Extreme'];
+  // Recovery-timing framing (2026-08-07, replacing a plain 0-3 severity scale): asking whether
+  // soreness had actually resolved by today is a more direct, easier-to-answer question than a
+  // bare intensity rating, and it maps onto the exact same 0-3 severity ordering underneath — no
+  // change needed to the progression-capping logic (getSetTarget) or SFR aggregation
+  // (getMuscleSFRSignal), which both just read the plain 0-3 number either way.
+  const labels=['Not Sore At All','Healed Early','Just Barely Healed','Still Sore'];
   const muscleKeys=Object.keys(sorenessDraft);
   el.innerHTML=muscleKeys.map((m,i)=>
-    '<div class="soreness-row"><span class="bold">'+escHtml(m)+'</span><div class="soreness-scale">'
-    +[0,1,2,3].map(s=>'<button class="soreness-btn'+(sorenessDraft[m]===s?' active':'')+'" data-score="'+s+'" title="'+labels[s]+'" onclick="setSorenessScoreByIndex('+i+','+s+')">'+s+'</button>').join('')
+    '<div class="soreness-row"><div class="bold" style="font-size:13.5px">'+escHtml(m)+'</div><div class="soreness-scale">'
+    +[0,1,2,3].map(s=>'<button class="soreness-btn'+(sorenessDraft[m]===s?' active':'')+'" data-score="'+s+'" onclick="setSorenessScoreByIndex('+i+','+s+')">'+labels[s]+'</button>').join('')
     +'</div></div>'
   ).join('');
 }
@@ -4940,6 +5037,26 @@ function renderPausedWorkoutBanner(){
     +'<button class="btn btn-primary flex-1" onclick="resumeSavedDraft(getSavedDraft())">Resume</button>'
     +'<button class="btn btn-ghost flex-1" onclick="discardPausedWorkoutFromHome()">Discard</button>'
     +'</div></div>';
+}
+// Persistent Home banner mirroring renderPausedWorkoutBanner's pattern: whenever Google Drive
+// sync is configured (a Client ID has been saved) but this session currently has no valid
+// access token, shows an explicit "sign in" prompt right on Home — rather than the previous
+// behavior of silently skipping auto-sync after a logged workout with no indication anything
+// was wrong. Google's browser-only OAuth flow doesn't hand out refresh tokens, so a session can
+// still occasionally need re-signing-in (access tokens expire after about an hour) even with
+// the token now persisted in localStorage and a silent-refresh attempt on boot (see
+// initGoogleSync) — this banner is the visible fallback for whenever that silent refresh didn't
+// succeed, so it's obvious at a glance rather than discovered later as a missing backup.
+function renderGoogleSyncBanner(){
+  const el=document.getElementById('google-sync-banner');
+  if(!el)return;
+  if(!getGoogleClientId()||gAccessToken){el.innerHTML='';return;}
+  el.innerHTML=
+    '<div style="margin:12px 16px 4px;padding:14px;background:var(--bg2);border:1px solid #ff8c00;border-radius:var(--radius)">'
+    +'<div style="font-weight:600;color:#ff8c00">\u2601\ufe0f Google Drive signed out</div>'
+    +'<div class="small text2" style="margin:4px 0 12px">Backups are paused until you sign back in — your workouts still save locally either way.</div>'
+    +'<button class="btn btn-primary flex-1" onclick="googleSignIn()">Sign in with Google</button>'
+    +'</div>';
 }
 function discardPausedWorkoutFromHome(){
   forgeConfirm('Discard Paused Workout?','Everything logged in that session will be lost. This cannot be undone.',()=>{
@@ -5471,7 +5588,8 @@ function suggestNextLoad(exId,workoutEx,routineId){
 // per the user's own framing — it's saved to history so that data exists when that's built).
 const PEF_FIELDS=[
   {field:'pump',label:'Pump',legend:'0 Flat \u00b7 1 Good Pump \u00b7 2 Max Pump'},
-  {field:'challenge',label:'Target Muscle Challenge',legend:'0 Another muscle/joint limited it first \u00b7 1 Target muscle was the limiting factor \u00b7 2 Pushed well past plan (extreme fatigue/cramping)'},
+  {field:'challenge',label:'Workload',legend:'How hard was that for the target muscle, in plain terms?',
+   max:3,optLabels:['Easy','Pretty Good','Pushed My Limits','Too Much']},
   {field:'jointPain',label:'Joint / Acute Pain',legend:'0 No pain \u00b7 1 Mild ache \u00b7 2 Sharp pain'}
 ];
 let pefDraft={},pefPanelOpenIdxs=new Set();
@@ -5501,11 +5619,21 @@ function renderPEFPanel(exIdx){
   const panel=document.getElementById('pef-panel-'+exIdx);if(!panel)return;
   const d=pefDraft[exIdx]||{pump:null,challenge:null,jointPain:null};
   const rowsEl=panel.querySelector('.pef-rows');if(!rowsEl)return;
-  rowsEl.innerHTML=PEF_FIELDS.map(f=>
-    '<div class="pef-row"><div><div class="bold" style="font-size:13px">'+f.label+'</div><div class="small text3">'+f.legend+'</div></div>'
-    +'<div class="pef-scale">'+[0,1,2].map(s=>'<button class="pef-btn'+(d[f.field]===s?' active':'')+'" data-score="'+s+'" onclick="setPEFScore('+exIdx+',\''+f.field+'\','+s+')">'+s+'</button>').join('')
-    +'</div></div>'
-  ).join('');
+  rowsEl.innerHTML=PEF_FIELDS.map(f=>{
+    const steps=f.max!=null?f.max:2;
+    const opts=[];for(let s=0;s<=steps;s++)opts.push(s);
+    if(f.optLabels){
+      // Text-labeled variant (Workload, 2026-08-07): real option text ("Pushed My Limits", not a
+      // bare digit) doesn't fit beside the row's own label at this width, so the buttons drop to
+      // their own full-width line below instead — same pattern as the soreness modal's rework.
+      return '<div class="pef-row" style="flex-direction:column;align-items:stretch;gap:8px">'
+        +'<div><div class="bold" style="font-size:13px">'+f.label+'</div><div class="small text3">'+f.legend+'</div></div>'
+        +'<div class="pef-scale" style="width:100%">'+opts.map(s=>'<button class="pef-btn pef-btn-text'+(d[f.field]===s?' active':'')+'" data-score="'+s+'" onclick="setPEFScore('+exIdx+',\''+f.field+'\','+s+')">'+f.optLabels[s]+'</button>').join('')+'</div></div>';
+    }
+    return '<div class="pef-row"><div><div class="bold" style="font-size:13px">'+f.label+'</div><div class="small text3">'+f.legend+'</div></div>'
+      +'<div class="pef-scale">'+opts.map(s=>'<button class="pef-btn'+(f.field==='jointPain'?' good0':'')+(d[f.field]===s?' active':'')+'" data-score="'+s+'" onclick="setPEFScore('+exIdx+',\''+f.field+'\','+s+')">'+s+'</button>').join('')
+      +'</div></div>';
+  }).join('');
 }
 function savePEFeedback(exIdx){
   const ex=activeWorkout.exercises[exIdx];if(!ex)return;
@@ -5521,7 +5649,9 @@ function updatePEFSummary(exIdx){
   const el=document.getElementById('pef-summary-'+exIdx);if(!el)return;
   if(!ex||!ex.feedback){el.style.display='none';return;}
   const f=ex.feedback;
-  el.innerHTML='<span>Pump '+f.pump+' \u00b7 Challenge '+f.challenge+' \u00b7 Joint '+f.jointPain+'</span><button class="btn btn-ghost btn-sm" onclick="openExerciseFeedback('+exIdx+')">Edit</button>';
+  const workloadField=PEF_FIELDS.find(x=>x.field==='challenge');
+  const workloadLbl=(workloadField&&f.challenge!=null)?workloadField.optLabels[f.challenge]:f.challenge;
+  el.innerHTML='<span>Pump '+f.pump+' \u00b7 Workload '+workloadLbl+' \u00b7 Joint '+f.jointPain+'</span><button class="btn btn-ghost btn-sm" onclick="openExerciseFeedback('+exIdx+')">Edit</button>';
   el.style.display='flex';
 }
 
@@ -6827,7 +6957,7 @@ function renderSorenessImpactList(){
   const labels=['0: No effect','1: Slightly limited','2: Significantly limited'];
   el.innerHTML=Object.keys(sorenessImpactDraft).map((m,i)=>
     '<div class="pef-row"><div><div class="bold" style="font-size:13px">'+escHtml(m)+'</div><div class="small text3">0 No effect \u00b7 1 Slightly limited \u00b7 2 Significantly limited</div></div>'
-    +'<div class="pef-scale">'+[0,1,2].map(s=>'<button class="pef-btn'+(sorenessImpactDraft[m]===s?' active':'')+'" data-score="'+s+'" title="'+labels[s]+'" onclick="setSorenessImpactScoreByIndex('+i+','+s+')">'+s+'</button>').join('')
+    +'<div class="pef-scale">'+[0,1,2].map(s=>'<button class="pef-btn good0'+(sorenessImpactDraft[m]===s?' active':'')+'" data-score="'+s+'" title="'+labels[s]+'" onclick="setSorenessImpactScoreByIndex('+i+','+s+')">'+s+'</button>').join('')
     +'</div></div>'
   ).join('');
 }
@@ -7920,10 +8050,31 @@ function renderReview(){
     +'<div class="week-stat"><div class="week-stat-val">'+(vol/1000).toFixed(1)+'t</div><div class="week-stat-lbl">Volume</div></div>'
     +'<div class="week-stat"><div class="week-stat-val" style="color:var(--orange)">'+avgRPE+'</div><div class="week-stat-lbl">Avg Effort</div></div></div>';
   const maxS=Math.max(...Object.values(ms),1);
-  const barsHtml=MUSCLE_GROUPS.filter(m=>ms[m]>0).sort((a,b)=>ms[b]-ms[a]).map(m=>{
+  // Redesign (2026-08-07): each trained muscle's volume-recommendation status now renders as a
+  // chip right on its own bar row (sorted attention-first — pain/at-MRV/high-fatigue/below-MEV
+  // ahead of building/solid) instead of ALSO repeating as a full sentence in the Suggestions list
+  // below — that list used to push one near-identical line per landmark muscle every single week.
+  // A reason sentence still appears under the bar, but only for statuses that actually need one;
+  // 'building' and 'mav-to-mrv' (nothing wrong) get just the chip. 'mav-to-mrv' previously had no
+  // representation anywhere (old icons map had no entry for it) — now it's an explicit green chip.
+  const trainedWithRec=MUSCLE_GROUPS.filter(m=>ms[m]>0).map(m=>({m,rec:state.volumeLandmarks[m]?getVolumeRecommendation(m):null}));
+  trainedWithRec.sort((a,b)=>{
+    const ai=a.rec?VOLUME_STATUS_ORDER.indexOf(a.rec.status):999;
+    const bi=b.rec?VOLUME_STATUS_ORDER.indexOf(b.rec.status):999;
+    return ai!==bi?ai-bi:ms[b.m]-ms[a.m];
+  });
+  const barsHtml=trainedWithRec.map(({m,rec})=>{
     const lm=state.volumeLandmarks[m];
-    const lmCaption=lm?'<span class="text3 small" style="display:block;text-align:right">MEV '+lm.mev+' \u00b7 MAV '+lm.mav+' \u00b7 MRV '+lm.mrv+'</span>':'';
-    return '<div class="muscle-bar-wrap"><div class="muscle-bar-label"><span style="font-weight:600">'+m+'</span><span class="text3 small">'+ms[m]+' sets / '+getMuscleTrainingCadence(m)+'d</span></div><div class="muscle-bar-track"><div class="muscle-bar-fill" style="width:'+Math.round(ms[m]/maxS*100)+'%;background:'+(MUSCLE_COLORS[m]||'#aaa')+'"></div></div>'+lmCaption+'</div>';
+    const lmCaption=lm?'MEV '+lm.mev+' \u00b7 MAV '+lm.mav+' \u00b7 MRV '+lm.mrv:'';
+    const meta=rec?VOLUME_STATUS_META[rec.status]:null;
+    const chip=meta?statusChipHtml(meta.icon,meta.label,meta.color):'';
+    const needsReason=rec&&rec.status!=='building'&&rec.status!=='mav-to-mrv';
+    return '<div class="muscle-bar-wrap"><div class="muscle-bar-label"><span style="font-weight:600">'+m+'</span>'
+      +'<span style="display:flex;align-items:center;gap:6px"><span class="text3 small">'+ms[m]+' sets / '+getMuscleTrainingCadence(m)+'d</span>'+chip+'</span></div>'
+      +'<div class="muscle-bar-track"><div class="muscle-bar-fill" style="width:'+Math.round(ms[m]/maxS*100)+'%;background:'+(MUSCLE_COLORS[m]||'#aaa')+'"></div></div>'
+      +(lmCaption?'<div class="text3 small" style="text-align:right;margin-top:2px">'+lmCaption+'</div>':'')
+      +(needsReason?'<div class="small text2" style="margin-top:3px;line-height:1.4">'+rec.action+'</div>':'')
+      +'</div>';
   }).join('');
   const untrained=MUSCLE_GROUPS.filter(m=>!ms[m]&&m!=='Full Body');
   const sugg=[];
@@ -7939,11 +8090,9 @@ function renderReview(){
       if(ra>0&&rb===0)sugg.push({i:'⚖️',t:'Trained '+a+' but skipped '+b+' recently. Balancing these reduces injury risk.'});
       else if(ra>0&&rb>0&&ra/rb>2.5)sugg.push({i:'⚠️',t:a+' volume ('+ra+' sets) is much higher than '+b+' ('+rb+' sets). Add more '+b+' work.'});
     });
-    Object.keys(state.volumeLandmarks).forEach(m=>{
-      const rec=getVolumeRecommendation(m);
-      const icons={'pain-flag':'🛑','at-or-above-mrv':'🚧','high-fatigue':'😮\u200d💨','below-mev':'📉','building-poor-sfr':'🔍','building':'📈'};
-      if(icons[rec.status])sugg.push({i:icons[rec.status],t:rec.action});
-    });
+    // Per-muscle volume-recommendation lines used to also live here (one full sentence per
+    // landmark muscle, every week) — moved onto each muscle's own bar row above instead; this
+    // list is now only for things that AREN'T already tied to one specific muscle's bar.
     getPriorityImbalanceNotes().forEach(note=>sugg.push({i:'🎯',t:note}));
     if(consec>=5)sugg.push({i:'😴',t:consec+' consecutive days training. Schedule a rest day — muscles grow during recovery.'});
     if(!ms['Core'])sugg.push({i:'🔷',t:'No recent core work. 5 minutes of planks or crunches transfers to every lift.'});
@@ -8113,6 +8262,7 @@ function toggleSyncHelp(){
   el.style.display=el.style.display==='none'?'block':'none';
 }
 
+let gSilentAuthAttempt=false;
 function initGoogleSync(){
   const clientId=getGoogleClientId();
   const setupWrap=document.getElementById('sync-setup-wrap');
@@ -8142,9 +8292,30 @@ function initGoogleSync(){
       client_id:clientId,
       scope:DRIVE_SCOPE,
       callback:(resp)=>{
-        if(resp.error){alert('Google sign-in failed: '+resp.error);return;}
+        const wasSilent=gSilentAuthAttempt;
+        gSilentAuthAttempt=false;
+        if(resp.error){
+          // A silent (no-popup) refresh attempt failing just means the browser no longer has an
+          // active Google session to refresh from — expected sometimes, not worth an alert popup
+          // at app boot. An explicit, user-initiated sign-in failing (wasSilent===false) still
+          // surfaces the alert as before, since that's a direct response to their own tap.
+          if(!wasSilent)alert('Google sign-in failed: '+resp.error);
+          gAccessToken=null;gDriveFileId=null;
+          localStorage.removeItem('forge_g_token');
+          localStorage.removeItem('forge_g_token_exp');
+          if(setupWrap){setupWrap.style.display='none';signedOutWrap.style.display='block';signedInWrap.style.display='none';}
+          renderGoogleSyncBanner();
+          return;
+        }
         gAccessToken=resp.access_token;
-        sessionStorage.setItem('forge_g_token',gAccessToken);
+        // Access tokens from the browser-only OAuth flow expire (~1hr) with no refresh token
+        // issued — Google doesn't hand those to client-side apps for security reasons. Tracking
+        // the expiry lets the boot-time restore below tell "still valid, just reuse it" apart
+        // from "expired, needs a silent refresh attempt" instead of treating every saved token
+        // as good until an API call actually fails on it.
+        const expiresAt=Date.now()+((resp.expires_in||3600)*1000);
+        localStorage.setItem('forge_g_token',gAccessToken);
+        localStorage.setItem('forge_g_token_exp',String(expiresAt));
         onGoogleSignedIn();
       },
     });
@@ -8152,16 +8323,43 @@ function initGoogleSync(){
     console.error('GIS init error',e);
   }
 
-  // Restore session token if present
-  const savedToken=sessionStorage.getItem('forge_g_token');
-  if(savedToken){
+  // Restore a saved token if present — persisted in localStorage (not sessionStorage) so it
+  // survives the app being fully closed and relaunched, which is the normal lifecycle for an
+  // installed PWA on mobile (sessionStorage was being wiped on every relaunch, which is why
+  // sign-in kept appearing lost). If it's expired, attempt a silent (no-popup) refresh first,
+  // since the browser usually still has an active Google session — this is what actually lets
+  // sign-in "stay" across restarts, rather than just persisting an already-expired token. The
+  // Google Drive Home banner (renderGoogleSyncBanner) reflects whichever state this lands in.
+  const savedToken=localStorage.getItem('forge_g_token');
+  const savedExp=parseInt(localStorage.getItem('forge_g_token_exp')||'0',10);
+  if(savedToken&&Date.now()<savedExp){
     gAccessToken=savedToken;
     onGoogleSignedIn(true);
+  }else if(savedToken&&gTokenClient){
+    gSilentAuthAttempt=true;
+    try{gTokenClient.requestAccessToken({prompt:''});}catch(e){gSilentAuthAttempt=false;}
+    setupWrap.style.display='none';
+    signedOutWrap.style.display='block';
+    signedInWrap.style.display='none';
+    document.getElementById('sync-status-text').textContent='Reconnecting to Google\u2026';
   }else{
     setupWrap.style.display='none';
     signedOutWrap.style.display='block';
     signedInWrap.style.display='none';
   }
+  renderGoogleSyncBanner();
+}
+// Polls briefly for the Google Identity Services script (loaded async/defer in <head>, so it
+// isn't guaranteed ready the instant boot code runs) before attempting the token restore above
+// — without this, a boot-time initGoogleSync() call could race the script load and fall through
+// to initGoogleSync's own "needs an internet connection" fallback even while online, simply
+// because the script hadn't finished fetching yet. Gives up after ~6s and calls it anyway, which
+// falls through to that same offline-safe fallback UI if the script genuinely never loads.
+function initGoogleSyncWhenReady(retries){
+  if(!getGoogleClientId())return; // sync never configured — nothing to restore
+  if(typeof google!=='undefined'&&google.accounts){initGoogleSync();return;}
+  if(retries<=0){initGoogleSync();return;}
+  setTimeout(()=>initGoogleSyncWhenReady(retries-1),300);
 }
 
 function googleSignIn(){
@@ -8174,17 +8372,21 @@ function googleSignOut(){
     google.accounts.oauth2.revoke(gAccessToken,()=>{});
   }
   gAccessToken=null;gDriveFileId=null;
-  sessionStorage.removeItem('forge_g_token');
+  localStorage.removeItem('forge_g_token');
+  localStorage.removeItem('forge_g_token_exp');
   document.getElementById('sync-setup-wrap').style.display='none';
   document.getElementById('sync-signed-out-wrap').style.display='block';
   document.getElementById('sync-signed-in-wrap').style.display='none';
+  renderGoogleSyncBanner();
 }
+
 
 async function onGoogleSignedIn(silent){
   document.getElementById('sync-setup-wrap').style.display='none';
   document.getElementById('sync-signed-out-wrap').style.display='none';
   document.getElementById('sync-signed-in-wrap').style.display='block';
   document.getElementById('sync-status-text').textContent='Connected to Google Drive. Your data backs up to a private app folder in your Drive — only FORGE can access it.';
+  renderGoogleSyncBanner();
 
   // Fetch user email
   try{
