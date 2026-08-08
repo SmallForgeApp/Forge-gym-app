@@ -598,7 +598,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-08.4</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-08.6</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -3635,20 +3635,29 @@ function getMesoVolumeSuggestions(m,routineId){
 // entirely — see getEfficientVolumeMechanism). (3) needs \u22652 predicted normal sets — a swap
 // needs a REAL set to reference (myo extends it, a drop set drops from it); user's explicit
 // choice for a single-set exercise: skip it rather than swap using stale last-session numbers.
-// Predicted set count uses the same last-real-session lookback the time estimator already uses
-// — an approximation only, since the ramp's actual seeded count isn't known until
-// startRoutineWorkout actually builds it; the real ≥2 check runs again there before applying.
-function getEfficientVolumeEligibility(m,routineId){
+// Predicted set count (2026-08-08 fix) now comes from getPredictedSetCounts — the same real
+// buildRoutineSeedPlan-based prediction the Gym Setup preview and duration estimates already use
+// — rather than a separate, cruder "last real session's raw set count" lookback. That older
+// approximation could wrongly exclude an exercise the ramp had genuinely grown past 2 sets (if
+// its last LOGGED session happened to be a reset/deload rotation sitting at 1), with no fallback
+// the other direction — the real ≥2 check downstream (applyEfficientVolumeSwap, at apply time)
+// only catches false positives, never false negatives like that.
+function getEfficientVolumeEligibility(m,routineId,routineIdx){
   if(!m||m.phase!=='training'||!m.rirRampEnabled)return null;
   const rirInfo=getMesoTargetRIR(m);
   if(!rirInfo||rirInfo.deload||rirInfo.rir==null||rirInfo.rir>1)return null;
   const r=getRoutine(routineId);if(!r)return null;
+  const predicted=routineIdx!=null?getPredictedSetCounts(routineIdx):null;
   const exIds=[];
   (r.exerciseIds||[]).forEach(exId=>{
     const exData=getExercise(exId);if(!exData)return;
     if(!getEfficientVolumeMechanism(normalizeEquipmentTag(exData)))return;
-    let sc=3;
-    for(let i=state.history.length-1;i>=0;i--){const f=state.history[i].exercises.find(e=>e.exId===exId);if(f){sc=f.sets.filter(s=>s.done).length||3;break;}}
+    let sc;
+    if(predicted&&predicted[exId]!=null)sc=predicted[exId];
+    else{
+      sc=3;
+      for(let i=state.history.length-1;i>=0;i--){const f=state.history[i].exercises.find(e=>e.exId===exId);if(f){sc=f.sets.filter(s=>s.done).length||3;break;}}
+    }
     if(sc>=2)exIds.push(exId);
   });
   return exIds.length?exIds:null;
@@ -4662,7 +4671,7 @@ function beginRoutineWithSorenessCheck(i){
   const r=state.routines[i];
   const muscles=r?getRoutinePlannedMuscles(r):[];
   const activeMeso=activeMesoContext?state.mesocycles[activeMesoContext.mesoIdx]:null;
-  const efficientEligibility=(activeMeso&&r)?getEfficientVolumeEligibility(activeMeso,r.id):null;
+  const efficientEligibility=(activeMeso&&r)?getEfficientVolumeEligibility(activeMeso,r.id,i):null;
   if(!muscles.length&&!efficientEligibility){startRoutineWorkout(i);return;}
   pendingSorenessRoutineIdx=i;
   sorenessDraft={};
@@ -7136,7 +7145,13 @@ function reallyFinishWorkout(){
     const dSets=ex.sets.filter(s=>s.done);
     return'<div class="small text2" style="padding:3px 0">'+(exData?escHtml(exData.name):'?')+': '+dSets.length+' sets · '+dSets.reduce((a,s)=>a+(s.weight||0)*(s.reps||0),0).toFixed(0)+' kg</div>';
   }).join('');
-  const futureEst=estimateRoutineTime(activeWorkout.exercises.map(e=>e.exId),activeWorkout.sourceRoutineId);
+  // Predicted set counts here reflect the CURRENT rotation's meso state — advanceMesoProgress
+  // (below) hasn't run yet at this point in the function, so this is a same-rotation proxy for
+  // "next time," not the literally-advanced next rotation. Still meaningfully closer than the old
+  // pure last-logged-session lookback (ramp/Phase-B targets don't usually swing hugely rotation
+  // to rotation), without restructuring this function's ordering just for a summary-screen number.
+  const routineIdxForEst=activeWorkout.sourceRoutineId?state.routines.findIndex(rt=>rt.id===activeWorkout.sourceRoutineId):-1;
+  const futureEst=estimateRoutineTime(activeWorkout.exercises.map(e=>e.exId),activeWorkout.sourceRoutineId,routineIdxForEst>=0?getPredictedSetCounts(routineIdxForEst):null);
   document.getElementById('finish-summary').innerHTML=
     '<div class="summary-stat"><span>Duration</span><span class="summary-val">'+m+':'+String(s).padStart(2,'0')+'</span></div>'
     +'<div class="summary-stat"><span>Total Volume</span><span class="summary-val">'+vol.toFixed(0)+' kg</span></div>'
