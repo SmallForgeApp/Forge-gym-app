@@ -598,7 +598,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-08.2</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-08.4</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1513,16 +1513,17 @@ function load(){
     // "Bottom end" starting points (2026-08-06, per user's request as an experienced lifter who
     // found the original wider-range defaults too high to see the ramp actually move) — MEV
     // floor unchanged from the original defaults (the ramp already starts every pass there
-    // regardless), new MRV = what used to be MAV (roughly halves the ceiling's headroom), MAV
-    // recomputed as the midpoint. The adaptive landmark system (reassessVolumeLandmarks) still
-    // bumps MRV +1 after any pass hit cleanly with no fatigue flags — this is a conservative
-    // starting point to earn upward from, not a permanent ceiling.
+    // regardless), MAV recomputed as the midpoint. MRV values updated 2026-08-08 to the low end
+    // of RP Hypertrophy's own published table (see migration below for the full reasoning) — the
+    // original 2026-08-06 halving left MRV systematically below RP's numbers once compared
+    // directly. Still a starting point to earn upward from, not a permanent ceiling — the
+    // adaptive landmark system (reassessVolumeLandmarks) keeps nudging it after any clean pass.
     state.volumeLandmarks={
-      Chest:{mv:4,mev:8,mav:12,mrv:16},Back:{mv:6,mev:10,mav:14,mrv:18},
-      Shoulders:{mv:4,mev:8,mav:14,mrv:20},Biceps:{mv:4,mev:8,mav:12,mrv:16},
-      Triceps:{mv:2,mev:6,mav:9,mrv:12},Quads:{mv:4,mev:8,mav:11.5,mrv:15},
-      Hamstrings:{mv:2,mev:6,mav:9,mrv:12},Glutes:{mv:0,mev:4,mav:7,mrv:10},
-      Core:{mv:0,mev:6,mav:10,mrv:14},Calves:{mv:4,mev:8,mav:11,mrv:14}
+      Chest:{mv:4,mev:8,mav:12,mrv:20},Back:{mv:6,mev:10,mav:14,mrv:20},
+      Shoulders:{mv:4,mev:8,mav:14,mrv:20},Biceps:{mv:4,mev:8,mav:12,mrv:20},
+      Triceps:{mv:2,mev:6,mav:9,mrv:20},Quads:{mv:4,mev:8,mav:11.5,mrv:18},
+      Hamstrings:{mv:2,mev:6,mav:9,mrv:13},Glutes:{mv:0,mev:4,mav:7,mrv:13},
+      Core:{mv:0,mev:6,mav:10,mrv:25},Calves:{mv:4,mev:8,mav:11,mrv:20}
     };
   }
   // One-time forced migration (2026-08-06, user's explicit request): existing installs still
@@ -1534,14 +1535,37 @@ function load(){
     const stillOnOldDefaults=Object.keys(oldDefaultMrv).every(m=>state.volumeLandmarks[m]&&state.volumeLandmarks[m].mrv===oldDefaultMrv[m]);
     if(stillOnOldDefaults){
       state.volumeLandmarks={
-        Chest:{mv:4,mev:8,mav:12,mrv:16},Back:{mv:6,mev:10,mav:14,mrv:18},
-        Shoulders:{mv:4,mev:8,mav:14,mrv:20},Biceps:{mv:4,mev:8,mav:12,mrv:16},
-        Triceps:{mv:2,mev:6,mav:9,mrv:12},Quads:{mv:4,mev:8,mav:11.5,mrv:15},
-        Hamstrings:{mv:2,mev:6,mav:9,mrv:12},Glutes:{mv:0,mev:4,mav:7,mrv:10},
-        Core:{mv:0,mev:6,mav:10,mrv:14},Calves:{mv:4,mev:8,mav:11,mrv:14}
+        Chest:{mv:4,mev:8,mav:12,mrv:20},Back:{mv:6,mev:10,mav:14,mrv:20},
+        Shoulders:{mv:4,mev:8,mav:14,mrv:20},Biceps:{mv:4,mev:8,mav:12,mrv:20},
+        Triceps:{mv:2,mev:6,mav:9,mrv:20},Quads:{mv:4,mev:8,mav:11.5,mrv:18},
+        Hamstrings:{mv:2,mev:6,mav:9,mrv:13},Glutes:{mv:0,mev:4,mav:7,mrv:13},
+        Core:{mv:0,mev:6,mav:10,mrv:25},Calves:{mv:4,mev:8,mav:11,mrv:20}
       };
     }
     state.volumeLandmarksBottomEndMigrated=true;
+  }
+  // One-time forced migration (2026-08-08, user's explicit request — "the MRV numbers need to be
+  // upped against the RP table"): the 2026-08-06 "bottom end" MRVs were a deliberate halving to
+  // make the ramp actually move, but came out systematically low once directly compared against
+  // RP Hypertrophy's own published landmark table (screenshot comparison, 2026-08-07) — Triceps,
+  // Calves, and Core were roughly HALF of RP's low end. New values use the LOW end of RP's
+  // published MRV range per muscle (RP gives a range since MRV is genuinely individual; the low
+  // end is the conservative, defensible single number to ship as a default). MV/MEV/MAV
+  // deliberately untouched — those already lined up closely with RP's table in the comparison and
+  // weren't part of this ask. Shoulders has no RP equivalent (RP splits Front/Side/Rear-Delts,
+  // each with very different numbers, e.g. Side-Delts alone runs 25-40) and is left exactly as-is
+  // rather than guessed at. Gated the same way as the 2026-08-06 migration above: only fires if
+  // every mrv still exactly matches the bottom-end defaults, so a customized value in Settings is
+  // never touched.
+  if(!state.volumeLandmarksRPMrvMigrated){
+    const bottomEndMrv={Chest:16,Back:18,Shoulders:20,Biceps:16,Triceps:12,Quads:15,Hamstrings:12,Glutes:10,Core:14,Calves:14};
+    const stillOnBottomEnd=Object.keys(bottomEndMrv).every(m=>state.volumeLandmarks[m]&&state.volumeLandmarks[m].mrv===bottomEndMrv[m]);
+    if(stillOnBottomEnd){
+      // Shoulders intentionally omitted — no clean RP equivalent, left unchanged.
+      const newMrv={Chest:20,Back:20,Biceps:20,Triceps:20,Quads:18,Hamstrings:13,Glutes:13,Core:25,Calves:20};
+      Object.keys(newMrv).forEach(m=>{if(state.volumeLandmarks[m])state.volumeLandmarks[m].mrv=newMrv[m];});
+    }
+    state.volumeLandmarksRPMrvMigrated=true;
   }
   if(!state.musclePriority)state.musclePriority={};
   Object.keys(state.volumeLandmarks).forEach(m=>{if(!state.musclePriority[m])state.musclePriority[m]='normal';});
@@ -1773,10 +1797,10 @@ function getLastSets(exId,routineId){
   }
   return fallback||[];
 }
-// Partials sets are auto-added (not part of the routine template) on the last training rotation
-// before a deload, so they don't replay via the normal getLastSets prev-session logic — this
-// looks specifically for the last time THIS exercise had a completed Partials set, so its count
-// can be shown as a placeholder next time around.
+// Partials sets are never part of the routine template (manual-only since 2026-08-07.9 — see
+// SET_TYPES) and never replay via the normal getLastSets prev-session logic — this looks
+// specifically for the last time THIS exercise had a completed Partials set, so its count can be
+// shown as a placeholder next time one gets added again.
 function getLastPartialSet(exId){
   for(let i=0;i<state.history.length;i++){
     const w=state.history[i];
@@ -4455,7 +4479,7 @@ function openGymSetupPreview(i){
   }else{
     // BUG FIX (2026-08-07): this used to compute its own set count independently — "however many
     // sets were done last time this exercise was logged, anywhere" — which ignored the ramp
-    // target, deload/reset baseline, and Partials that actually decide what Start seeds. Now
+    // target and deload/reset baseline that actually decide what Start seeds. Now
     // reuses buildRoutineSeedPlan (commit:false — no side effects), the exact same function
     // startRoutineWorkout itself calls, so this can't drift out of sync again. One deliberate
     // scoping gap: Efficient Volume is an opt-in toggle the person sees AFTER this preview, in
@@ -4750,7 +4774,7 @@ function confirmSorenessAndStart(){
 // (startRoutineWorkout) and the read-only Gym Setup preview modal (openGymSetupPreview), so the
 // two can never drift out of sync. BUG FIXED (2026-08-07): the preview used to compute its own,
 // completely separate "however many sets were last logged for this exercise, anywhere" number —
-// ignoring the ramp target, deload/reset baseline, and Partials that actually decide the real
+// ignoring the ramp target and deload/reset baseline that actually decide the real
 // count, so the preview routinely didn't match what Start actually produced.
 // `commit` gates the ONE side effect in this pipeline (Phase B's extraRotationCredits grant,
 // see getMesoVolumeSuggestions) — false for a preview call, true only when a workout is actually
