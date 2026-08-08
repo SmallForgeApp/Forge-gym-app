@@ -598,7 +598,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-07.8</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-08.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1173,7 +1173,7 @@ const SET_TYPES=[
   {id:'feeder',label:'Feeder',desc:'Pump / blood flow set',badgeClass:'badge-feeder'},
   {id:'back',label:'Back-Off',desc:'Lower intensity after heavy',badgeClass:'badge-back'},
   {id:'1rm',label:'1RM',desc:'Max effort single',badgeClass:'badge-1rm'},
-  {id:'partials',label:'Partials',desc:'Beyond-failure partials, pre-deload only',badgeClass:'badge-partials'},
+  {id:'partials',label:'Partials',desc:'Beyond-failure partials',badgeClass:'badge-partials'},
 ];
 const MUSCLE_GROUPS=['Chest','Back','Shoulders','Biceps','Triceps','Quads','Hamstrings','Glutes','Core','Calves','Full Body'];
 const MUSCLE_PAIRS={Chest:'Back',Back:'Chest',Biceps:'Triceps',Triceps:'Biceps',Quads:'Hamstrings',Hamstrings:'Quads'};
@@ -1592,12 +1592,23 @@ function getRoutineHistorySessions(routineId,limit){
   const pool=state.history.filter(w=>w.routineId===routineId&&w.duration>0).slice(0,(limit||8)*3);
   return filterPlausibleSessions(pool).slice(0,limit||8);
 }
-function formatMinRange(t){
-  const m=Math.round(t/60),lo=Math.max(5,Math.round((m-10)/5)*5),hi=Math.round((m+10)/5)*5;
-  return lo+'–'+hi+' min';
+// `isFloor` (2026-08-08, user's correction): a real historical average already reflects true
+// wall-clock elapsed time — equipment moves, checking your phone, resting a bit past the timer
+// before actually moving the weight, all of it — because it's measured from real sessions. The
+// pure formula fallback (< 2 real sessions logged yet) only sums realistic REST + a flat per-set
+// work estimate — a genuine physical floor, not a realistic estimate; real sessions can only run
+// long from there, never short. A flat +30% buffer approximates that real-world overhead for the
+// single number shown. User's follow-up (2026-08-08): dropped the lo–hi range entirely in favor
+// of one plain number — simpler to read, and the range's low end read as "achievable" when, for a
+// floor-only estimate, it never really was.
+function formatMinutes(t,isFloor){
+  const buffered=isFloor?t*1.3:t;
+  const m=Math.max(5,Math.round(buffered/60/5)*5);
+  return '~'+m+' min';
 }
 // exerciseIds/routineId are used to fall back to the old formula estimate when there isn't yet
 // enough real history; totalSets is the actual/predicted set count to scale the real average by.
+// Returns {sec,isFloor} — see formatMinutes for what isFloor changes about the displayed number.
 function estimateSecondsForSets(totalSets,exerciseIds,routineId){
   const sessions=getRoutineHistorySessions(routineId,8);
   if(sessions.length>=2){
@@ -1606,7 +1617,7 @@ function estimateSecondsForSets(totalSets,exerciseIds,routineId){
       const doneSets=w.exercises.reduce((a,ex)=>a+ex.sets.filter(s=>s.done).length,0);
       if(doneSets>0){totalSec+=w.duration;totalDoneSets+=doneSets;}
     });
-    if(totalDoneSets>0)return(totalSec/totalDoneSets)*totalSets;
+    if(totalDoneSets>0)return{sec:(totalSec/totalDoneSets)*totalSets,isFloor:false};
   }
   let t=0;
   (exerciseIds||[]).forEach(exId=>{
@@ -1614,17 +1625,39 @@ function estimateSecondsForSets(totalSets,exerciseIds,routineId){
     for(let i=state.history.length-1;i>=0;i--){const f=state.history[i].exercises.find(e=>e.exId===exId);if(f){sc=f.sets.filter(s=>s.done).length||3;break;}}
     t+=sc*45+(sc-1)*getSetRestTime(exId)+60;
   });
-  return t;
+  return{sec:t,isFloor:true};
 }
-function estimateRoutineTime(exerciseIds,routineId){
+function estimateRoutineTime(exerciseIds,routineId,predictedSetsByExId){
   if(!exerciseIds||!exerciseIds.length)return null;
   let predictedSets=0;
   exerciseIds.forEach(exId=>{
+    if(predictedSetsByExId&&predictedSetsByExId[exId]!=null){predictedSets+=predictedSetsByExId[exId];return;}
     let sc=3;
     for(let i=state.history.length-1;i>=0;i--){const f=state.history[i].exercises.find(e=>e.exId===exId);if(f){sc=f.sets.filter(s=>s.done).length||3;break;}}
     predictedSets+=sc;
   });
-  return formatMinRange(estimateSecondsForSets(predictedSets,exerciseIds,routineId));
+  const est=estimateSecondsForSets(predictedSets,exerciseIds,routineId);
+  return formatMinutes(est.sec,est.isFloor);
+}
+// BUG FIX (2026-08-07): estimateRoutineTime's own per-exercise lookback ("however many sets were
+// done last time, anywhere") had the exact same drift-from-reality problem the Gym Setup preview
+// had — it ignored the ramp target, deload/reset baseline, and Phase B's extra sets, so the
+// displayed duration range could sit well under what a session with real rest times actually
+// takes. This reuses buildRoutineSeedPlan (commit:false, no side effects) — the same real seeding
+// logic startRoutineWorkout itself runs — so the duration estimate and the Gym Setup preview's set
+// counts can't drift apart from each other or from what Start actually produces. Returns null
+// (falls back to the old per-exercise lookback inside estimateRoutineTime) when there's no active
+// mesocycle to seed from — nothing more accurate to offer in that case.
+function getPredictedSetCounts(routineIdx){
+  const plan=buildRoutineSeedPlan(routineIdx,false);
+  if(!plan||!plan.activeMeso)return null;
+  const map={};
+  plan.exercises.forEach(ex=>{
+    let n=(ex.sets||[]).length;
+    if(plan.addSetExIds.has(ex.exId))n+=1; // ramp-due extra set — always-on, applied via addSet() post-beginWorkout in the real path
+    map[ex.exId]=n;
+  });
+  return map;
 }
 // EFFICIENT VOLUME feature (redesigned 2026-08-06): a myo-burst or drop-set chain replacing one
 // full normal set takes meaningfully less time than that set would have — no fresh rest period,
@@ -1683,7 +1716,7 @@ function updateWorkoutEstimate(){
   const totalSets=activeWorkout.exercises.reduce((a,ex)=>a+ex.sets.length,0);
   const exIds=activeWorkout.exercises.map(e=>e.exId);
   const t=estimateSecondsForSets(totalSets,exIds,activeWorkout.sourceRoutineId);
-  el.textContent='Estimated: '+formatMinRange(t);
+  el.textContent='Estimated: '+formatMinutes(t.sec,t.isFloor);
 }
 
 // ── 1RM (Epley) ──
@@ -2655,7 +2688,7 @@ function renderActiveMesoHero(){
     const showBtn='<button onclick="event.stopPropagation();toggleMesoExList(\'' +exListId+ '\')" style="background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text3);font-size:10px;padding:2px 7px;cursor:pointer;flex-shrink:0">'+n+' ex</button>';
 
     if(isNext){
-      const est=estimateRoutineTime(r.exerciseIds||[],r.id)||'—';
+      const est=estimateRoutineTime(r.exerciseIds||[],r.id,getPredictedSetCounts(state.routines.indexOf(r)))||'—';
       return '<div style="background:linear-gradient(90deg,var(--accent)18,var(--accent)05);border:1px solid var(--accent)44;border-radius:14px;padding:14px;margin:8px 0;cursor:pointer" onclick="openGymSetupPreview('+state.routines.indexOf(r)+')">'
         +'<div style="display:flex;align-items:center;gap:10px">'
         +'<div style="width:32px;height:32px;border-radius:10px;background:var(--accent);color:#0F1117;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;flex-shrink:0">'+(idx+1)+'</div>'
@@ -4477,7 +4510,7 @@ function openRoutineDetail(i){
   viewingRoutineIdx=i;const r=state.routines[i];
   document.getElementById('rd-title').textContent=r.name;
   const n=(r.exerciseIds||[]).length;
-  const est=estimateRoutineTime(r.exerciseIds||[],r.id);
+  const est=estimateRoutineTime(r.exerciseIds||[],r.id,getPredictedSetCounts(i));
   document.getElementById('rd-meta').innerHTML=(r.desc?escHtml(r.desc)+' &middot; ':'')+n+' exercise'+(n!==1?'s':'')+(est?' &middot; <span style="color:var(--accent2)">⏱ '+est+'</span>':'');
   const mh=state.history.filter(w=>{const ids=w.exercises.map(e=>e.exId);return (r.exerciseIds||[]).length>0&&(r.exerciseIds||[]).every(id=>ids.includes(id));}).sort((a,b)=>new Date(b.date)-new Date(a.date));
   const lw=mh[0];
@@ -4646,11 +4679,26 @@ function renderEfficientVolumeToggle(r,activeMeso,eligibility){
   });
   const savedSec=estimateEfficientVolumeSavings(eligibility,mechanismByExId,r.id);
   const savedLabel=savedSec>=60?Math.round(savedSec/60)+' min':Math.round(savedSec)+' sec';
+  // Absolute Off-vs-On session time (2026-08-07, user's ask — the toggle used to only show the
+  // savings delta, not what either option actually comes out to). Real predicted set counts come
+  // from the same buildRoutineSeedPlan pipeline as the Gym Setup preview/duration estimates
+  // (getPredictedSetCounts), falling back to the plain per-exercise lookback when there's no
+  // active meso to seed from — same fallback estimateRoutineTime itself uses.
+  const predictedSetsByExId=getPredictedSetCounts(pendingSorenessRoutineIdx!=null?pendingSorenessRoutineIdx:state.routines.indexOf(r));
+  let predictedSets=0;
+  (r.exerciseIds||[]).forEach(exId=>{
+    if(predictedSetsByExId&&predictedSetsByExId[exId]!=null){predictedSets+=predictedSetsByExId[exId];return;}
+    let sc=3;
+    for(let i=state.history.length-1;i>=0;i--){const f=state.history[i].exercises.find(e=>e.exId===exId);if(f){sc=f.sets.filter(s=>s.done).length||3;break;}}
+    predictedSets+=sc;
+  });
+  const offEst=estimateSecondsForSets(predictedSets,r.exerciseIds||[],r.id);
+  const onSec=Math.max(0,offEst.sec-savedSec);
   document.getElementById('efficient-volume-options').innerHTML=
     '<button class="btn btn-sm volume-mode-btn'+(!pendingEfficientVolumeOn?' active':'')+'" onclick="setPendingEfficientVolumeOn(false)" style="display:block;width:100%;text-align:left;margin-bottom:6px">'
-    +'<span class="bold">Off</span> — <span class="text3 small">Last set trained as normal</span></button>'
+    +'<span class="bold">Off</span> — <span class="text3 small">Last set trained as normal \u00b7 '+formatMinutes(offEst.sec,offEst.isFloor)+'</span></button>'
     +'<button class="btn btn-sm volume-mode-btn'+(pendingEfficientVolumeOn?' active':'')+'" onclick="setPendingEfficientVolumeOn(true)" style="display:block;width:100%;text-align:left">'
-    +'<span class="bold">On</span> — <span class="text3 small">Swap last set for myo-rep/drop-set, same volume, saves ~'+savedLabel+'</span></button>';
+    +'<span class="bold">On</span> — <span class="text3 small">Swap last set for myo-rep/drop-set, same volume \u00b7 '+formatMinutes(onSec,offEst.isFloor)+' (saves ~'+savedLabel+')</span></button>';
 }
 function setPendingEfficientVolumeOn(on){
   pendingEfficientVolumeOn=on;
@@ -4711,19 +4759,6 @@ function confirmSorenessAndStart(){
 function buildRoutineSeedPlan(routineIdx,commit){
   const r=state.routines[routineIdx];if(!r)return null;
   const activeMeso=activeMesoContext?state.mesocycles[activeMesoContext.mesoIdx]:null;
-  // The Partials set (beyond-failure partials) only ever gets auto-added on the final training
-  // rotation of a pass, right before a deload — never saved to the routine, never carried into
-  // any other rotation. rotationsDone is the count of ALREADY-completed rotations, so the one
-  // about to start is rotationsDone+1; when that equals rotationsPerMeso, this is treated as the
-  // likely last one. BUG FIXED (2026-08-05): under the MV\u2192MRV redesign, deload-enabled mesos
-  // no longer end training on reaching rotationsPerMeso (see advanceMesoProgress) — it's now
-  // stall-check triggered, so this used to stay true on every rotation PAST the configured count
-  // too (>= never resets), adding Partials repeatedly instead of once. Changed to ===, an exact
-  // one-shot match at the configured count. NOTE this is now a best guess, not a guarantee — the
-  // actual last rotation is only known retroactively once the stall check fires on a completed
-  // workout, which can't be known in advance at the start of the NEXT one.
-  const lastCycleBeforeDeload=!!(activeMeso&&activeMeso.phase==='training'&&activeMeso.deloadEnabled
-    &&((activeMeso.rotationsDone||0)+1)===(activeMeso.rotationsPerMeso||1));
   // Same target used for the "aim for N RIR today" banner — reused below to pre-fill each
   // working set's RPE/RIR field to what THIS cycle is actually asking for, rather than whatever
   // was hit last session (which reflects last session's effort, not today's target).
@@ -4837,19 +4872,9 @@ function buildRoutineSeedPlan(routineIdx,commit){
       const aimRIR=mesoRIRInfo.rir;
       sets=sets.map(s=>(!s.type||s.type==='normal')?{...s,rpe:useRIR?aimRIR:(10-aimRIR)}:s);
     }
-    if(lastCycleBeforeDeload&&!ex.excludePartials){
-      const lastPartial=getLastPartialSet(id);
-      sets=[...sets,{type:'partials',weight:0,reps:0,repsL:0,repsR:0,rpe:null,done:false,
-        prevWeight:(lastPartial&&lastPartial.weight)||0,prevReps:(lastPartial&&lastPartial.reps)||0,
-        prevRepsL:(lastPartial&&lastPartial.repsL)||0,prevRepsR:(lastPartial&&lastPartial.repsR)||0}];
-    }
     return{exId:id,sets,supersetGroup:sg,repRange,useRIR};
   }).filter(Boolean);
-  if(lastCycleBeforeDeload){
-    const partialsMsg='Final rotation before deload — Partials added to push past failure.';
-    mesoNote=mesoNote?mesoNote+' '+partialsMsg:partialsMsg;
-  }
-  return{r,activeMeso,lastCycleBeforeDeload,mesoRIRInfo,volSuggestions,addSetExIds,exercises,mesoNote};
+  return{r,activeMeso,mesoRIRInfo,volSuggestions,addSetExIds,exercises,mesoNote};
 }
 function startRoutineWorkout(i,sorenessScores,volumeMode,efficientVolumeOn){
   volumeMode=volumeMode||'extra'; // other direct entry points (meso quick-start, Revisit, Routine Detail Start) bypass the picker — default preserves today's existing always-auto-add behavior for them
@@ -7310,8 +7335,6 @@ function renderExRow(r,muscle,list){
     }
   }
   if(soloEx){
-    const excluded=!!soloEx.excludePartials;
-    dropdownItems+='<div class="r-dropdown-item" onclick="event.stopPropagation();toggleExcludePartials(\''+soloEx.id+'\');closeAllDropdowns()">'+(excluded?'☑':'☐')+' Exclude from Partials (pre-deload)</div>';
     dropdownItems+='<div class="r-dropdown-item" onclick="event.stopPropagation();openMergeExerciseModal(\''+soloEx.id+'\');closeAllDropdowns()">'+uiIcon('merge',15,'currentColor')+' Merge into...</div>';
   }
 
@@ -7552,11 +7575,6 @@ function customizeLibraryVariant(rowIdx){
   const r=libRowRegistry[rowIdx];if(!r)return;
   closeAllDropdowns();
   openLibraryEditModal(r.muscle,r.name,null);
-}
-function toggleExcludePartials(exId){
-  const ex=getExercise(exId);if(!ex)return;
-  ex.excludePartials=!ex.excludePartials;
-  save();renderExerciseDB();
 }
 let mergeSourceExId=null;
 // Efficient Volume's equipment vocabulary — what getEfficientVolumeMechanism/normalizeEquipmentTag
