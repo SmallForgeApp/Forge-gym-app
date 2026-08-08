@@ -598,7 +598,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-08.1</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-08.2</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -5466,6 +5466,22 @@ function getSetTarget(exId,workoutEx,setIdx,exData,routineId){
       targetWeight=w;
     }
   }
+  // "Too Much" Workload (2026-08-08, user's explicit ask — "wire the too much"): the top option
+  // on the reworded Workload question is "extreme fatigue/cramping", the same real severity class
+  // as sharp joint pain — until now it was only averaged into a muscle-wide SFR check, so a single
+  // "Too Much" rating just got diluted away and never actually changed anything for THIS exercise
+  // next time. Gated and backed off the same way jointPain>=2 is, same plain-cross-session-only
+  // scope, stacking on top of whatever jointPain already did above.
+  const lastWorkloadTooMuch=getLastWorkloadTooMuch(exId);
+  if(lastWorkloadTooMuch){
+    if(!isBW){
+      targetWeight=Math.max(0,Math.round((targetWeight-inc)*100)/100);
+      targetReps=range.min;
+    }else{
+      targetReps=Math.max(1,Math.round(targetReps*0.85));
+      targetWeight=w;
+    }
+  }
   return isUni?{weight:targetWeight,repsL:mesoRepsL!=null?mesoRepsL:targetReps,repsR:mesoRepsR!=null?mesoRepsR:targetReps}:{weight:targetWeight,reps:targetReps};
 }
 // The most recent logged session's own feedback for THIS exercise — not just muscle-level
@@ -5478,6 +5494,15 @@ function getLastJointPain(exId){
     if(ex)return ex.feedback&&ex.feedback.jointPain!=null?ex.feedback.jointPain:null;
   }
   return null;
+}
+// Same scope/shape as getLastJointPain, checking Workload's top option instead (score 3 —
+// "Too Much"/extreme fatigue or cramping, see PEF_FIELDS). See getSetTarget's usage above.
+function getLastWorkloadTooMuch(exId){
+  for(let i=0;i<state.history.length;i++){
+    const ex=(state.history[i].exercises||[]).find(e=>e.exId===exId);
+    if(ex)return!!(ex.feedback&&ex.feedback.challenge===3);
+  }
+  return false;
 }
 // Pairwise performance comparison between two sets of the same slot: +1 = b is better than a,
 // -1 = b is worse, 0 = equal (or not comparable). Weight first, then reps, then effort as the
@@ -5738,6 +5763,33 @@ function getMuscleSorenessWarningHtml(muscle){
   if(score===3)return'<div class="exercise-soreness-warn severe">\ud83d\uded1 '+escHtml(muscle)+' rated extremely sore today \u2014 consider swapping this exercise or using it as active recovery.</div>';
   return'';
 }
+// Feedback trend for THIS specific exercise, not rolled up to muscle (2026-08-08, user's explicit
+// ask: "Post exercise feedback should be more than just muscle" — getMuscleSFRSignal/
+// getVolumeRecommendation only ever average pump/challenge/jointPain across every exercise for a
+// muscle, so a pattern on one specific exercise could get diluted away by whatever its siblings
+// are doing that week and never surface anywhere). Same "last session(s), not a rolling average"
+// scope as getLastJointPain/getLastWorkloadTooMuch above — a recent pattern on THIS exercise,
+// surfaced right when you're about to do it again, is the "days to think about technique or
+// switching exercises" the user described liking about the muscle-level version.
+function getLastNExerciseFeedback(exId,n){
+  const out=[];
+  for(let i=0;i<state.history.length&&out.length<n;i++){
+    const ex=(state.history[i].exercises||[]).find(e=>e.exId===exId);
+    if(ex)out.push(ex.feedback||null); // logged but no feedback given still counts as "the session" so a same-value streak below can't silently skip past it
+  }
+  return out;
+}
+function getExerciseFeedbackWarningHtml(exId){
+  const recent=getLastNExerciseFeedback(exId,2);
+  const last=recent[0];
+  if(!last)return'';
+  if(last.jointPain>=2)return'<div class="exercise-soreness-warn severe">\ud83d\uded1 Joint pain flagged last session on this exercise \u2014 target backed off automatically. Ease in and stop if it repeats.</div>';
+  if(last.jointPain===1)return'<div class="exercise-soreness-warn mod">\u26a0\ufe0f Mild joint ache reported last session on this exercise \u2014 keep an eye on how it feels today.</div>';
+  if(last.challenge===3)return'<div class="exercise-soreness-warn severe">\ud83d\udd25 Rated Too Much last session \u2014 target backed off automatically. Worth checking form, or swapping this exercise if it keeps happening.</div>';
+  if(recent.length===2&&recent[1]&&last.challenge===0&&last.pump===0&&recent[1].challenge===0&&recent[1].pump===0)
+    return'<div class="exercise-soreness-warn mod">\ud83d\udd0d Rated Easy with flat pump the last two sessions \u2014 worth checking your setup/technique, or considering a swap.</div>';
+  return'';
+}
 function buildExerciseCard(exIdx){
   const ex=activeWorkout.exercises[exIdx];
   const exData=getExercise(ex.exId)||{name:'Unknown',muscle:'',machine:'',secondary:'',note:'',bw:'no'};
@@ -5746,6 +5798,7 @@ function buildExerciseCard(exIdx){
   if(ex.repRange&&ex.repRange.max)metaParts.push('Target '+ex.repRange.min+'\u2013'+ex.repRange.max+' reps');
   const noteHtml=exData.note?'<div class="note-row"><span class="note-icon">📌</span><span class="note-text">'+escHtml(exData.note)+'</span></div>':'';
   const sorenessHtml=getMuscleSorenessWarningHtml(exData.muscle);
+  const exFeedbackHtml=getExerciseFeedbackWarningHtml(ex.exId);
   const sugg=suggestNextLoad(ex.exId,ex,activeWorkout.sourceRoutineId);
   const suggText=sugg?('\ud83d\udca1 Set '+(sugg.setIdx+1)+(sugg.isLive?' just now':' last time')+': '+(sugg.w?sugg.w+'kg \u00d7 ':'')+sugg.r+'r'+sugg.effortLbl+' \u2192 '+escHtml(sugg.text)):'';
   const suggHtml='<div class="small" id="tip-'+exIdx+'" style="padding:2px 16px 10px;color:var(--accent2)">'+suggText+'</div>';
@@ -5762,6 +5815,7 @@ function buildExerciseCard(exIdx){
     +'<button class="btn btn-danger btn-sm" onclick="removeExercise('+exIdx+')">✕</button></div></div>'
     +noteHtml
     +sorenessHtml
+    +exFeedbackHtml
     +suggHtml
     +missHtml
     +'<table class="set-table"><thead><tr>'
