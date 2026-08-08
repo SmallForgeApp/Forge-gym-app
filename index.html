@@ -598,7 +598,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-07.5</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-07.8</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1023,7 +1023,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div class="modal-body">
       <div class="input-label">Rotations per mesocycle</div>
       <input id="meso-set-rotations" type="number" inputmode="numeric" min="1"/>
-      <div class="small text3 mt4" style="line-height:1.5">A rotation = completing every routine in the sequence once. Paces the volume and RIR ramps (early rotations near MEV/higher RIR, this one at MRV/your final RIR target) — with deload enabled, it's not a hard cutoff: training keeps going past it until a real decline shows up, gaining a bit more volume each extra rotation.</div>
+      <div class="small text3 mt4" style="line-height:1.5">A rotation = completing every routine in the sequence once. Paces the volume and RIR ramps (early rotations near MEV/higher RIR, this one at MAV/your final RIR target) — with deload enabled, it's not a hard cutoff: training keeps going past it until a real decline shows up, gaining a bit more volume each extra rotation, up to each muscle's own MRV.</div>
 
       <div class="input-label mt12">Times to repeat this mesocycle</div>
       <input id="meso-set-repeats" type="number" inputmode="numeric" min="0"/>
@@ -1102,7 +1102,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <div id="meso-early-deload-fields">
         <div class="input-label mt12">Exercises declining (threshold)</div>
         <input id="meso-set-decline-count" type="number" inputmode="numeric" min="1"/>
-        <div class="small text3 mt4" style="line-height:1.5">This is now the only thing that ends a deload-enabled mesocycle's training phase — there's no separate scheduled deload. Main driver: this many exercises' top sets declining against their last two sessions (checked every workout, including past the rotation count above). Effort hitting your final RIR target only counts as a second signal while you're genuinely still earlier than the rotation count above — reaching it on schedule, or training there for extra rotations, is expected and won't by itself trigger a deload.</div>
+        <div class="small text3 mt4" style="line-height:1.5">This is now the only thing that ends a deload-enabled mesocycle's training phase — there's no separate scheduled deload. Main driver: this many exercises' top sets declining against their last two sessions (checked every workout, including past the rotation count above). Effort hitting your final RIR target ahead of schedule (before the rotation count above) is a second, weaker signal — it always asks first regardless of the mode above, since training that hard early can just be your own choice rather than a sign the pass is done. Only when it lines up with an actual decline does the mode above decide whether to ask or deload automatically.</div>
       </div>
     </div>
     <div class="modal-actions">
@@ -3451,9 +3451,10 @@ function getRecentNormalTopSets(exId,count){
 // just add fatigue without payoff. Purely a suggestion shown at workout start; never changes
 // the routine itself.
 // MV\u2192MRV redesign: how far through this pass's volume ramp the CURRENT rotation sits, as a
-// 0-1 fraction from MEV to MRV. rotationsDone+1 is the rotation about to be trained. Capped at 1
-// so a pass that's still going past its configured rotationsPerMeso (because the stall check
-// hasn't fired yet) holds at the MRV ceiling rather than extrapolating the ramp past 100%.
+// 0-1 fraction from MEV to MAV (see 2026-08-07 note on getMesoMuscleVolumeTarget below for why
+// MAV, not MRV). rotationsDone+1 is the rotation about to be trained. Capped at 1 so a pass
+// that's still going past its configured rotationsPerMeso (because the stall check hasn't fired
+// yet) holds at the Phase A ceiling rather than extrapolating the ramp past 100%.
 function getMesoRampFraction(m){
   const total=m.rotationsPerMeso||1;
   const rotNum=(m.rotationsDone||0)+1;
@@ -3479,13 +3480,22 @@ function getMesoRoutineSiblingExIds(routineId,muscle){
   return(r.exerciseIds||[]).filter(sid=>{const e=getExercise(sid);return e&&e.muscle===muscle;});
 }
 // The volume ramp's target TOTAL weekly-equivalent set count for one muscle at the current
-// rotation \u2014 the actual primary progression axis under this redesign, not a bonus layered on
-// top of the RIR ramp. Linearly interpolates the muscle's own MEV\u2192MRV landmarks by the ramp
-// fraction above, so early rotations sit near MEV and later ones climb toward MRV.
+// rotation — the actual primary progression axis under this redesign, not a bonus layered on
+// top of the RIR ramp. CHANGED 2026-08-07: Phase A now climbs MEV\u2192MAV, not MEV\u2192MRV. Reason
+// (user's explicit correction): the ramp used to interpolate straight to whatever MRV was
+// configured, over the SAME fixed rotationsPerMeso regardless of that number — so raising MRV
+// (e.g. to line up with a published landmark table) made the ramp steeper, not longer, which is
+// the wrong kind of change. MAV is a much gentler, more stable climb across configurations.
+// Anything past MAV is now Phase B's job (getMesoVolumeSuggestions, extraIdx>0 branch) — +1 set
+// per muscle per routine per extra rotation, already gated on the muscle's own configured MRV as
+// a soft per-muscle ceiling (rec.vol>=mrv holds it there) and on pain/high-fatigue flags. That
+// ceiling only ever holds volume steady for that one muscle — it has no path to end the training
+// phase or trigger deload; the stall check (decline across sessions, mainly) is the only trigger
+// for that, completely independent of any muscle's volume relative to its MRV.
 function getMesoMuscleVolumeTarget(m,muscle){
   const lm=getMuscleLandmarks(muscle);
   const frac=getMesoRampFraction(m);
-  return Math.round(lm.mev+(lm.mrv-lm.mev)*frac);
+  return Math.round(lm.mev+(lm.mav-lm.mev)*frac);
 }
 function getMesoVolumeSuggestions(m,routineId){
   if(!m||m.phase!=='training')return null;
@@ -3535,7 +3545,7 @@ function getMesoVolumeSuggestions(m,routineId){
     const belowTarget=rec.vol<target;
     // Priority still shapes how the ramp target gets pursued, same spirit as the old trend-based
     // version: Low priority only chases the target once genuinely under MEV \u2014 a muscle
-    // shouldn't keep climbing toward MRV just because routine design happens to assign it more
+    // shouldn't keep climbing toward MAV just because routine design happens to assign it more
     // exercises; High pursues the target right up to the point of actual overreach rather than
     // holding back.
     const eligible=priority==='low'?(belowTarget&&rec.vol<rec.landmarks.mev)
@@ -3650,14 +3660,22 @@ function checkEarlyDeloadSignals(m,workoutExercises){
     }
   });
   const reasons=[];
+  let rirSignal=false,declineSignal=false;
   if(aheadOfSchedule&&rirChecked>0&&rirHits>=Math.ceil(rirChecked/2)){
     reasons.push('Several exercises are already at your final-rotation RIR target, well ahead of schedule.');
+    rirSignal=true;
   }
   const declineThreshold=m.earlyDeloadDeclineCount||2;
   if(declineHits>=declineThreshold){
     reasons.push(declineHits+' exercises declined versus their last two sessions ('+declineNames.slice(0,3).join(', ')+(declineNames.length>3?', ...':'')+').');
+    declineSignal=true;
   }
-  return reasons.length?{reasons}:null;
+  // rirSignal/declineSignal (2026-08-07) let the caller tell "genuinely ahead of schedule" apart
+  // from "actually declining" — user's explicit correction: sometimes 0 RIR early in a pass is
+  // just a personal choice (enjoys training to failure, less to think about), not a sign the pass
+  // is really done, so that reason alone shouldn't be trusted to auto-deload the way a real
+  // performance decline should be. See the call site in confirmFinishWorkout.
+  return reasons.length?{reasons,rirSignal,declineSignal}:null;
 }
 
 function toggleMesoDropdown(e,mi){
@@ -4402,19 +4420,34 @@ function openGymSetupPreview(i){
   if(!ids.length){
     body.innerHTML='<div class="small text2" style="text-align:center;padding:16px 0">No exercises yet.</div>';
   }else{
+    // BUG FIX (2026-08-07): this used to compute its own set count independently — "however many
+    // sets were done last time this exercise was logged, anywhere" — which ignored the ramp
+    // target, deload/reset baseline, and Partials that actually decide what Start seeds. Now
+    // reuses buildRoutineSeedPlan (commit:false — no side effects), the exact same function
+    // startRoutineWorkout itself calls, so this can't drift out of sync again. One deliberate
+    // scoping gap: Efficient Volume is an opt-in toggle the person sees AFTER this preview, in
+    // the soreness modal, defaulting off — this preview assumes it stays off, matching what
+    // Start actually produces unless that toggle gets switched on next.
+    const plan=buildRoutineSeedPlan(i,false);
+    const seedByExId={};
+    (plan?plan.exercises:[]).forEach(ex=>{
+      let n=(ex.sets||[]).length;
+      if(plan.addSetExIds.has(ex.exId))n+=1; // ramp-due extra set — always-on, applied via addSet() post-beginWorkout in the real path
+      seedByExId[ex.exId]=n;
+    });
     body.innerHTML=ids.map((id,idx)=>{
       const ex=getExercise(id);if(!ex)return'';
       const color=MUSCLE_COLORS[ex.muscle]||'#aaa';
-      let lastStr='',sc=3;
+      let lastStr='';
       for(let h=state.history.length-1;h>=0;h--){
         const f=state.history[h].exercises.find(e=>e.exId===id);
         if(f){
           const done=f.sets.filter(s=>s.done);
           if(done.length){const isBW=ex.bw==='bw';lastStr=isBW?Math.max(...done.map(s=>repsMetricOf(s)))+' reps':Math.max(...done.map(s=>s.weight||0))+'kg';}
-          sc=done.length||3;
           break;
         }
       }
+      const sc=seedByExId[id]!=null?seedByExId[id]:3;
       const setupBits=[];
       if(ex.machine)setupBits.push(ex.machine);
       if(ex.attachment)setupBits.push(ex.attachment);
@@ -4664,9 +4697,19 @@ function confirmSorenessAndStart(){
   pendingEfficientEligibility=null;
   if(i!=null)startRoutineWorkout(i,scores,volumeMode,efficientVolumeOn);
 }
-function startRoutineWorkout(i,sorenessScores,volumeMode,efficientVolumeOn){
-  volumeMode=volumeMode||'extra'; // other direct entry points (meso quick-start, Revisit, Routine Detail Start) bypass the picker — default preserves today's existing always-auto-add behavior for them
-  const r=state.routines[i];
+// Builds the exercises array a workout WOULD start with for this routine, given the current
+// mesocycle/history state — the single source of truth for both the real seeding path
+// (startRoutineWorkout) and the read-only Gym Setup preview modal (openGymSetupPreview), so the
+// two can never drift out of sync. BUG FIXED (2026-08-07): the preview used to compute its own,
+// completely separate "however many sets were last logged for this exercise, anywhere" number —
+// ignoring the ramp target, deload/reset baseline, and Partials that actually decide the real
+// count, so the preview routinely didn't match what Start actually produced.
+// `commit` gates the ONE side effect in this pipeline (Phase B's extraRotationCredits grant,
+// see getMesoVolumeSuggestions) — false for a preview call, true only when a workout is actually
+// starting; everything else here is pure/read-only (getMesoVolumeSuggestions and
+// getMesoSetAdjustments are both already documented read-only for exactly this reason).
+function buildRoutineSeedPlan(routineIdx,commit){
+  const r=state.routines[routineIdx];if(!r)return null;
   const activeMeso=activeMesoContext?state.mesocycles[activeMesoContext.mesoIdx]:null;
   // The Partials set (beyond-failure partials) only ever gets auto-added on the final training
   // rotation of a pass, right before a deload — never saved to the routine, never carried into
@@ -4693,7 +4736,7 @@ function startRoutineWorkout(i,sorenessScores,volumeMode,efficientVolumeOn){
   // Decision 2 (Phase B): commit the extra-rotation credit now that the workout is actually
   // starting (getMesoVolumeSuggestions itself stays read-only/preview-safe — it's also called
   // just to render the pre-workout note, so mutating there would over-grant on every re-render).
-  if(activeMeso&&volSuggestions){
+  if(commit&&activeMeso&&volSuggestions){
     if(!activeMeso.extraRotationCredits)activeMeso.extraRotationCredits={};
     let creditsChanged=false;
     volSuggestions.forEach(s=>{
@@ -4806,6 +4849,13 @@ function startRoutineWorkout(i,sorenessScores,volumeMode,efficientVolumeOn){
     const partialsMsg='Final rotation before deload — Partials added to push past failure.';
     mesoNote=mesoNote?mesoNote+' '+partialsMsg:partialsMsg;
   }
+  return{r,activeMeso,lastCycleBeforeDeload,mesoRIRInfo,volSuggestions,addSetExIds,exercises,mesoNote};
+}
+function startRoutineWorkout(i,sorenessScores,volumeMode,efficientVolumeOn){
+  volumeMode=volumeMode||'extra'; // other direct entry points (meso quick-start, Revisit, Routine Detail Start) bypass the picker — default preserves today's existing always-auto-add behavior for them
+  const plan=buildRoutineSeedPlan(i,true);
+  if(!plan)return;
+  const{r,activeMeso,mesoRIRInfo,volSuggestions,addSetExIds,exercises,mesoNote}=plan;
   beginWorkout(r.name,exercises,r.id,[...(r.exerciseIds||[])]);
   if(activeWorkout&&activeWorkout.sourceRoutineId===r.id){
     activeWorkout.muscleSoreness=sorenessScores||{};
@@ -7121,13 +7171,21 @@ function confirmFinishWorkout(){
       if(wasTrainingBefore&&m.phase==='training'&&m.deloadEnabled){
         const signal=checkEarlyDeloadSignals(m,activeWorkout.exercises);
         if(signal){
-          if(m.earlyDeloadDetection==='auto'||m.earlyDeloadDetection==='off'){
+          // A RIR-only signal (genuinely at/near failure ahead of schedule, but no actual
+          // decline yet) always asks first now, regardless of the Cycle Settings mode — user's
+          // explicit correction: training to 0 RIR is sometimes just their own preference, not
+          // evidence the pass is really done, so it shouldn't be trusted to silently end training
+          // the way a real decline can be. If decline ALSO fired alongside it, that's independent
+          // corroborating evidence, so the normal auto/suggest setting applies as before.
+          const forceSuggest=signal.rirSignal&&!signal.declineSignal;
+          const mode=forceSuggest?'suggest':m.earlyDeloadDetection;
+          if(mode==='auto'||mode==='off'){
             // 'off' is intentionally treated the same as 'auto' here, per the user's explicit
             // choice: auto-fall-back to deload based on the data rather than asking, since a
             // deload-enabled meso has no other way to end its training phase under this model.
             enterDeloadPhase(m);
             save();renderMesocycles();
-          }else if(m.earlyDeloadDetection==='suggest'){
+          }else{
             forgeConfirm('Deload Suggested',signal.reasons.join(' ')+' Start the deload rotation now instead of continuing training?',()=>{
               enterDeloadPhase(m);
               save();renderMesocycles();
