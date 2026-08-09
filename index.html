@@ -598,7 +598,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-08.6</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-08.9</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -3950,7 +3950,17 @@ function getMesoReviewData(m){
       if(!exData)return;
       const normalSets=(ex.sets||[]).filter(s=>s.done&&(!s.type||s.type==='normal'));
       if(!normalSets.length)return;
-      const top=normalSets[0];
+      // "Top set" = the HEAVIEST logged normal set that session, not simply the first one in
+      // array order (2026-08-08 fix — user's report: Squat/Deadlift kept showing "no change" here
+      // despite clearly having gone up). If a heavy compound's warm-up ramp sets get logged as
+      // plain sets rather than explicitly tagged type:'warmup', the first array entry is often a
+      // lighter ramp set — comparing THAT across sessions can read as flat even while the real
+      // working weight climbed. Picking the heaviest set is robust to that regardless of whether
+      // warm-ups happen to be tagged correctly. Scoped to this function only — the same
+      // first-set convention is used elsewhere (checkEarlyDeloadSignals, Post-Exercise Feedback)
+      // for a different purpose (this session's actual top-set effort/RIR, not a cross-session
+      // weight trend) and wasn't touched.
+      const top=normalSets.reduce((a,b)=>(b.weight||0)>(a.weight||0)?b:a,normalSets[0]);
       if(!exerciseData[ex.exId])exerciseData[ex.exId]={name:exData.name,muscle:exData.muscle||'Other',isUni:!!exData.uni,sessions:[]};
       exerciseData[ex.exId].sessions.push({date:w.date,weight:top.weight,reps:top.reps,repsL:top.repsL,repsR:top.repsR});
     });
@@ -3958,10 +3968,30 @@ function getMesoReviewData(m){
   const exerciseSummaries=Object.keys(exerciseData).map(exId=>{
     const d=exerciseData[exId];
     const first=d.sessions[0],last=d.sessions[d.sessions.length-1];
-    const delta=(last.weight||0)-(first.weight||0);
+    // BUG FIX (2026-08-08, user's report — "does it take into account reps? it seems misleading
+    // that I've had no change"): this used to compare raw weight only. Someone progressing via
+    // reps at the same weight (the normal first half of double progression, before the next
+    // weight bump) would show as flat "no change" here even while genuinely progressing — reps
+    // never factored in at all. Classification now uses estimated-1RM (calcORM, the same Epley
+    // estimate the Progress Chart/PR system already uses elsewhere) so a rep-only improvement
+    // correctly counts as trending up. The displayed label still shows literal weight or literal
+    // reps (whichever actually changed) rather than a synthetic "kg" figure derived from a
+    // formula, so it stays honest about what actually happened in the gym.
+    const firstRepsMetric=repsMetricOf({repsL:first.repsL,repsR:first.repsR,reps:first.reps});
+    const lastRepsMetric=repsMetricOf({repsL:last.repsL,repsR:last.repsR,reps:last.reps});
+    const weightDelta=(last.weight||0)-(first.weight||0);
+    const repDelta=lastRepsMetric-firstRepsMetric;
+    // calcORM returns 0 whenever weight is falsy (its own `if(!weight...)return 0` guard) — for a
+    // bodyweight exercise (weight always 0/unset), that makes ORM delta always 0 regardless of
+    // real rep progress, silently miscounting it as flat even though the displayed label below
+    // would correctly say "+N reps". Found immediately after landing the ORM fix above (2026-08-08)
+    // — bodyweight exercises fall back to repDelta directly as the classification driver instead.
+    const isBWExercise=!first.weight&&!last.weight;
+    const delta=isBWExercise?repDelta:Math.round((calcORM(last.weight,lastRepsMetric)||0)-(calcORM(first.weight,firstRepsMetric)||0));
     return{exId,name:d.name,muscle:d.muscle,isUni:d.isUni,sessionCount:d.sessions.length,
       firstWeight:first.weight,firstReps:first.reps,firstRepsL:first.repsL,firstRepsR:first.repsR,
-      lastWeight:last.weight,lastReps:last.reps,lastRepsL:last.repsL,lastRepsR:last.repsR,delta};
+      lastWeight:last.weight,lastReps:last.reps,lastRepsL:last.repsL,lastRepsR:last.repsR,
+      weightDelta,repDelta,delta};
   }).sort((a,b)=>a.muscle.localeCompare(b.muscle)||a.name.localeCompare(b.name));
   const muscleSummaries={};
   exerciseSummaries.forEach(s=>{
@@ -4019,7 +4049,14 @@ function renderMesoReviewBody(data){
       html+='<div style="padding:0 0 4px 2px">'+exs.map(s=>{
         const col=s.delta>0?'#2ed573':s.delta<0?'#ff4757':'var(--text2)';
         const arrow=s.delta>0?'▲':s.delta<0?'▼':'–';
-        const deltaStr=s.delta!==0?(s.delta>0?'+':'')+s.delta+'kg':'no change';
+        // Label reflects whichever literally changed (weight or reps), not the estimated-1RM
+        // number itself — s.delta only decides the arrow color/direction now (2026-08-08 fix,
+        // see getMesoReviewData), so someone who added reps at the same weight sees "+N reps"
+        // here, not a synthetic kg figure that never actually happened on the bar.
+        let deltaStr='no change';
+        if(s.weightDelta!==0&&s.repDelta!==0)deltaStr=(s.weightDelta>0?'+':'')+s.weightDelta+'kg, '+(s.repDelta>0?'+':'')+s.repDelta+' reps';
+        else if(s.weightDelta!==0)deltaStr=(s.weightDelta>0?'+':'')+s.weightDelta+'kg';
+        else if(s.repDelta!==0)deltaStr=(s.repDelta>0?'+':'')+s.repDelta+' reps';
         return '<div style="padding:6px 0;border-bottom:1px solid var(--border)">'
           +'<div style="display:flex;justify-content:space-between"><span class="bold" style="font-size:13px">'+escHtml(s.name)+'</span>'
           +'<span class="small" style="color:'+col+'">'+arrow+' '+deltaStr+'</span></div>'
