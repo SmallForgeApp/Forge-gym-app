@@ -598,7 +598,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-08.9</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-09.5</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1178,6 +1178,15 @@ const SET_TYPES=[
 const MUSCLE_GROUPS=['Chest','Back','Shoulders','Biceps','Triceps','Quads','Hamstrings','Glutes','Core','Calves','Full Body'];
 const MUSCLE_PAIRS={Chest:'Back',Back:'Chest',Biceps:'Triceps',Triceps:'Biceps',Quads:'Hamstrings',Hamstrings:'Quads'};
 const MUSCLE_COLORS={Chest:'#e8ff47',Back:'#47c8ff',Shoulders:'#ff8c00',Biceps:'#2ed573',Triceps:'#ff4757',Quads:'#cc44ff',Hamstrings:'#c2703d',Glutes:'#ff6b81',Core:'#ffd700',Calves:'#00cec9','Full Body':'#fd79a8'};
+// See getMuscleVolume for the full reasoning — declared this early (not right above
+// getMuscleVolume itself) because the Home screen's boot-time render chain can reach it well
+// before the script's own top-to-bottom pass would otherwise get there.
+const MUSCLE_VOLUME_WINDOW_DAYS=7;
+// Same boot-time-reachability reasoning as MUSCLE_VOLUME_WINDOW_DAYS above — getSetTarget (which
+// reads this) is reachable from the exact same boot chain (renderActiveMesoHero -> ... ->
+// buildRoutineSeedPlan), just later in that function's execution than the volume-suggestions
+// call, so this one was masked until that first crash got fixed. Fixed proactively, 2026-08-09.
+const DEFAULT_REP_RANGE={min:8,max:12};
 // Shared status vocabulary for both the Review tab (weekly, all mesos) and Manage Meso > Review
 // Progress (one meso's lifetime) — 2026-08-07 redesign, so a muscle's status/trend renders as one
 // small colored chip on its own row instead of the two screens using different, disconnected
@@ -5261,7 +5270,6 @@ function checkMissedRepRange(exId,repRange,routineId){
   }
   return null;
 }
-const DEFAULT_REP_RANGE={min:8,max:12};
 // Same as getSetAtSessionsAgo but indexed against the NORMAL-only view of a session's sets —
 // i.e. the same indexing scheme adjArr/anchor arrays use throughout (they only ever cover
 // working sets). Needed by getPlainProgressionWeight's stepdown check below.
@@ -7877,7 +7885,15 @@ function renderHistory(){
     const ds=d.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
     let vol=0,sets=0;w.exercises.forEach(ex=>ex.sets.forEach(s=>{if(s.done){sets++;vol+=(s.weight||0)*(s.reps||0);}}));
     const names=w.exercises.slice(0,3).map(ex=>{const e=getExercise(ex.exId);return e?e.name:'?';}).join(', ')+(w.exercises.length>3?' +'+(w.exercises.length-3)+' more':'');
-    const muscles=[...new Set(w.exercises.map(ex=>{const e=getExercise(ex.exId);return e?e.muscle:'';}).filter(Boolean))];
+    // BUG FIX (2026-08-09, user's report — Review showed Triceps as untrained while a History
+    // card's muscle pills showed it worked that same day): this used to list a muscle for EVERY
+    // exercise that was part of the workout, regardless of whether any of its sets were actually
+    // marked done — an exercise seeded into the session but never logged (skipped, ran out of
+    // time, etc) still got its muscle shown here, while Review's real volume tally (getMuscleVolume
+    // -> getExerciseVolumeCredit) only ever counts done sets, same as this same card's own "N sets"
+    // header just above. Now requires at least one done set for that exercise before its muscle
+    // counts, matching every other "was this muscle actually trained" check in the app.
+    const muscles=[...new Set(w.exercises.filter(ex=>(ex.sets||[]).some(s=>s.done)).map(ex=>{const e=getExercise(ex.exId);return e?e.muscle:'';}).filter(Boolean))];
 
     // Mesocycle tag for this workout — includes the specific rotation/pass it was performed in
     // when available (mesoProgress, saved 2026-08-03.6), so a plateau is traceable to exactly
@@ -8026,39 +8042,20 @@ function getWeeklyMuscleVolume(windowDays){
   }));
   return{ww,ms};
 }
-// Derives how many days apart a muscle actually gets trained, from real logged history —
-// instead of assuming a fixed calendar week. Averages the gaps between the last few sessions
-// that hit this muscle (primary or secondary, same crediting rule as volume counting below).
-// Falls back to a 7-day default until there's enough history for this specific muscle to
-// calculate a real cadence — same cold-start pattern already used for myo-rep calibration and
-// the time estimator elsewhere in the app.
-function getMuscleTrainingCadence(muscle){
-  const dates=[];
-  state.history.forEach(w=>{
-    const hit=w.exercises.some(ex=>{
-      const exData=getExercise(ex.exId);
-      if(!exData)return false;
-      if(exData.muscle===muscle)return true;
-      if(exData.secondary)return exData.secondary.split(',').some(s=>s.trim()===muscle);
-      return false;
-    });
-    if(hit)dates.push(new Date(w.date));
-  });
-  dates.sort((a,b)=>a-b);
-  const recent=dates.slice(-5); // last few sessions reflect current cadence without over-weighting stale history
-  if(recent.length<3)return 7; // not enough history for THIS muscle yet — cold-start default
-  const gaps=[];
-  for(let i=1;i<recent.length;i++)gaps.push((recent[i]-recent[i-1])/864e5);
-  const avg=gaps.reduce((a,b)=>a+b,0)/gaps.length;
-  return Math.max(3,Math.round(avg)); // floor guards against a same-day double-session collapsing the window toward 0
+// Whether this muscle has EVER been trained (any done set, anywhere in history) — distinct from
+// getMuscleVolume returning 0, which just means "no volume in the last MUSCLE_VOLUME_WINDOW_DAYS"
+// and says nothing about whether it was ever trained at all. Added 2026-08-09 to split Review's
+// zero-recent-volume bucket into "never trained" vs "trained before, just not this week".
+function hasEverTrainedMuscle(muscle){
+  return state.history.some(w=>w.exercises.some(ex=>{
+    if(!(ex.sets||[]).some(s=>s.done))return false;
+    const exData=getExercise(ex.exId);
+    if(!exData)return false;
+    if(exData.muscle===muscle)return true;
+    if(exData.secondary)return exData.secondary.split(',').some(s=>s.trim()===muscle);
+    return false;
+  }));
 }
-// Per-muscle equivalent of the set tally in getWeeklyMuscleVolume above, but sized to this
-// muscle's own actual training cadence rather than a fixed calendar week — accurate for anyone
-// who doesn't train on a fixed weekly schedule (the app's own skip/catch-up session system
-// already assumes exactly this, so the volume count should too). Used anywhere volume gets
-// compared against MEV/MAV/MRV landmarks; getWeeklyMuscleVolume's ww/fixed-window output is
-// kept separately for genuine "this calendar week" display stats (workout count, total volume,
-// avg RPE) which are a different, deliberately calendar-bound concept.
 // EFFICIENT VOLUME feature: a drop set or myo-rep continuation earns credit based on what it
 // actually achieves relative to the set it replaces — full credit (not a discount) if it hits
 // that target, since the whole point of this feature is matching the same volume while saving
@@ -8124,8 +8121,23 @@ function normalizeEquipmentTag(ex){
   if(lower.includes('machine'))return 'Machine'; // e.g. Calf Raise Machine, Hip Thrust Machine, Ab Machine
   return null;
 }
+// Flat rolling 7-day window (2026-08-09, user's correction to the per-muscle adaptive cadence
+// this replaced): volume landmarks are inherently weekly concepts — RP's own published table
+// defines each one alongside a weekly frequency ("2-4x Week") — so comparing against them only
+// makes sense against a real week of training, not a window that quietly narrows or widens per
+// muscle based on how often it's been hit historically. That adaptive version (getMuscleTraining
+// Cadence, since removed — this was its only real caller) sounded reasonable in principle but in
+// practice made a muscle disappear from "trained" entirely the moment a totally normal gap
+// happened to exceed its own comparatively tight window — confusing, not clarifying. Rolling from
+// right now, not calendar-Monday-aligned, per user's explicit preference. Declared up near
+// MUSCLE_COLORS rather than right above getMuscleVolume (BUG FIX, 2026-08-09) — the Home screen's
+// boot-time render chain (renderActiveMesoHero's duration estimate -> getPredictedSetCounts ->
+// buildRoutineSeedPlan -> getMesoVolumeSuggestions -> getVolumeRecommendation -> getMuscleVolume)
+// can reach this const before the script's linear top-to-bottom execution ever reaches a
+// declaration sitting this deep in the file — a plain `const` has no hoisting the way a
+// `function` declaration does, so it threw "Cannot access before initialization" at boot.
 function getMuscleVolume(muscle){
-  const windowDays=getMuscleTrainingCadence(muscle);
+  const windowDays=MUSCLE_VOLUME_WINDOW_DAYS;
   const cutoff=new Date(Date.now()-windowDays*864e5);
   let sets=0;
   state.history.filter(w=>new Date(w.date)>=cutoff).forEach(w=>w.exercises.forEach(ex=>{
@@ -8241,10 +8253,26 @@ function getVolumeRecommendation(muscle){
   }
   return{muscle,vol,windowDays,landmarks:lm,sfr,status,action};
 }
+function getDaysSinceLastTrained(muscle){
+  let latest=null;
+  state.history.forEach(w=>{
+    if(!w.exercises.some(ex=>{
+      if(!(ex.sets||[]).some(s=>s.done))return false;
+      const exData=getExercise(ex.exId);
+      if(!exData)return false;
+      if(exData.muscle===muscle)return true;
+      if(exData.secondary)return exData.secondary.split(',').some(s=>s.trim()===muscle);
+      return false;
+    }))return;
+    const d=new Date(w.date);
+    if(!latest||d>latest)latest=d;
+  });
+  return latest?Math.round((Date.now()-latest)/864e5):null;
+}
 function renderReview(){
   const c=document.getElementById('review-content');c.innerHTML='';
-  const{ww}=getWeeklyMuscleVolume(7); // genuine calendar-week stats below (workout count, total volume, RPE, streak) stay on a fixed week on purpose
-  const ms=getMuscleGroupVolumes(); // muscle-vs-landmark comparisons use each muscle's own actual training cadence instead
+  const{ww}=getWeeklyMuscleVolume(7); // rolling last-7-days stats below (workout count, total volume, RPE, streak) — NOT calendar-Monday-aligned, despite what an earlier version of this comment claimed; corrected 2026-08-09 after that mischaracterization caused real confusion. The Home page's Weekly Consistency chart (getWeekBuckets) is the one genuinely calendar/Monday-aligned thing in the app, and stays that way per user's explicit preference — every other window in FORGE (this one included) rolls from right now.
+  const ms=getMuscleGroupVolumes(); // muscle-vs-landmark comparisons: flat rolling 7 days (see MUSCLE_VOLUME_WINDOW_DAYS/getMuscleVolume)
   const now=new Date();
   let vol=0,sets=0,rpeAll=[];const days=new Set();let consec=0;
   ww.forEach(w=>{days.add(new Date(w.date).toDateString());w.exercises.forEach(ex=>{const useRIR=!!ex.useRIR;ex.sets.forEach(s=>{if(s.done&&s.type!=='partials'){sets++;vol+=(s.weight||0)*(s.reps||0);if(s.rpe!=null)rpeAll.push(useRIR?(10-s.rpe):s.rpe);}});});});
@@ -8276,13 +8304,23 @@ function renderReview(){
     const chip=meta?statusChipHtml(meta.icon,meta.label,meta.color):'';
     const needsReason=rec&&rec.status!=='building'&&rec.status!=='mav-to-mrv';
     return '<div class="muscle-bar-wrap"><div class="muscle-bar-label"><span style="font-weight:600">'+m+'</span>'
-      +'<span style="display:flex;align-items:center;gap:6px"><span class="text3 small">'+ms[m]+' sets / '+getMuscleTrainingCadence(m)+'d</span>'+chip+'</span></div>'
+      +'<span style="display:flex;align-items:center;gap:6px"><span class="text3 small">'+ms[m]+' sets / 7d</span>'+chip+'</span></div>'
       +'<div class="muscle-bar-track"><div class="muscle-bar-fill" style="width:'+Math.round(ms[m]/maxS*100)+'%;background:'+(MUSCLE_COLORS[m]||'#aaa')+'"></div></div>'
       +(lmCaption?'<div class="text3 small" style="text-align:right;margin-top:2px">'+lmCaption+'</div>':'')
       +(needsReason?'<div class="small text2" style="margin-top:3px;line-height:1.4">'+rec.action+'</div>':'')
       +'</div>';
   }).join('');
-  const untrained=MUSCLE_GROUPS.filter(m=>!ms[m]&&m!=='Full Body');
+  const zeroVolMuscles=MUSCLE_GROUPS.filter(m=>!ms[m]&&m!=='Full Body');
+  // Split "no recent volume" into two genuinely different situations (2026-08-09) — a muscle with
+  // real history that just hasn't been trained in the last 7 days reads completely differently
+  // than one that's never been touched, and conflating them under one "NOT TRAINED YET" label was
+  // actively misleading (see hasEverTrainedMuscle above). Was originally written around the old
+  // per-muscle adaptive cadence window (since replaced with a flat 7 days, see getMuscleVolume) —
+  // still just as relevant with a flat window, since "genuinely never" and "not this week" remain
+  // different situations either way.
+  const neverTrained=zeroVolMuscles.filter(m=>!hasEverTrainedMuscle(m));
+  const outsideCadence=zeroVolMuscles.filter(m=>hasEverTrainedMuscle(m));
+  const untrained=zeroVolMuscles; // kept for the imbalance/no-core/no-calves checks below, which only care about "any recent volume" either way
   const sugg=[];
   if(!ww.length){sugg.push({i:'💪',t:'No workouts this week yet. Start a session to begin tracking!'});}
   else{
@@ -8313,11 +8351,12 @@ function renderReview(){
     if(!sugg.length)sugg.push({i:'🏆',t:'Excellent week! Great muscle balance and consistent frequency. Keep it up.'});
   }
   c.innerHTML=statsHtml
-    +'<div class="section-label">Muscle Volume (your cadence)</div>'
+    +'<div class="section-label">Muscle Volume (last 7 days)</div>'
     +'<div class="review-card" style="margin:0 16px 10px">'
     +(!ww.length?'<div class="small text2" style="text-align:center;padding:14px 0">Complete workouts to see your breakdown</div>':'')
     +barsHtml
-    +(untrained.length&&ww.length?'<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)"><div class="small text3" style="margin-bottom:5px">NOT TRAINED YET</div>'+untrained.map(m=>'<span class="muscle-tag">'+m+'</span>').join('')+'</div>':'')
+    +(neverTrained.length&&ww.length?'<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)"><div class="small text3" style="margin-bottom:5px">NOT TRAINED YET</div>'+neverTrained.map(m=>'<span class="muscle-tag">'+m+'</span>').join('')+'</div>':'')
+    +(outsideCadence.length&&ww.length?'<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)"><div class="small text3" style="margin-bottom:5px">NOT TRAINED IN THE LAST 7 DAYS</div>'+outsideCadence.map(m=>{const d=getDaysSinceLastTrained(m);return '<span class="muscle-tag">'+m+(d!=null?' · '+d+'d ago':'')+'</span>';}).join('')+'</div>':'')
     +'</div>'
     +'<div class="section-label">Suggestions &amp; Insights</div>'
     +'<div class="review-card" style="margin:0 16px 16px">'+sugg.map(s=>'<div class="suggestion-item"><span style="font-size:15px;margin-right:6px">'+s.i+'</span>'+s.t+'</div>').join('')+'</div>';
