@@ -259,6 +259,9 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .sort-chip.active{background:var(--accent);color:#0a0a0f;border-color:var(--accent);}
 .muscle-bar-wrap{padding:5px 0;}.muscle-bar-label{display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px;}
 .status-chip{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:10px;font-size:10.5px;font-weight:700;white-space:nowrap;flex-shrink:0;}
+.priority-pill{padding:8px 14px;border-radius:14px;border:1px solid var(--border);background:var(--bg);color:var(--text2);font-size:13px;font-weight:600;}
+.priority-pill.active{background:var(--accent);border-color:var(--accent);color:#fff;}
+.priority-pill.suggested:not(.active){border-color:var(--accent2);color:var(--accent2);}
 .muscle-status-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 0;border-bottom:1px solid var(--border);}
 .muscle-status-row:last-child{border-bottom:none;}
 .muscle-group-header{display:flex;align-items:center;justify-content:space-between;padding:9px 0;cursor:pointer;}
@@ -509,6 +512,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <input type="number" step="0.5" id="prog-inc-cable" inputmode="decimal" oninput="saveProgressionIncrement('Cable',this.value)"/>
       <div class="input-label mt12">Other / Machine (kg)</div>
       <input type="number" step="0.5" id="prog-inc-other" inputmode="decimal" oninput="saveProgressionIncrement('Other',this.value)"/>
+      <button class="btn btn-ghost btn-full mt12" onclick="resetProgressionIncrementsToDefault()">↺ Reset to Defaults</button>
     </div>
     <div class="section-label" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleVolumeLandmarksSection()">
       <span>Volume Landmarks</span>
@@ -533,6 +537,11 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
         <input type="color" id="accent-color-input" value="#D97757" oninput="saveAccentColor(this.value)" style="width:52px;height:40px;padding:2px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);cursor:pointer"/>
         <button class="btn btn-ghost flex-1" onclick="saveAccentColor('#D97757')">Reset to Claude Orange</button>
       </div>
+    </div>
+    <div class="section-label">Reset</div>
+    <div style="padding:0 16px 14px">
+      <div class="small text2" style="margin-bottom:10px;line-height:1.6">Reverts Volume Landmarks, Progression Increments, and Plates/Barbell Weight back to FORGE's stock defaults in one tap. Routines, history, and mesocycles are untouched.</div>
+      <button class="btn btn-ghost btn-full" onclick="resetAllSettingsToDefault()">↺ Reset All Settings to Defaults</button>
     </div>
     <div class="section-label">Backup &amp; Restore</div>
     <div style="padding:0 16px 8px">
@@ -598,7 +607,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-09.5</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-11.3</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -815,6 +824,9 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <div class="input-label mt12">Primary Muscle</div>
       <select id="new-ex-muscle"><option>Chest</option><option>Back</option><option>Shoulders</option><option>Biceps</option><option>Triceps</option><option>Legs</option><option>Glutes</option><option>Core</option><option>Calves</option><option>Full Body</option></select>
       <div class="input-label mt12">Secondary Muscles</div><input id="new-ex-secondary" placeholder="e.g. Triceps, Front Delts"/>
+      <div class="input-label mt12">Indirect Credit Overrides (optional)</div>
+      <input id="new-ex-secondary-fractions" placeholder="e.g. Biceps:0.4, Forearms:0.2"/>
+      <div class="small text3 mt8" style="line-height:1.5">How much of a normal set each secondary muscle above should count for toward its own weekly volume — 0 to 1. Leave blank to use FORGE's default for that muscle pair.</div>
       <div class="input-label mt12">Equipment / Machine</div>
       <select id="new-ex-machine">
         <option value="">— Select —</option>
@@ -1140,6 +1152,35 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
   </div>
 </div>
 
+<!-- Priority/Back-Burner selection, shown after each deload -->
+<div class="modal-overlay" id="modal-priority-select">
+  <div class="modal"><div class="modal-handle"></div>
+    <div class="modal-title">Priority Muscles \u2014 <span id="priority-select-meso-name"></span></div>
+    <div class="modal-body">
+      <div class="small text2" style="margin-bottom:12px">Pick 1-2 muscles to prioritize this pass \u2014 they'll ramp toward (and a little past, if feedback supports it) their MRV. Everything else becomes back burner: a lighter MV\u2192MEV ramp, enough to hold real ground without chasing growth. Suggested below, based on which muscles have gone longest without a turn.</div>
+      <div id="priority-select-list" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost flex-1" onclick="skipPrioritySelection()">Skip This Time</button>
+      <button class="btn btn-primary flex-1" onclick="confirmPrioritySelection()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- Priority Muscle Volume Ceiling Check -->
+<div class="modal-overlay" id="modal-priority-volume-check">
+  <div class="modal"><div class="modal-handle"></div>
+    <div class="modal-title">This Pass's Priority Setup</div>
+    <div class="modal-body">
+      <div class="small text2" style="margin-bottom:12px">A couple of things worth a look for your priority muscles this pass. Nothing here changes anything automatically unless you tap a button for it.</div>
+      <div id="priority-volume-check-body"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary btn-full" onclick="closeModal('modal-priority-volume-check')">Got It</button>
+    </div>
+  </div>
+</div>
+
 <!-- Add Routine to Mesocycle -->
 <div class="modal-overlay" id="modal-add-routine-meso">
   <div class="modal"><div class="modal-handle"></div><div class="modal-title">Add to Mesocycle</div>
@@ -1182,6 +1223,53 @@ const MUSCLE_COLORS={Chest:'#e8ff47',Back:'#47c8ff',Shoulders:'#ff8c00',Biceps:'
 // getMuscleVolume itself) because the Home screen's boot-time render chain can reach it well
 // before the script's own top-to-bottom pass would otherwise get there.
 const MUSCLE_VOLUME_WINDOW_DAYS=7;
+// ── INDIRECT/FRACTIONAL VOLUME CREDIT (2026-08-11) ──
+// A secondary muscle doesn't get the same stimulus as the primary target, so it's credited at a
+// fraction of the primary's set count rather than a full set. Previously this was a single flat
+// 0.5 hardcoded in two different places (getMuscleVolume, getWeeklyMuscleVolume); this table
+// replaces both with one shared, muscle-pair-specific default (e.g. rows crediting biceps less
+// than squats credit glutes), still overridable per-exercise via exData.secondaryFractions.
+// These are reasonable RP-informed starting estimates, not a settled standard — nothing here is
+// precise physiology, and they're meant to be tuned (per-exercise override) rather than trusted
+// exactly as shipped.
+const DEFAULT_SECONDARY_MUSCLE_FRACTION=0.5; // fallback for any primary→secondary pair not listed below
+const SECONDARY_MUSCLE_FRACTION_DEFAULTS={
+  'Back->Biceps':0.4,'Back->Shoulders':0.2,'Back->Core':0.2,
+  'Chest->Triceps':0.4,'Chest->Shoulders':0.25,
+  'Shoulders->Triceps':0.3,
+  'Quads->Glutes':0.5,'Quads->Hamstrings':0.2,'Quads->Core':0.15,
+  'Hamstrings->Glutes':0.5,
+  'Glutes->Hamstrings':0.3,
+  'Core->Back':0.15
+};
+// Resolves the credit fraction for one primary→secondary muscle relationship on a given exercise:
+// per-exercise override (exData.secondaryFractions) first, then the pair-specific default above,
+// then the flat fallback. Used by both getMuscleVolume and getWeeklyMuscleVolume so "volume"
+// means the same thing everywhere in the app (Review tab, MRV checks, priority ramp targets).
+function getSecondaryMuscleFraction(exData,secondaryMuscle){
+  if(exData.secondaryFractions&&exData.secondaryFractions[secondaryMuscle]!=null)return exData.secondaryFractions[secondaryMuscle];
+  const key=exData.muscle+'->'+secondaryMuscle;
+  if(SECONDARY_MUSCLE_FRACTION_DEFAULTS[key]!=null)return SECONDARY_MUSCLE_FRACTION_DEFAULTS[key];
+  return DEFAULT_SECONDARY_MUSCLE_FRACTION;
+}
+// Parses the freeform "Biceps:0.4, Forearms:0.2" override text into {Biceps:0.4,Forearms:0.2}.
+// Silently skips malformed segments (no colon, non-numeric, out-of-range) rather than blocking
+// save — consistent with how saveVolumeLandmark/saveNewExercise handle bad input elsewhere.
+function parseSecondaryFractionsInput(text){
+  const out={};
+  (text||'').split(',').forEach(seg=>{
+    const parts=seg.split(':');
+    if(parts.length!==2)return;
+    const name=parts[0].trim(),val=parseFloat(parts[1]);
+    if(name&&!isNaN(val)&&val>=0&&val<=1)out[name]=val;
+  });
+  return out;
+}
+// Inverse of parseSecondaryFractionsInput, for re-populating the edit form.
+function stringifySecondaryFractions(obj){
+  if(!obj)return'';
+  return Object.keys(obj).map(k=>k+':'+obj[k]).join(', ');
+}
 // Same boot-time-reachability reasoning as MUSCLE_VOLUME_WINDOW_DAYS above — getSetTarget (which
 // reads this) is reachable from the exact same boot chain (renderActiveMesoHero -> ... ->
 // buildRoutineSeedPlan), just later in that function's execution than the volume-suggestions
@@ -1519,19 +1607,17 @@ function load(){
   if(!state.progressionIncrements)state.progressionIncrements={Dumbbell:2,Cable:5,Other:2.5};
   if(!state.weeklyWorkoutTarget)state.weeklyWorkoutTarget=4;
   if(!state.volumeLandmarks||!Object.keys(state.volumeLandmarks).length){
-    // "Bottom end" starting points (2026-08-06, per user's request as an experienced lifter who
-    // found the original wider-range defaults too high to see the ramp actually move) — MEV
-    // floor unchanged from the original defaults (the ramp already starts every pass there
-    // regardless), MAV recomputed as the midpoint. MRV values updated 2026-08-08 to the low end
-    // of RP Hypertrophy's own published table (see migration below for the full reasoning) — the
-    // original 2026-08-06 halving left MRV systematically below RP's numbers once compared
-    // directly. Still a starting point to earn upward from, not a permanent ceiling — the
-    // adaptive landmark system (reassessVolumeLandmarks) keeps nudging it after any clean pass.
+    // Fresh-install defaults (updated 2026-08-11, user's explicit request) — matches
+    // DEFAULT_VOLUME_LANDMARKS below and the force-migration a few lines down
+    // (volumeLandmarksRPMrv2Migrated). MEV/MAV are unchanged from every earlier version of these
+    // defaults; only MRV has moved across the migrations below — see those comments for the
+    // 2026-08-06 → 2026-08-08 → 2026-08-11 history (the 2026-08-11 values land back close to
+    // where MRV originally started, see that migration's comment for why).
     state.volumeLandmarks={
-      Chest:{mv:4,mev:8,mav:12,mrv:20},Back:{mv:6,mev:10,mav:14,mrv:20},
-      Shoulders:{mv:4,mev:8,mav:14,mrv:20},Biceps:{mv:4,mev:8,mav:12,mrv:20},
-      Triceps:{mv:2,mev:6,mav:9,mrv:20},Quads:{mv:4,mev:8,mav:11.5,mrv:18},
-      Hamstrings:{mv:2,mev:6,mav:9,mrv:13},Glutes:{mv:0,mev:4,mav:7,mrv:13},
+      Chest:{mv:4,mev:8,mav:12,mrv:22},Back:{mv:6,mev:10,mav:14,mrv:25},
+      Shoulders:{mv:4,mev:8,mav:14,mrv:26},Biceps:{mv:4,mev:8,mav:12,mrv:26},
+      Triceps:{mv:2,mev:6,mav:9,mrv:18},Quads:{mv:4,mev:8,mav:11.5,mrv:20},
+      Hamstrings:{mv:2,mev:6,mav:9,mrv:20},Glutes:{mv:0,mev:4,mav:7,mrv:16},
       Core:{mv:0,mev:6,mav:10,mrv:25},Calves:{mv:4,mev:8,mav:11,mrv:20}
     };
   }
@@ -1576,7 +1662,27 @@ function load(){
     }
     state.volumeLandmarksRPMrvMigrated=true;
   }
+  // One-time forced migration (2026-08-11, user's explicit request): reverts the 2026-08-06
+  // halving. Comparing against the RP Hypertrophy table again, the 2026-08-08 "low end of RP's
+  // range" pass still undershot on several muscles — this migration force-sets MRV to RP's
+  // current published numbers on EVERY install, including ones with custom-tuned values, since
+  // the user explicitly asked to override rather than preserve tuning this time. Core is already
+  // 25 from the prior migration and is unaffected. Shoulders again has no clean RP equivalent
+  // (RP splits Front/Side/Rear-Delts) but the user supplied 26 directly this round, so it's
+  // included rather than left alone as in the 2026-08-08 pass. Runs once, gated by its own flag —
+  // does NOT check current values first, unlike the two migrations above.
+  if(!state.volumeLandmarksRPMrv2Migrated){
+    const newMrv2={Chest:22,Back:25,Shoulders:26,Biceps:26,Triceps:18,Quads:20,Hamstrings:20,Glutes:16,Core:25,Calves:20};
+    Object.keys(newMrv2).forEach(m=>{if(state.volumeLandmarks[m])state.volumeLandmarks[m].mrv=newMrv2[m];});
+    state.volumeLandmarksRPMrv2Migrated=true;
+  }
   if(!state.musclePriority)state.musclePriority={};
+  // Priority/back-burner history (2026-08-09) — global log of every meso-pass priority
+  // selection, across ALL mesocycles, so suggestPriorityMuscles can rotate through the full
+  // muscle list over time rather than the same 1-2 muscles repeating pass after pass. Separate
+  // from state.musclePriority above (the older Settings-level Low/Normal/High pills, still used
+  // for imbalance notes only — a different, coexisting concept).
+  if(!state.priorityHistory)state.priorityHistory=[];
   Object.keys(state.volumeLandmarks).forEach(m=>{if(!state.musclePriority[m])state.musclePriority[m]='normal';});
   if(!state.homeLayout)state.homeLayout=['meso','startEmpty','chart'];
   if(state.activeMesoId===undefined)state.activeMesoId=null;
@@ -2057,6 +2163,7 @@ function uiIcon(name, size, color){
     copy:`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
     trash:`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19,6l-1,14a2,2,0,0,1-2,2H8a2,2,0,0,1-2-2L5,6"/><path d="M10,11v6"/><path d="M14,11v6"/></svg>`,
     merge:`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><path d="M6 3v7a4 4 0 0 0 4 4h8"/><path d="M14 10l4 4-4 4"/><path d="M6 14v7"/></svg>`,
+    refresh:`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>`,
   };
   return map[name]||'';
 }
@@ -2259,6 +2366,19 @@ const TIMER_PRESETS=[0,30,60,90,120,180,240,300];
 // Shared plate weight list — includes small "micro-loading" fractional plates (0.25/0.5/0.75kg)
 // below the standard 1.25kg, since not everyone's smallest plate is 1.25kg.
 const DEFAULT_PLATES=[0.25,0.5,0.75,1.25,2.5,5,10,15,20,25];
+const DEFAULT_BARBELL_WEIGHT=20;
+const DEFAULT_PROGRESSION_INCREMENTS={Dumbbell:2,Cable:5,Other:2.5};
+// Single source of truth for Volume Landmark defaults — used both to seed a fresh install (load())
+// and to power the per-section/global "Reset to Defaults" button (resetVolumeLandmarksToDefault).
+// Keep in sync with the literal in load() if that ever changes; ideally load() should just
+// reference this constant, but it's left as-is there to avoid touching working migration code.
+const DEFAULT_VOLUME_LANDMARKS={
+  Chest:{mv:4,mev:8,mav:12,mrv:22},Back:{mv:6,mev:10,mav:14,mrv:25},
+  Shoulders:{mv:4,mev:8,mav:14,mrv:26},Biceps:{mv:4,mev:8,mav:12,mrv:26},
+  Triceps:{mv:2,mev:6,mav:9,mrv:18},Quads:{mv:4,mev:8,mav:11.5,mrv:20},
+  Hamstrings:{mv:2,mev:6,mav:9,mrv:20},Glutes:{mv:0,mev:4,mav:7,mrv:16},
+  Core:{mv:0,mev:6,mav:10,mrv:25},Calves:{mv:4,mev:8,mav:11,mrv:20}
+};
 const MODIFIER_PRESETS=['Paused','Slow Eccentric','Partial Reps','1.5 Reps','Ankle Weights','Chains','Bands','Deficit'];
 function renderModifierChips(containerEl,stateObj,onChange){
   containerEl.innerHTML='';
@@ -2961,6 +3081,9 @@ function renderMesocycles(){
         :'<div class="r-dropdown-item" onclick="event.stopPropagation();activateMesocycle('+mi+');closeAllMesoDropdowns()">&#9679; Set as Active</div>'
       )
       +'<div class="r-dropdown-item" onclick="event.stopPropagation();openMesocycleDetail('+mi+');closeAllMesoDropdowns()">'+uiIcon('eye',15,'currentColor')+' View / Edit</div>'
+      +(m.phase==='training'&&m.deloadEnabled
+        ?'<div class="r-dropdown-item" onclick="event.stopPropagation();manualDeloadNow('+mi+');closeAllMesoDropdowns()">'+uiIcon('refresh',15,'currentColor')+' Deload Now</div>'
+        :'')
       +'<div class="r-dropdown-item danger" onclick="event.stopPropagation();deleteMesocycle('+mi+');closeAllMesoDropdowns()">'+uiIcon('trash',15,'currentColor')+' Delete</div>'
       +'</div>';
     list.appendChild(card);
@@ -3129,6 +3252,13 @@ function advanceMesoProgress(m,loggedExercises){
     m.rirRampAnchorTotal=null; // fresh pass — ramp computes against its own rotationsPerMeso, not a carried-over extension anchor
     if(m.baseRotationsPerMeso!=null){m.rotationsPerMeso=m.baseRotationsPerMeso;m.baseRotationsPerMeso=null;} // an extension only ever applies to the pass it was granted for
     m.phase=(totalRepeats>0&&m.repeatsDone>=totalRepeats)?'finished':'training';
+    // PRIORITY/BACK-BURNER (2026-08-09): a fresh pass is starting (not finishing the mesocycle
+    // entirely) — flag the priority-selection prompt so the finish-workout flow shows it right
+    // after this deload rotation gets logged. Cleared, not carried over — every pass gets its own
+    // fresh selection, which is what lets suggestPriorityMuscles actually rotate through the full
+    // muscle list over time rather than the same pair persisting indefinitely.
+    m.priorityMuscles=null;
+    m.priorityPromptPending=(m.phase==='training');
     return;
   }
 
@@ -3278,6 +3408,22 @@ function enterDeloadPhase(m){
   const hasData=resolved&&Object.keys(resolved).length;
   m.pendingResetBaseline=hasData?resolved:(m.preDeloadBaselines||{});
 }
+// Manual override for the deload trigger (2026-08-11, user's explicit request): ends the current
+// training phase immediately and enters deload, same as the automatic stall-check path
+// (checkEarlyDeloadSignals) would — just skipped straight there without waiting for a signal.
+// Everything downstream is the existing flow: this pass's deload rotation(s) get logged as
+// normal, and finishing them advances into a fresh training phase with the standard
+// priorityPromptPending reselection prompt (see advanceMesoProgress) — no separate priority-
+// picker needed here.
+function manualDeloadNow(mi){
+  const m=state.mesocycles[mi];if(!m||m.phase!=='training'||!m.deloadEnabled)return;
+  forgeConfirm('Deload Now?','Ends this training phase immediately and starts your deload. Your next pass will prompt you to pick new priority muscles once the deload is logged.',()=>{
+    enterDeloadPhase(m);
+    save();
+    renderMesocycles();
+    if(state.activeMesoId===m.id)renderHomeScreen();
+  });
+}
 // Predicts today's rep target from the target RIR, without touching weight at all — weight
 // stays whatever normal progression already has it at (you control when it changes, e.g. after
 // pushing past your rep ceiling), and only the pre-filled REP count adjusts to reflect "N reps
@@ -3375,12 +3521,18 @@ function getMesoSetAdjustments(m,exId,routineId,repRange){
       // across however many exercises in THIS routine train the same muscle, floor 1 set each.
       // Only ever trims len DOWN (Math.min) — never invents sets beyond what history/the RIR
       // anchor actually has.
+      // UPDATED 2026-08-09 (priority/back-burner system): a back-burner muscle resets toward MV
+      // instead of MEV — its whole pass ramps MV\u2192MEV (see getMesoMuscleVolumeTarget), so
+      // starting it at MEV would skip that ramp's own floor entirely. Priority muscles and mesos
+      // where the priority system isn't active yet keep the original MEV reset unchanged.
       const muscle=exData.muscle;
       if(muscle){
         const lm=getMuscleLandmarks(muscle);
         const r=getRoutine(routineId);
         const siblingCount=r?Math.max(1,(r.exerciseIds||[]).filter(sid=>{const e=getExercise(sid);return e&&e.muscle===muscle;}).length):1;
-        const mevShare=Math.max(1,Math.round(lm.mev/siblingCount));
+        const isBackBurner=mesoHasActivePriority(m)&&!mesoIsPriorityMuscle(m,muscle);
+        const floorLandmark=isBackBurner?lm.mv:lm.mev;
+        const mevShare=Math.max(1,Math.round(floorLandmark/siblingCount));
         len=Math.min(len,mevShare);
       }
     }
@@ -3545,23 +3697,101 @@ function getMesoRoutineSiblingExIds(routineId,muscle){
   if(!r||!muscle)return[];
   return(r.exerciseIds||[]).filter(sid=>{const e=getExercise(sid);return e&&e.muscle===muscle;});
 }
+// Whether this muscle is a real, active priority selection for THIS pass — false whenever the
+// meso hasn't been through the priority-selection prompt yet (feature inactive: brand new meso,
+// or a deload-disabled meso, which never triggers the prompt at all — see enterDeloadPhase/
+// advanceMesoProgress). Kept as a named helper since several functions below need the same check.
+function mesoHasActivePriority(m){return!!(m&&Array.isArray(m.priorityMuscles)&&m.priorityMuscles.length);}
+function mesoIsPriorityMuscle(m,muscle){return mesoHasActivePriority(m)&&m.priorityMuscles.includes(muscle);}
+// PRIORITY/BACK-BURNER SYSTEM (2026-08-09, user spec): after every deload, the person picks 1-2
+// muscles as this pass's "priority" — every other muscle automatically becomes "back burner", no
+// separate manual step. Priority muscles ramp MEV\u2192(elastic MRV, see getEffectiveMRV below);
+// back-burner muscles ramp MV\u2192MEV instead of the original MEV\u2192MAV — a deliberate buffer
+// above true maintenance so a missed session can't drop a deprioritized muscle's real volume
+// below MV, without spending ramp room chasing MAV/MRV on a muscle that isn't this pass's focus.
+// See suggestPriorityMuscles/openPrioritySelectionModal for the selection UI and history-based
+// suggestion logic, and advanceMesoProgress for where the prompt gets triggered (right after a
+// deload rotation completes and a fresh pass begins).
+//
+// A priority muscle's ceiling for THIS pass isn't the flat stored MRV number — it can extend past
+// it when recent feedback genuinely supports pushing further (user's explicit design: "MRV isn't
+// a fixed number - it should be driven by feedback signals... rather than a hardcoded ceiling").
+// Mirrors getVolumeRecommendation's own pain/fatigue/SFR thresholds exactly (same numbers, same
+// fields) — it's answering a different question than that function, though: "is it still safe to
+// go past the stored ceiling," not "what should I do right now." A muscle sitting exactly AT its
+// stored MRV already reads as getVolumeRecommendation's 'at-or-above-mrv' status, so that status
+// can't be reused directly here — this recomputes the same underlying signals directly instead.
+// Hard safety backstop at 150% of the stored MRV regardless of how clean feedback looks, so a
+// lagging decline signal can't let this run unreasonably far before the stall check (or these same
+// pain/fatigue flags, which still apply in full) catches up. Non-priority muscles (back-burner, or
+// the feature not yet active for this meso) always get the flat stored MRV — no elastic room.
+function getEffectiveMRV(m,muscle){
+  const lm=getMuscleLandmarks(muscle);
+  const base=lm.mrv;
+  if(!mesoIsPriorityMuscle(m,muscle))return base;
+  const sfr=getMuscleSFRSignal(muscle);
+  const painOk=!(sfr.maxJointPain!=null&&sfr.maxJointPain>=2);
+  const fatigueOk=!((sfr.impactSampleCount>=2&&sfr.avgConfirmedImpact!=null&&sfr.avgConfirmedImpact>=1.2)
+    ||(sfr.impactSampleCount<2&&sfr.sampleCount>=2&&sfr.avgSoreness!=null&&sfr.avgSoreness>=2.2));
+  const sfrOk=!(sfr.sampleCount>=2&&sfr.avgPump!=null&&sfr.avgChallenge!=null&&sfr.avgPump<=0.5&&sfr.avgChallenge<=0.5);
+  return(painOk&&fatigueOk&&sfrOk)?Math.round(base*1.5):base;
+}
+// Default priority suggestion for the post-deload prompt (2026-08-09 spec): rotates through the
+// full tracked-muscle list over time by favoring whichever muscles have gone longest without
+// being a priority pick — a muscle never picked before sorts ahead of any muscle that has,
+// regardless of how long ago. Reads state.priorityHistory (every past pass's selection, across
+// ALL mesocycles, not just this one) rather than any single meso's own history, matching the
+// user's explicit "based on which muscles have had priority in previous mesos" — the rotation is
+// meant to be global, not restart fresh for every new mesocycle. Muscles without a landmark
+// (unmapped 'Other'/nothing tracked) are never suggested. Purely a suggestion — the actual
+// selection UI lets the person override it before confirming.
+function suggestPriorityMuscles(count){
+  const lastPicked={};
+  (state.priorityHistory||[]).forEach(entry=>{
+    (entry.muscles||[]).forEach(muscle=>{
+      if(!lastPicked[muscle]||new Date(entry.date)>new Date(lastPicked[muscle]))lastPicked[muscle]=entry.date;
+    });
+  });
+  return Object.keys(state.volumeLandmarks||{})
+    .map(m=>({muscle:m,last:lastPicked[m]||null}))
+    .sort((a,b)=>{
+      if(!a.last&&!b.last)return 0;
+      if(!a.last)return-1;
+      if(!b.last)return 1;
+      return new Date(a.last)-new Date(b.last);
+    })
+    .slice(0,count)
+    .map(x=>x.muscle);
+}
 // The volume ramp's target TOTAL weekly-equivalent set count for one muscle at the current
 // rotation — the actual primary progression axis under this redesign, not a bonus layered on
-// top of the RIR ramp. CHANGED 2026-08-07: Phase A now climbs MEV\u2192MAV, not MEV\u2192MRV. Reason
-// (user's explicit correction): the ramp used to interpolate straight to whatever MRV was
-// configured, over the SAME fixed rotationsPerMeso regardless of that number — so raising MRV
-// (e.g. to line up with a published landmark table) made the ramp steeper, not longer, which is
-// the wrong kind of change. MAV is a much gentler, more stable climb across configurations.
-// Anything past MAV is now Phase B's job (getMesoVolumeSuggestions, extraIdx>0 branch) — +1 set
-// per muscle per routine per extra rotation, already gated on the muscle's own configured MRV as
-// a soft per-muscle ceiling (rec.vol>=mrv holds it there) and on pain/high-fatigue flags. That
-// ceiling only ever holds volume steady for that one muscle — it has no path to end the training
-// phase or trigger deload; the stall check (decline across sessions, mainly) is the only trigger
-// for that, completely independent of any muscle's volume relative to its MRV.
+// top of the RIR ramp. Branches by this pass's priority/back-burner status (see block comment
+// above getEffectiveMRV): priority climbs MEV\u2192effective MRV, back-burner climbs MV\u2192MEV,
+// and if the priority system hasn't been activated for this meso yet (no deload has happened to
+// prompt a selection), every muscle falls back to the original MEV\u2192MAV ramp unchanged — this
+// keeps existing/in-progress mesos and deload-disabled mesos behaving exactly as before.
+// Anything past this target is Phase B's job (getMesoVolumeSuggestions, extraIdx>0 branch) — +1
+// set per muscle per routine per extra rotation, gated on the SAME priority-aware ceiling (see
+// getMesoVolumeSuggestions) and on pain/high-fatigue flags. That ceiling only ever holds volume
+// steady for that one muscle — it has no path to end the training phase or trigger deload; the
+// stall check (decline across sessions, mainly) is the only trigger for that.
 function getMesoMuscleVolumeTarget(m,muscle){
   const lm=getMuscleLandmarks(muscle);
   const frac=getMesoRampFraction(m);
-  return Math.round(lm.mev+(lm.mav-lm.mev)*frac);
+  if(!mesoHasActivePriority(m))return Math.round(lm.mev+(lm.mav-lm.mev)*frac);
+  if(mesoIsPriorityMuscle(m,muscle)){
+    const effMrv=getEffectiveMRV(m,muscle);
+    return Math.round(lm.mev+(effMrv-lm.mev)*frac);
+  }
+  // Back-burner floor-return (2026-08-11, user's explicit request): a back-burner muscle showing
+  // its own pain or high-fatigue signal drops straight back to MV and holds there — independent of
+  // the priority muscles and without forcing the real full-body deload (that stays priority-only,
+  // see checkEarlyDeloadSignals). Purely reactive per-call, no stored state: once the signal clears
+  // on a later call, this falls through to the normal MV\u2192MEV ramp again right where frac already
+  // is, same as if it had never dropped.
+  const rec=getVolumeRecommendation(muscle);
+  if(rec.status==='pain-flag'||rec.status==='high-fatigue')return Math.round(lm.mv);
+  return Math.round(lm.mv+(lm.mev-lm.mv)*frac);
 }
 function getMesoVolumeSuggestions(m,routineId){
   if(!m||m.phase!=='training')return null;
@@ -3583,7 +3813,18 @@ function getMesoVolumeSuggestions(m,routineId){
     if(!g.exIds.length)return;
     const priority=state.musclePriority[muscle]||'normal';
     const rec=getVolumeRecommendation(muscle);
-    const overreached=rec.status==='at-or-above-mrv'||rec.status==='pain-flag'||rec.status==='high-fatigue';
+    // Priority/back-burner ceiling (2026-08-09, see block comment above getEffectiveMRV) — a
+    // priority muscle's real ceiling this pass can sit ABOVE the flat stored MRV that
+    // getVolumeRecommendation's 'at-or-above-mrv' status is computed against, so that raw status
+    // can't gate "overreached" for a priority muscle the way it does for everyone else — only the
+    // genuine safety flags (pain/fatigue) still do. Back-burner's ceiling is MEV, not MRV, so an
+    // extended Phase B pass can't quietly let a deprioritized muscle creep all the way up toward
+    // MRV — it holds at MEV the same way Phase A already capped it there.
+    const isMesoPriority=mesoIsPriorityMuscle(m,muscle);
+    const isBackBurner=mesoHasActivePriority(m)&&!isMesoPriority;
+    const overreached=isMesoPriority
+      ?(rec.status==='pain-flag'||rec.status==='high-fatigue')
+      :(rec.status==='at-or-above-mrv'||rec.status==='pain-flag'||rec.status==='high-fatigue');
     if(extraIdx>0){
       // Phase B — past the configured rotationsPerMeso, still training (stall check hasn't fired).
       // Deliberately NOT the Phase A logic below: instead of "add a set every eligible workout
@@ -3593,7 +3834,7 @@ function getMesoVolumeSuggestions(m,routineId){
       // is also called just to render the pre-workout note); the credit itself is only committed
       // in startRoutineWorkout, once the workout actually begins.
       const credit=(m.extraRotationCredits&&m.extraRotationCredits[muscle])||{granted:0,cycleIdx:0};
-      const mrv=rec.landmarks.mrv;
+      const mrv=isMesoPriority?getEffectiveMRV(m,muscle):isBackBurner?getMuscleLandmarks(muscle).mev:rec.landmarks.mrv;
       const atMRV=rec.vol>=mrv;
       if(!atMRV&&!overreached&&credit.granted<extraIdx){
         const siblings=getMesoRoutineSiblingExIds(routineId,muscle);
@@ -3601,7 +3842,7 @@ function getMesoVolumeSuggestions(m,routineId){
         const targetEx=getExercise(targetExId);
         suggestions.push({muscle,action:'add_set',exerciseNames:[targetEx?targetEx.name:g.names[0]],exIds:[targetExId],priority,target:mrv,current:rec.vol,phaseB:true});
       }else if(atMRV||overreached){
-        suggestions.push({muscle,action:'hold',exerciseNames:g.names,overrideReason:muscle+' has reached its MRV for this pass — holding steady.'});
+        suggestions.push({muscle,action:'hold',exerciseNames:g.names,overrideReason:muscle+(isBackBurner?' has reached its back-burner ceiling (MEV) for this pass — holding steady.':' has reached its MRV for this pass — holding steady.')});
       }else{
         suggestions.push({muscle,action:'hold',exerciseNames:g.names,overrideReason:muscle+' already got this extra rotation\u2019s set — holding until the next one.'});
       }
@@ -3707,10 +3948,17 @@ function checkEarlyDeloadSignals(m,workoutExercises){
   // unaffected by this and remains the main driver once at/past the scheduled count — per user,
   // downward progression across sessions, not absolute RIR, is what should trigger a deload here.
   const aheadOfSchedule=(m.rotationsDone||0)<(m.rotationsPerMeso||1);
+  // Deload trigger scoped to priority muscles (2026-08-11, user's explicit request): the deload
+  // itself still resets everything full-body (see enterDeloadPhase below) — only the DECISION of
+  // when to deload changes here, to track the muscles actually being progressed rather than
+  // treating every muscle equally. When no priority muscles are set this cycle (mesoHasActivePriority
+  // false), there's nothing to scope to, so every exercise is checked exactly as before.
+  const scoped=mesoHasActivePriority(m);
   let rirChecked=0,rirHits=0,declineHits=0;
   const declineNames=[];
   (workoutExercises||[]).forEach(ex=>{
     const exData=getExercise(ex.exId)||{};
+    if(scoped&&!mesoIsPriorityMuscle(m,exData.muscle))return;
     const isUni=!!exData.uni;
     const useRIR=!!ex.useRIR;
     const normalSets=(ex.sets||[]).filter(s=>s.done&&(!s.type||s.type==='normal'));
@@ -3775,7 +4023,7 @@ function saveNewMesocycle(){
     rirRampEnabled:true,rirEnd:0,rirStartCap:4,earlyDeloadDetection:'suggest',earlyDeloadDeclineCount:2,
     deloadMethod:'weight',deloadTargetRIR:4,slotRepRanges:{},
     rirRepTargetEnabled:true,trueFailureAnchor:{},
-    rotationsDone:0,repeatsDone:0,phase:'training',passWorkoutCount:0,rotationWorkoutCount:0,baselines:{},rotationBaselines:{},preDeloadBaselines:{},pendingResetBaseline:null,measurementsPending:false,skipLog:[],undoSkip:null});
+    rotationsDone:0,repeatsDone:0,phase:'training',passWorkoutCount:0,rotationWorkoutCount:0,baselines:{},rotationBaselines:{},preDeloadBaselines:{},pendingResetBaseline:null,measurementsPending:false,skipLog:[],undoSkip:null,priorityMuscles:null,priorityPromptPending:false});
   save();renderMesocycles();closeModal('modal-new-mesocycle');
 }
 
@@ -4012,6 +4260,187 @@ function getMesoReviewData(m){
   return{exerciseSummaries,muscleSummaries};
 }
 let mesoReviewOpenMuscles=new Set();
+// Priority/back-burner selection modal (2026-08-09) — draft state for the multi-select pills,
+// separate from m.priorityMuscles itself so nothing gets written to the meso until Confirm.
+let priorityDraftMesoIdx=null;
+let priorityDraftMuscles=[];
+function openPrioritySelectionModal(mesoIdx){
+  const m=state.mesocycles[mesoIdx];if(!m)return;
+  priorityDraftMesoIdx=mesoIdx;
+  priorityDraftMuscles=suggestPriorityMuscles(2);
+  document.getElementById('priority-select-meso-name').textContent=m.name||'Mesocycle';
+  renderPrioritySelectionList();
+  openModal('modal-priority-select');
+}
+function renderPrioritySelectionList(){
+  const el=document.getElementById('priority-select-list');if(!el)return;
+  const suggested=suggestPriorityMuscles(2);
+  el.innerHTML=Object.keys(state.volumeLandmarks||{}).map(muscle=>{
+    const active=priorityDraftMuscles.includes(muscle);
+    const isSuggested=suggested.includes(muscle)&&!active;
+    return '<button class="priority-pill'+(active?' active':'')+(isSuggested?' suggested':'')+'" onclick="togglePriorityPill(\''+muscle+'\')">'+escHtml(muscle)+'</button>';
+  }).join('');
+}
+// Muscle names are a fixed internal set (MUSCLE_GROUPS/volumeLandmarks keys), not free text — safe
+// to interpolate directly into the onclick, same convention as saveMusclePriority elsewhere.
+function togglePriorityPill(muscle){
+  if(priorityDraftMuscles.includes(muscle)){
+    priorityDraftMuscles=priorityDraftMuscles.filter(x=>x!==muscle);
+  }else{
+    // Cap at 2 — selecting a 3rd bumps the oldest-picked one out instead of blocking the tap,
+    // so the person can just keep tapping their real preference without an extra "deselect first"
+    // step.
+    priorityDraftMuscles=[...priorityDraftMuscles,muscle].slice(-2);
+  }
+  renderPrioritySelectionList();
+}
+function skipPrioritySelection(){
+  const m=state.mesocycles[priorityDraftMesoIdx];
+  if(m)m.priorityPromptPending=false; // priorityMuscles stays null — every muscle ramps the original MEV\u2192MAV way until a selection is actually made (see mesoHasActivePriority)
+  save();
+  closeModal('modal-priority-select');
+}
+function confirmPrioritySelection(){
+  const m=state.mesocycles[priorityDraftMesoIdx];
+  if(!m){closeModal('modal-priority-select');return;}
+  if(!priorityDraftMuscles.length){skipPrioritySelection();return;}
+  m.priorityMuscles=[...priorityDraftMuscles];
+  m.priorityPromptPending=false;
+  state.priorityHistory.push({date:new Date().toISOString(),muscles:[...priorityDraftMuscles],mesoId:m.id});
+  save();
+  closeModal('modal-priority-select');
+  renderMesocycles();
+  // PRIORITY MUSCLE VOLUME PLANNING (2026-08-11, user's explicit request): once priority muscles
+  // are locked in, check whether this mesocycle's current workout structure can actually reach
+  // each one's MRV, and surface it right here — the moment the selection that makes it relevant
+  // just happened — rather than making the user discover it later in Review.
+  const volumeAnalysis=getPriorityVolumeCeilingAnalysis(m,m.priorityMuscles);
+  // EXERCISE ORDER SUGGESTION (2026-08-11, user's explicit request): training a priority muscle
+  // first in a session, while genuinely fresh, gets a better stimulus than training it last — so
+  // flag any routine in this meso where a priority-muscle exercise sits behind a non-priority one,
+  // same trigger moment as the volume check above. One-tap auto-reorder offered alongside the
+  // reminder rather than a reminder alone (user explicitly invited a "better way" than just a
+  // note) — still fully reviewable/reversible afterward via the routine editor's own drag-reorder.
+  const reorderSuggestions=getPriorityReorderSuggestions(m,m.priorityMuscles);
+  if(volumeAnalysis.length||reorderSuggestions.length)openPriorityVolumeCheckModal(priorityDraftMesoIdx,volumeAnalysis,reorderSuggestions);
+}
+// Fixed sets-per-muscle-per-session ceiling used for weekly volume planning — matches the
+// existing hardcoded-constant convention (see EFFICIENT_VOLUME_CREDIT_CAP) rather than becoming
+// a Settings field, per user's explicit choice.
+const PRIORITY_VOLUME_SET_CAP=10;
+// Which of this meso's routines currently train `muscle` as a PRIMARY exercise (not counting
+// secondary/indirect credit — Y is meant to reflect workouts deliberately targeting the muscle),
+// vs the full routine list for the cycle.
+function getPriorityMuscleWorkoutCoverage(m,muscle){
+  const routineIds=m.routineIds||[];
+  const training=routineIds.filter(rid=>{
+    const r=getRoutine(rid);if(!r)return false;
+    return(r.exerciseIds||[]).some(exId=>{const exData=getExercise(exId);return exData&&exData.muscle===muscle;});
+  });
+  return{training,total:routineIds};
+}
+// For each given muscle: Y = workouts already training it, ceiling = Y×10, compared against MRV.
+// Returns only muscles worth flagging — either a genuine gap (ceiling short of MRV, but closeable
+// by adding the muscle to an untrained workout) or a structural limit (even training it in EVERY
+// workout this split has still can't reach MRV — nothing to suggest, just a fact about the split).
+function getPriorityVolumeCeilingAnalysis(m,muscles){
+  return(muscles||[]).map(muscle=>{
+    const{training,total}=getPriorityMuscleWorkoutCoverage(m,muscle);
+    const y=training.length,totalWorkouts=total.length;
+    const mrv=(state.volumeLandmarks[muscle]||{}).mrv||0;
+    const ceiling=y*PRIORITY_VOLUME_SET_CAP;
+    const structural=(totalWorkouts*PRIORITY_VOLUME_SET_CAP)<mrv;
+    const gap=!structural&&ceiling<mrv;
+    const eligibleRoutineIds=gap?total.filter(rid=>!training.includes(rid)):[];
+    return{muscle,y,totalWorkouts,mrv,ceiling,structural,gap,eligibleRoutineIds};
+  }).filter(a=>a.structural||a.gap);
+}
+let priorityVolumeCheckMesoIdx=null;
+// Whether `r` has any priority-muscle exercise sitting after a non-priority-muscle exercise —
+// i.e. priority muscles aren't ALL trained first. Exercises with no muscle data or a non-tracked
+// muscle just count as "non-priority" for ordering purposes.
+function routineNeedsPriorityReorder(r,muscles){
+  let seenNonPriority=false;
+  for(const exId of(r.exerciseIds||[])){
+    const exData=getExercise(exId);
+    const isPriority=!!(exData&&muscles.includes(exData.muscle));
+    if(!isPriority)seenNonPriority=true;
+    else if(seenNonPriority)return true;
+  }
+  return false;
+}
+// Stable partition: priority-muscle exercises move to the front, each group keeping its own
+// original relative order. supersetGroups (if present) is position-aligned with exerciseIds — see
+// the merge-exercise comment near line 8156 — so it's permuted identically to stay in sync.
+function reorderRoutineForPriority(r,muscles){
+  const ids=r.exerciseIds||[];
+  const supers=r.supersetGroups||null;
+  const order=ids.map((_,i)=>i).sort((a,b)=>{
+    const pa=(getExercise(ids[a])&&muscles.includes(getExercise(ids[a]).muscle))?0:1;
+    const pb=(getExercise(ids[b])&&muscles.includes(getExercise(ids[b]).muscle))?0:1;
+    return pa-pb;
+  });
+  r.exerciseIds=order.map(i=>ids[i]);
+  if(supers)r.supersetGroups=order.map(i=>supers[i]);
+}
+function getPriorityReorderSuggestions(m,muscles){
+  return(m.routineIds||[]).map(rid=>getRoutine(rid)).filter(r=>r&&routineNeedsPriorityReorder(r,muscles))
+    .map(r=>({routineId:r.id,name:r.name}));
+}
+function openPriorityVolumeCheckModal(mesoIdx,volumeAnalysis,reorderSuggestions){
+  priorityVolumeCheckMesoIdx=mesoIdx;
+  const body=document.getElementById('priority-volume-check-body');
+  const volumeHtml=volumeAnalysis.map(a=>{
+    if(a.structural){
+      return '<div style="padding:12px 0;border-bottom:1px solid var(--border)">'
+        +'<div class="bold" style="margin-bottom:4px">'+escHtml(a.muscle)+' — structural limit</div>'
+        +'<div class="small text2" style="line-height:1.5">Even trained in all '+a.totalWorkouts+' workouts this cycle, the max is '+((a.totalWorkouts*PRIORITY_VOLUME_SET_CAP))+' sets/week — short of its '+a.mrv+'-set MRV. Closing this gap would need a structural change to the split (an extra workout, or more sets per session than the '+PRIORITY_VOLUME_SET_CAP+'-set cap), not just moving this muscle around.</div>'
+        +'</div>';
+    }
+    const routineButtons=a.eligibleRoutineIds.map(rid=>{
+      const r=getRoutine(rid);if(!r)return'';
+      return '<button class="btn btn-ghost btn-sm mt8" style="display:block;width:100%;text-align:left" onclick="pickPriorityVolumeWorkout(\''+rid+'\')">'+escHtml(r.name)+'</button>';
+    }).join('');
+    return '<div style="padding:12px 0;border-bottom:1px solid var(--border)">'
+      +'<div class="bold" style="margin-bottom:4px">'+escHtml(a.muscle)+' — '+a.ceiling+'/'+a.mrv+' sets/week ceiling</div>'
+      +'<div class="small text2" style="line-height:1.5">Currently trained in '+a.y+' of '+a.totalWorkouts+' workouts. Add it to one more to close the gap:</div>'
+      +routineButtons
+      +'</div>';
+  }).join('');
+  const reorderHtml=reorderSuggestions.length?(
+    '<div style="padding:12px 0'+(volumeAnalysis.length?';border-top:1px solid var(--border)':'')+'">'
+    +'<div class="bold" style="margin-bottom:4px">Exercise order</div>'
+    +'<div class="small text2" style="line-height:1.5;margin-bottom:8px">These workouts don\'t train your priority muscles first this pass — going in fresh gets a better stimulus:</div>'
+    +reorderSuggestions.map(s=>
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0">'
+      +'<span class="small">'+escHtml(s.name)+'</span>'
+      +'<button class="btn btn-ghost btn-sm" id="reorder-btn-'+s.routineId+'" onclick="applyPriorityReorder(\''+s.routineId+'\')">Reorder Automatically</button>'
+      +'</div>'
+    ).join('')
+    +'</div>'
+  ):'';
+  body.innerHTML=volumeHtml+reorderHtml;
+  openModal('modal-priority-volume-check');
+}
+// One-tap version of the reorder suggestion above — still fully reviewable/reversible afterward
+// via the routine editor's own drag-reorder (initRoutineExDragSort), so this isn't a one-way door.
+function applyPriorityReorder(routineId){
+  const m=state.mesocycles[priorityVolumeCheckMesoIdx];if(!m)return;
+  const r=getRoutine(routineId);if(!r)return;
+  reorderRoutineForPriority(r,m.priorityMuscles||[]);
+  save();
+  const btn=document.getElementById('reorder-btn-'+routineId);
+  if(btn){btn.textContent='✓ Reordered';btn.disabled=true;}
+}
+// Suggestion only — per user's explicit "suggest, don't auto-add" requirement, this never adds an
+// exercise itself. It just takes the user to that routine's edit screen so THEY add one for the
+// flagged muscle.
+function pickPriorityVolumeWorkout(routineId){
+  closeModal('modal-priority-volume-check');
+  const idx=state.routines.findIndex(r=>r.id===routineId);
+  if(idx===-1)return;
+  setTimeout(()=>openEditRoutineModal_fromList(idx),300);
+}
 function openMesoReviewFor(mesoIdx){
   viewingMesoIdx=mesoIdx;
   openMesoReview();
@@ -4953,6 +5382,13 @@ function buildRoutineSeedPlan(routineIdx,commit){
     }
     return{exId:id,sets,supersetGroup:sg,repRange,useRIR};
   }).filter(Boolean);
+  // PRIORITY/BACK-BURNER note (2026-08-09): shown every session while the system is active for
+  // this meso, not just on a deload/reset transition — this is ongoing context for the whole
+  // pass, not a one-off event like the deload/reset messages above.
+  if(mesoHasActivePriority(activeMeso)){
+    const priorityMsg='Priority this pass: '+activeMeso.priorityMuscles.join(', ')+'.';
+    mesoNote=mesoNote?mesoNote+' '+priorityMsg:priorityMsg;
+  }
   return{r,activeMeso,mesoRIRInfo,volSuggestions,addSetExIds,exercises,mesoNote};
 }
 function startRoutineWorkout(i,sorenessScores,volumeMode,efficientVolumeOn){
@@ -6834,7 +7270,7 @@ function openNewExerciseModalFromWorkout(){
   editingExId=null;fromWorkout=true;closeModal('modal-add-exercise');
   setTimeout(()=>{
     document.getElementById('new-ex-modal-title').textContent='New Exercise';
-    ['new-ex-name','new-ex-secondary','new-ex-note','new-ex-modifier'].forEach(id=>document.getElementById(id).value='');
+    ['new-ex-name','new-ex-secondary','new-ex-secondary-fractions','new-ex-note','new-ex-modifier'].forEach(id=>document.getElementById(id).value='');
     document.getElementById('new-ex-machine').value='';document.getElementById('new-ex-bw').value='no';
     document.getElementById('new-ex-uni').checked=false;
     openModal('modal-new-exercise');
@@ -6846,7 +7282,7 @@ function saveNewExercise(){
   const modifier=document.getElementById('new-ex-modifier').value.trim();
   const uni=document.getElementById('new-ex-uni').checked;
   const name=buildLibraryExName(baseName,uni,modifier);
-  const data={name,baseName,muscle:document.getElementById('new-ex-muscle').value,secondary:document.getElementById('new-ex-secondary').value.trim(),machine:document.getElementById('new-ex-machine').value,bw:document.getElementById('new-ex-bw').value,note:document.getElementById('new-ex-note').value.trim(),modifier,uni};
+  const data={name,baseName,muscle:document.getElementById('new-ex-muscle').value,secondary:document.getElementById('new-ex-secondary').value.trim(),secondaryFractions:parseSecondaryFractionsInput(document.getElementById('new-ex-secondary-fractions').value),machine:document.getElementById('new-ex-machine').value,bw:document.getElementById('new-ex-bw').value,note:document.getElementById('new-ex-note').value.trim(),modifier,uni};
   if(editingExId){const ex=getExercise(editingExId);if(ex)Object.assign(ex,data);}
   else state.exercises.push({id:uid(),generated:false,...data});
   save();renderExerciseDB();closeModal('modal-new-exercise');
@@ -7356,6 +7792,13 @@ function confirmFinishWorkout(){
           }
         }
       }
+      // PRIORITY/BACK-BURNER (2026-08-09): the deload rotation just logged above completed a
+      // pass and advanceMesoProgress flagged a fresh one starting — prompt for this pass's
+      // priority selection. Checked after the stall-check block above rather than instead of it;
+      // the two can never both fire on the same finish (checkEarlyDeloadSignals only runs when
+      // wasTrainingBefore was true, but a workout that sets priorityPromptPending was, by
+      // definition, the deload rotation itself, i.e. wasTrainingBefore false).
+      if(m.priorityPromptPending)openPrioritySelectionModal(state.mesocycles.indexOf(m));
     }
     activeMesoContext=null;
     save();
@@ -7836,6 +8279,7 @@ function openLibraryEditModal(seedMuscle,seedName,exId){
   document.getElementById('new-ex-name').value=ex?(ex.baseName||ex.name):(seedName||'');
   document.getElementById('new-ex-muscle').value=ex?ex.muscle:(seedMuscle||'Chest');
   document.getElementById('new-ex-secondary').value=ex?(ex.secondary||''):'';
+  document.getElementById('new-ex-secondary-fractions').value=ex?stringifySecondaryFractions(ex.secondaryFractions):'';
   document.getElementById('new-ex-machine').value=ex?(ex.machine||''):'';
   document.getElementById('new-ex-bw').value=ex?(ex.bw||'no'):'no';
   document.getElementById('new-ex-note').value=ex?(ex.note||''):'';
@@ -8038,7 +8482,7 @@ function getWeeklyMuscleVolume(windowDays){
     const exData=getExercise(ex.exId);if(!exData)return;
     const done=ex.sets.filter(s=>s.done&&(!s.type||s.type==='normal')).length;
     if(exData.muscle)ms[exData.muscle]=(ms[exData.muscle]||0)+done;
-    if(exData.secondary)exData.secondary.split(',').forEach(sm=>{const t=sm.trim();if(t&&ms[t]!==undefined)ms[t]=(ms[t]||0)+Math.ceil(done*0.5);});
+    if(exData.secondary)exData.secondary.split(',').forEach(sm=>{const t=sm.trim();if(t&&ms[t]!==undefined)ms[t]=(ms[t]||0)+done*getSecondaryMuscleFraction(exData,t);});
   }));
   return{ww,ms};
 }
@@ -8144,7 +8588,7 @@ function getMuscleVolume(muscle){
     const exData=getExercise(ex.exId);if(!exData)return;
     const credit=getExerciseVolumeCredit(ex);
     if(exData.muscle===muscle)sets+=credit;
-    else if(exData.secondary&&exData.secondary.split(',').some(s=>s.trim()===muscle))sets+=credit*0.5;
+    else if(exData.secondary&&exData.secondary.split(',').some(s=>s.trim()===muscle))sets+=credit*getSecondaryMuscleFraction(exData,muscle);
   }));
   return{sets:Math.round(sets*10)/10,windowDays};
 }
@@ -8387,6 +8831,11 @@ function buildPlateInventoryUI(){
     row.innerHTML='<span class="bold">'+kg+'kg plates</span><input type="number" inputmode="numeric" value="'+(state.plates[kg]||0)+'" min="0" max="20" style="width:68px;text-align:center" onchange="updatePlateCount('+kg+',this.value)"/>';
     sec.appendChild(row);
   });
+  const resetBtn=document.createElement('button');
+  resetBtn.className='btn btn-ghost btn-full mt12';
+  resetBtn.textContent='↺ Reset Plates & Barbell to Defaults';
+  resetBtn.onclick=resetPlatesToDefault;
+  sec.appendChild(resetBtn);
   updatePlateInventorySummary();
   const expanded=!state.plateSectionCollapsed;
   document.getElementById('plate-inventory-section').style.display=expanded?'block':'none';
@@ -8428,6 +8877,7 @@ function buildVolumeLandmarksUI(){
         +['mv','mev','mav','mrv'].map(f=>'<input type="number" inputmode="numeric" min="0" max="60" value="'+lm[f]+'" onchange="saveVolumeLandmark(\''+m+'\',\''+f+'\',this.value)"/>').join('')
         +'</div></div>';
     }).join('');
+  wrap.innerHTML+='<button class="btn btn-ghost btn-full mt12" onclick="resetVolumeLandmarksToDefault()">\u21ba Reset to Defaults</button>';
   updateVolumeLandmarksSummary();
   const expanded=!state.vlSectionCollapsed;
   document.getElementById('vl-section-body').style.display=expanded?'block':'none';
@@ -8460,6 +8910,51 @@ function saveVolumeLandmark(muscle,field,v){
   save();
 }
 function resetAllData(){if(confirm('Reset ALL data? Cannot be undone.')){localStorage.removeItem('forge_v4');localStorage.removeItem('forge_v3');location.reload();}}
+
+// ── RESET TO DEFAULTS (per-section + global) ──
+// Only touches the specific tunable settings named — never routines, history, mesocycles, etc.
+// Per-section resets live inside each collapsible Settings section; the global one at the bottom
+// of Settings runs all three. Each confirms first since these overwrite any manual tuning.
+function resetVolumeLandmarksToDefault(skipConfirm){
+  const doReset=()=>{
+    state.volumeLandmarks=JSON.parse(JSON.stringify(DEFAULT_VOLUME_LANDMARKS));
+    save();
+    buildVolumeLandmarksUI();
+  };
+  if(skipConfirm){doReset();return;}
+  forgeConfirm('Reset Volume Landmarks?','This overwrites your MV/MEV/MAV/MRV numbers for every muscle back to FORGE\'s defaults. Muscle priority (Low/Normal/High) is unaffected.',doReset);
+}
+function resetProgressionIncrementsToDefault(skipConfirm){
+  const doReset=()=>{
+    state.progressionIncrements={...DEFAULT_PROGRESSION_INCREMENTS};
+    save();
+    document.getElementById('prog-inc-dumbbell').value=state.progressionIncrements.Dumbbell;
+    document.getElementById('prog-inc-cable').value=state.progressionIncrements.Cable;
+    document.getElementById('prog-inc-other').value=state.progressionIncrements.Other;
+    updateProgIncSummary();
+  };
+  if(skipConfirm){doReset();return;}
+  forgeConfirm('Reset Progression Increments?','This overwrites your Dumbbell/Cable/Other jump sizes back to FORGE\'s defaults.',doReset);
+}
+function resetPlatesToDefault(skipConfirm){
+  const doReset=()=>{
+    const p={};DEFAULT_PLATES.forEach(kg=>{p[kg]=4;});
+    state.plates=p;
+    state.barbellWeight=DEFAULT_BARBELL_WEIGHT;
+    save();
+    document.getElementById('barbell-weight-input').value=state.barbellWeight;
+    buildPlateInventoryUI();
+  };
+  if(skipConfirm){doReset();return;}
+  forgeConfirm('Reset Plates & Barbell?','This overwrites your plate inventory (back to 4 of each default size) and your barbell weight (back to 20kg).',doReset);
+}
+function resetAllSettingsToDefault(){
+  forgeConfirm('Reset All Settings to Defaults?','This resets Volume Landmarks, Progression Increments, and Plates/Barbell Weight back to FORGE\'s stock defaults. Your routines, history, and mesocycles are not touched.',()=>{
+    resetVolumeLandmarksToDefault(true);
+    resetProgressionIncrementsToDefault(true);
+    resetPlatesToDefault(true);
+  });
+}
 
 // ============================================================
 // BACKUP & RESTORE (local file)
