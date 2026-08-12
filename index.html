@@ -608,7 +608,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-11.6</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-11.8</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1805,6 +1805,7 @@ function getPredictedSetCounts(routineIdx){
 // much shorter gaps between bursts/drops (see buildMyoBurstChain/buildDropSetChain) — used to
 // show the picker toggle an honest estimate of time actually saved, not the same number twice.
 const SET_TYPE_TIME_FACTOR={dropset:0.55,myo:0.3}; // fraction of a normal set's average time the WHOLE replacement chain costs
+const MYO_DROPSET_CHAIN_TIMER_SECS=15; // short timer between chain steps (activation\u2192burst, burst\u2192burst, drop\u2192drop) \u2014 2026-08-11, user's explicit request; myo/drop-set protocol calls for a brief pause here, not the full normal-set rest
 function getAvgSecondsPerSet(routineId){
   const sessions=getRoutineHistorySessions(routineId,8);
   if(sessions.length>=2){
@@ -5119,7 +5120,8 @@ let sorenessDraft={},pendingSorenessRoutineIdx=null,pendingVolumeMode='extra',pe
 function buildMyoBurstChain(refReps,isUni){
   const bursts=[];
   let remaining=refReps,frac=0.4;
-  for(let i=0;i<4&&remaining>0.5;i++){
+  // Capped at 2 bursts (2026-08-11, user's explicit request — was 4).
+  for(let i=0;i<2&&remaining>0.5;i++){
     let n=Math.max(1,Math.round(refReps*frac));
     n=Math.min(n,Math.ceil(remaining));
     bursts.push(isUni?{reps:null,repsL:n,repsR:n,done:false}:{reps:n,repsL:null,repsR:null,done:false});
@@ -6296,7 +6298,11 @@ let pefDraft={},pefPanelOpenIdxs=new Set();
 // without a full card rebuild (direct DOM update on the existing panel node).
 function checkExerciseFeedbackTrigger(exIdx){
   const ex=activeWorkout&&activeWorkout.exercises[exIdx];
-  if(!ex||ex.feedback||!ex.sets.length||!ex.sets.every(s=>s.done))return;
+  if(!ex||ex.feedback||!ex.sets.length)return;
+  // BUG FIX (2026-08-11): ex.sets.every(s=>s.done) alone treats a myo activation set as fully done
+  // the moment IT'S marked done, even though its bursts (set.myoBursts[]) live outside ex.sets and
+  // weren't checked — that's why feedback questions used to pop before the bursts were performed.
+  if(!ex.sets.every(s=>s.done&&(!s.myoBursts||s.myoBursts.every(b=>b.done))))return;
   openExerciseFeedback(exIdx);
 }
 function openExerciseFeedback(exIdx){
@@ -6447,7 +6453,15 @@ function renderSets(exIdx){
   const isUni=!!exData.uni;
   const prevSets=getLastSets(ex.exId,activeWorkout.sourceRoutineId);
   tbody.innerHTML='';
+  // Drop-set chain rows share the number of the set they extend rather than each taking a new
+  // one (2026-08-11, user's explicit request — "not counting as sets" on-screen; volume credit
+  // math is untouched, this is purely the "Set 3 of 3"-style label). Myo bursts already don't
+  // increment this at all — they render as their own "Burst N — extends #X" rows below, never a
+  // numbered <tr> in this loop.
+  let displayNum=0,lastWasDropset=false;
   ex.sets.forEach((set,setIdx)=>{
+    if(!(set.type==='dropset'&&lastWasDropset))displayNum++;
+    lastWasDropset=(set.type==='dropset');
     const tr=document.createElement('tr');
     const prCheckReps=repsMetricOf(set);
     const isPR=set.done&&set.weight>0&&checkSetForPR(ex.exId,set.weight||0,prCheckReps);
@@ -6488,7 +6502,7 @@ function renderSets(exIdx){
       ('<td><input class="set-input'+(isPR?' pr-input':'')+'" type="number" inputmode="numeric" value="'+(set.repsL||'')+'" placeholder="'+(phRepsL||'—')+'" onchange="updateSet('+exIdx+','+setIdx+',\'repsL\',this.value,this)" onfocus="this.select()" style="width:38px"/></td>'
       +'<td><input class="set-input'+(isPR?' pr-input':'')+'" type="number" inputmode="numeric" value="'+(set.repsR||'')+'" placeholder="'+(phRepsR||'—')+'" onchange="updateSet('+exIdx+','+setIdx+',\'repsR\',this.value,this)" onfocus="this.select()" style="width:38px"/></td>')
       :('<td><input class="set-input'+(isPR?' pr-input':'')+'" type="number" inputmode="numeric" value="'+(set.reps||'')+'" placeholder="'+(phReps||'—')+'" onchange="updateSet('+exIdx+','+setIdx+',\'reps\',this.value,this)" onfocus="this.select()" style="'+(isBW?'width:44px':'')+'"/></td>');
-    tr.innerHTML='<td><span class="set-num">'+(setIdx+1)+'</span></td>'
+    tr.innerHTML='<td><span class="set-num">'+displayNum+'</span></td>'
       +'<td><button class="btn btn-sm set-type-btn '+t.badgeClass+'" onclick="openSetTypeModal('+exIdx+','+setIdx+')">'+t.label+'</button></td>'
       +'<td><div class="prev-cell">'+escHtml(prevTxt)+'</div></td>'
       +weightCellHtml
@@ -6623,12 +6637,58 @@ function updateMyoBurst(exIdx,setIdx,burstIdx,field,value){
   set.myoBursts[burstIdx][field]=v;
   updateWorkoutStats();
 }
+// Fires once a "set slot" is TRULY finished — immediately for a plain set, or only after the
+// LAST step of a myo-burst/drop-set chain (see toggleSetDone/toggleMyoBurstDone below — 2026-08-11
+// bug fix: marking the chain's first/activation step "done" used to fire this immediately,
+// superset-advancing to the paired exercise and popping the feedback questions before the
+// bursts/drops actually happened). Handles superset auto-advance, the smart rest timer (skipped
+// entirely when this was a chain's last step inside a superset, per user's explicit request — the
+// point of a superset is zero rest between the paired movements, and the chain's own inter-step
+// 15s timers already covered whatever rest the protocol itself needed), and the post-exercise
+// feedback trigger.
+function finishSetSlot(exIdx,setIdx,opts){
+  opts=opts||{};
+  const ex=activeWorkout.exercises[exIdx];
+  const set=ex.sets[setIdx];
+  if(ex.supersetGroup!=null){
+    const groupIdxs=activeWorkout.exercises.map((e,i)=>({e,i})).filter(x=>x.e.supersetGroup===ex.supersetGroup).map(x=>x.i);
+    const myPos=groupIdxs.indexOf(exIdx);
+    const nextGroupIdx=groupIdxs[(myPos+1)%groupIdxs.length];
+    const nextEx=activeWorkout.exercises[nextGroupIdx];
+    const nextSetIdx=nextEx.sets.findIndex((s,si)=>!s.done&&si>=setIdx)||nextEx.sets.findIndex(s=>!s.done);
+    if(nextSetIdx>=0){
+      setTimeout(()=>{
+        const nextRow=document.getElementById('set-row-'+nextGroupIdx+'-'+nextSetIdx);
+        if(nextRow){nextRow.scrollIntoView({behavior:'smooth',block:'center'});const inp=nextRow.querySelector('.set-input');if(inp)inp.focus();}
+      },300);
+    }
+  }
+  if(!(opts.chainComplete&&ex.supersetGroup!=null)){
+    const exId=ex.exId;
+    const exDat=getExercise(exId);
+    let restSecs=90;
+    if(set.type==='warmup')restSecs=45;
+    else if(set.type==='dropset'||set.type==='myo')restSecs=45;
+    else if(set.type==='failure'||set.type==='1rm')restSecs=180;
+    else if(exDat&&COMPOUND_MUSCLES.includes(exDat.muscle))restSecs=150;
+    if(ex.supersetGroup!=null)restSecs=Math.min(restSecs,60);
+    startRestTimer(restSecs);
+  }
+  checkExerciseFeedbackTrigger(exIdx);
+}
 function toggleMyoBurstDone(exIdx,setIdx,burstIdx){
   const set=activeWorkout.exercises[exIdx].sets[setIdx];
   if(!set||!set.myoBursts||!set.myoBursts[burstIdx])return;
   set.myoBursts[burstIdx].done=!set.myoBursts[burstIdx].done;
   renderSets(exIdx);
   updateWorkoutStats();
+  if(set.myoBursts[burstIdx].done){
+    if(set.myoBursts.every(b=>b.done)){
+      finishSetSlot(exIdx,setIdx,{chainComplete:true});
+    }else{
+      startRestTimer(MYO_DROPSET_CHAIN_TIMER_SECS,'Myo — next burst');
+    }
+  }
 }
 function updateRPE(exIdx,setIdx,input){
   let v=input.value===''?null:parseInt(input.value);
@@ -6704,34 +6764,24 @@ function toggleSetDone(exIdx,setIdx){
   updateWorkoutStats();
   if(set.done){
     const ex=activeWorkout.exercises[exIdx];
-    // Superset auto-advance: move to next exercise in superset, same set index
-    if(ex.supersetGroup!=null){
-      const groupIdxs=activeWorkout.exercises.map((e,i)=>({e,i})).filter(x=>x.e.supersetGroup===ex.supersetGroup).map(x=>x.i);
-      const myPos=groupIdxs.indexOf(exIdx);
-      const nextGroupIdx=groupIdxs[(myPos+1)%groupIdxs.length];
-      const nextEx=activeWorkout.exercises[nextGroupIdx];
-      // Find next incomplete set at same or next slot in the next exercise
-      const nextSetIdx=nextEx.sets.findIndex((s,si)=>!s.done&&si>=setIdx)||nextEx.sets.findIndex(s=>!s.done);
-      if(nextSetIdx>=0){
-        // Scroll to and highlight the next set input
-        setTimeout(()=>{
-          const nextRow=document.getElementById('set-row-'+nextGroupIdx+'-'+nextSetIdx);
-          if(nextRow){nextRow.scrollIntoView({behavior:'smooth',block:'center'});const inp=nextRow.querySelector('.set-input');if(inp)inp.focus();}
-        },300);
-      }
+    // Myo activation set: bursts still need to happen right after (myo-rep protocol is a brief
+    // pause between activation and each burst, not a jump to the paired superset exercise) —
+    // 2026-08-11, fixes the same bug finishSetSlot's comment describes.
+    if(set.myoBursts&&set.myoBursts.length){
+      startRestTimer(MYO_DROPSET_CHAIN_TIMER_SECS,'Myo — next burst');
+      return;
     }
-    // Smart rest timer
-    const exId=ex.exId;
-    const exDat=getExercise(exId);
-    let restSecs=90;
-    if(set.type==='warmup')restSecs=45;
-    else if(set.type==='dropset'||set.type==='myo')restSecs=45;
-    else if(set.type==='failure'||set.type==='1rm')restSecs=180;
-    else if(exDat&&COMPOUND_MUSCLES.includes(exDat.muscle))restSecs=150;
-    // Shorter rest for supersets
-    if(ex.supersetGroup!=null)restSecs=Math.min(restSecs,60);
-    startRestTimer(restSecs);
-    checkExerciseFeedbackTrigger(exIdx);
+    // Drop-set chain: only its LAST step should advance/trigger feedback — same bug, same fix.
+    if(set.type==='dropset'){
+      const nextSet=ex.sets[setIdx+1];
+      if(nextSet&&nextSet.type==='dropset'&&!nextSet.done){
+        startRestTimer(MYO_DROPSET_CHAIN_TIMER_SECS,'Drop set — next drop');
+        return;
+      }
+      finishSetSlot(exIdx,setIdx,{chainComplete:true});
+      return;
+    }
+    finishSetSlot(exIdx,setIdx,{});
   }
 }
 
