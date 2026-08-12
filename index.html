@@ -262,6 +262,7 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .priority-pill{padding:8px 14px;border-radius:14px;border:1px solid var(--border);background:var(--bg);color:var(--text2);font-size:13px;font-weight:600;}
 .priority-pill.active{background:var(--accent);border-color:var(--accent);color:#fff;}
 .priority-pill.suggested:not(.active){border-color:var(--accent2);color:var(--accent2);}
+.priority-pill.flagged:not(.active){border-color:var(--red);color:var(--red);}
 .muscle-status-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 0;border-bottom:1px solid var(--border);}
 .muscle-status-row:last-child{border-bottom:none;}
 .muscle-group-header{display:flex;align-items:center;justify-content:space-between;padding:9px 0;cursor:pointer;}
@@ -607,7 +608,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-11.3</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-11.6</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1159,6 +1160,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div class="modal-body">
       <div class="small text2" style="margin-bottom:12px">Pick 1-2 muscles to prioritize this pass \u2014 they'll ramp toward (and a little past, if feedback supports it) their MRV. Everything else becomes back burner: a lighter MV\u2192MEV ramp, enough to hold real ground without chasing growth. Suggested below, based on which muscles have gone longest without a turn.</div>
       <div id="priority-select-list" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+      <div id="priority-select-caution"></div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost flex-1" onclick="skipPrioritySelection()">Skip This Time</button>
@@ -1234,7 +1236,7 @@ const MUSCLE_VOLUME_WINDOW_DAYS=7;
 // exactly as shipped.
 const DEFAULT_SECONDARY_MUSCLE_FRACTION=0.5; // fallback for any primary→secondary pair not listed below
 const SECONDARY_MUSCLE_FRACTION_DEFAULTS={
-  'Back->Biceps':0.4,'Back->Shoulders':0.2,'Back->Core':0.2,
+  'Back->Biceps':0.33,'Back->Shoulders':0.2,'Back->Core':0.2,
   'Chest->Triceps':0.4,'Chest->Shoulders':0.25,
   'Shoulders->Triceps':0.3,
   'Quads->Glutes':0.5,'Quads->Hamstrings':0.2,'Quads->Core':0.15,
@@ -2582,6 +2584,24 @@ function saveEditRoutine(){
   state.routines[editingRoutineIdx].rirModes=rirModes;
   save();renderRoutinesList();closeModal('modal-edit-routine');
   openRoutineDetail(editingRoutineIdx);
+  checkPriorityReorderAfterEdit(state.routines[editingRoutineIdx].id);
+}
+// Re-check the priority-muscle exercise-order suggestion after a routine edit (2026-08-11, user's
+// explicit request) — the original check only ever fired once, right after confirming priority
+// muscles for the pass; editing the routine afterward (e.g. adding a new exercise) could silently
+// put a priority muscle back out of order with nothing catching it until next pass. Scoped to the
+// currently ACTIVE mesocycle only — if this routine also belongs to other mesocycles (with
+// possibly different priority muscles), those are re-checked the normal way, next time THEY enter
+// a fresh pass.
+function checkPriorityReorderAfterEdit(routineId){
+  const m=state.mesocycles.find(mm=>mm.id===state.activeMesoId);
+  if(!m||!mesoHasActivePriority(m)||!(m.routineIds||[]).includes(routineId))return;
+  const r=getRoutine(routineId);if(!r)return;
+  if(!routineNeedsPriorityReorder(r,m.priorityMuscles))return;
+  forgeConfirm('Reorder for Priority?','"'+escHtml(r.name)+'" no longer trains '+m.priorityMuscles.join('/')+' first after this edit. Reorder it now?',()=>{
+    reorderRoutineForPriority(r,m.priorityMuscles);
+    save();
+  });
 }
 renderRoutinesList();renderExerciseDB();renderHistory();renderReview();
 
@@ -4275,11 +4295,28 @@ function openPrioritySelectionModal(mesoIdx){
 function renderPrioritySelectionList(){
   const el=document.getElementById('priority-select-list');if(!el)return;
   const suggested=suggestPriorityMuscles(2);
+  // Caution flags (2026-08-11, user's explicit request): a muscle with a recent pain or
+  // high-fatigue signal shouldn't be silently pickable as priority — same status values
+  // getMesoMuscleVolumeTarget's floor-return already reacts to, just surfaced BEFORE the choice
+  // here instead of after.
+  const flagged={};
+  Object.keys(state.volumeLandmarks||{}).forEach(muscle=>{
+    const rec=getVolumeRecommendation(muscle);
+    if(rec.status==='pain-flag'||rec.status==='high-fatigue')flagged[muscle]=rec.status;
+  });
   el.innerHTML=Object.keys(state.volumeLandmarks||{}).map(muscle=>{
     const active=priorityDraftMuscles.includes(muscle);
     const isSuggested=suggested.includes(muscle)&&!active;
-    return '<button class="priority-pill'+(active?' active':'')+(isSuggested?' suggested':'')+'" onclick="togglePriorityPill(\''+muscle+'\')">'+escHtml(muscle)+'</button>';
+    const isFlagged=!!flagged[muscle];
+    return '<button class="priority-pill'+(active?' active':'')+(isSuggested?' suggested':'')+(isFlagged?' flagged':'')+'" onclick="togglePriorityPill(\''+muscle+'\')">'+(isFlagged?'\u26a0\ufe0f ':'')+escHtml(muscle)+'</button>';
   }).join('');
+  const capEl=document.getElementById('priority-select-caution');
+  if(capEl){
+    const names=Object.keys(flagged);
+    capEl.innerHTML=names.length
+      ?'<div class="small" style="color:var(--red);margin-top:10px;line-height:1.5">\u26a0\ufe0f '+names.map(m=>escHtml(m)+' ('+(flagged[m]==='pain-flag'?'joint pain':'high fatigue')+')').join(', ')+' \u2014 flagged recently. Still fine to prioritize if that\'s intentional, just going in with eyes open.</div>'
+      :'';
+  }
 }
 // Muscle names are a fixed internal set (MUSCLE_GROUPS/volumeLandmarks keys), not free text — safe
 // to interpolate directly into the onclick, same convention as saveMusclePriority elsewhere.
@@ -5142,8 +5179,30 @@ function applyEfficientVolumeSwap(exIdx,mechanism){
 }
 // Entry point from the gym-setup preview's Start button. Shows the soreness modal only when
 // there's actually something to ask about; otherwise goes straight into the workout as before.
+// Derives {mesoIdx,routinePos} for a routine from the single persistent source of truth
+// (state.activeMesoId + that meso's routineIds) — used as a fallback when activeMesoContext
+// wasn't set by whichever button was tapped. Returns null if there's no active mesocycle, or this
+// routine isn't actually part of it (correctly means "no meso context" rather than a guess).
+function getActiveMesoContextForRoutine(routineId){
+  const mi=state.mesocycles.findIndex(mm=>mm.id===state.activeMesoId);
+  if(mi===-1)return null;
+  const pos=(state.mesocycles[mi].routineIds||[]).indexOf(routineId);
+  if(pos===-1)return null;
+  return{mesoIdx:mi,routinePos:pos};
+}
 function beginRoutineWithSorenessCheck(i){
   const r=state.routines[i];
+  // BUG FIX (2026-08-11): several Start entry points (routine-list dropdown, Gym Setup preview,
+  // Routine Detail) call straight into this function without ever setting activeMesoContext —
+  // only startMesoRoutine/startCatchUpSession did. That silently dropped meso-aware behavior
+  // (Efficient Volume eligibility, RIR info, ramp targets) for those entry points, and a leftover
+  // null from a just-discarded workout (cancelWorkout explicitly clears it) made it look like it
+  // depended on which button you'd used last rather than which routine you're starting. Validating
+  // and, if needed, re-deriving it here — the ONE common chokepoint — fixes every entry point at
+  // once, current and future, rather than patching each call site individually (see the file-wide
+  // note on that exact failure pattern from 2026-08-06).
+  const ctxValid=activeMesoContext&&state.mesocycles[activeMesoContext.mesoIdx]&&(state.mesocycles[activeMesoContext.mesoIdx].routineIds||[])[activeMesoContext.routinePos]===(r&&r.id);
+  if(!ctxValid)activeMesoContext=r?getActiveMesoContextForRoutine(r.id):null;
   const muscles=r?getRoutinePlannedMuscles(r):[];
   const activeMeso=activeMesoContext?state.mesocycles[activeMesoContext.mesoIdx]:null;
   const efficientEligibility=(activeMeso&&r)?getEfficientVolumeEligibility(activeMeso,r.id,i):null;
@@ -5279,6 +5338,15 @@ function buildRoutineSeedPlan(routineIdx,commit){
   // Decision 2 (Phase B): commit the extra-rotation credit now that the workout is actually
   // starting (getMesoVolumeSuggestions itself stays read-only/preview-safe — it's also called
   // just to render the pre-workout note, so mutating there would over-grant on every re-render).
+  // BUG FIX (2026-08-11): this commit is the ONE real side effect that fires the instant a workout
+  // STARTS, not when it finishes — and it's permanent (saved immediately). Discarding a workout
+  // right after starting it never used to undo this, so a discarded session could silently leave
+  // behind a granted credit that changes what getMesoVolumeSuggestions returns on the NEXT start
+  // attempt (a muscle already at its Phase B allotment stops being offered an extra set) — genuinely
+  // different computed data from a workout that, from the user's perspective, never happened.
+  // grantedPhaseBCredits is returned so the caller (startRoutineWorkout) can stash it on
+  // activeWorkout, and cancelWorkout can revert exactly these muscles if the session is discarded.
+  const grantedPhaseBCredits=[];
   if(commit&&activeMeso&&volSuggestions){
     if(!activeMeso.extraRotationCredits)activeMeso.extraRotationCredits={};
     let creditsChanged=false;
@@ -5287,6 +5355,7 @@ function buildRoutineSeedPlan(routineIdx,commit){
         const c=activeMeso.extraRotationCredits[s.muscle]||{granted:0,cycleIdx:0};
         activeMeso.extraRotationCredits[s.muscle]={granted:c.granted+1,cycleIdx:c.cycleIdx+1};
         creditsChanged=true;
+        grantedPhaseBCredits.push(s.muscle);
       }
     });
     if(creditsChanged)save();
@@ -5388,15 +5457,30 @@ function buildRoutineSeedPlan(routineIdx,commit){
   if(mesoHasActivePriority(activeMeso)){
     const priorityMsg='Priority this pass: '+activeMeso.priorityMuscles.join(', ')+'.';
     mesoNote=mesoNote?mesoNote+' '+priorityMsg:priorityMsg;
+    // Back-burner floor-return transparency (2026-08-11, follow-up to the floor-return feature in
+    // getMesoMuscleVolumeTarget) — that function silently drops a flagged back-burner muscle's
+    // target to MV; without this, the number changes with no visible explanation of why.
+    const flooredMuscles=[...new Set(exercises.map(e=>{const ex=getExercise(e.exId);return ex&&ex.muscle;}).filter(Boolean))]
+      .filter(muscle=>!mesoIsPriorityMuscle(activeMeso,muscle))
+      .filter(muscle=>{const rec=getVolumeRecommendation(muscle);return rec.status==='pain-flag'||rec.status==='high-fatigue';});
+    if(flooredMuscles.length){
+      mesoNote=mesoNote+' '+flooredMuscles.join(', ')+(flooredMuscles.length>1?' are':' is')+' back to MV this session — a recent pain/fatigue signal, holding until next deload.';
+    }
   }
-  return{r,activeMeso,mesoRIRInfo,volSuggestions,addSetExIds,exercises,mesoNote};
+  return{r,activeMeso,mesoRIRInfo,volSuggestions,addSetExIds,exercises,mesoNote,grantedPhaseBCredits,activeMesoId:activeMeso?activeMeso.id:null};
 }
 function startRoutineWorkout(i,sorenessScores,volumeMode,efficientVolumeOn){
   volumeMode=volumeMode||'extra'; // other direct entry points (meso quick-start, Revisit, Routine Detail Start) bypass the picker — default preserves today's existing always-auto-add behavior for them
   const plan=buildRoutineSeedPlan(i,true);
   if(!plan)return;
-  const{r,activeMeso,mesoRIRInfo,volSuggestions,addSetExIds,exercises,mesoNote}=plan;
+  const{r,activeMeso,mesoRIRInfo,volSuggestions,addSetExIds,exercises,mesoNote,grantedPhaseBCredits,activeMesoId}=plan;
   beginWorkout(r.name,exercises,r.id,[...(r.exerciseIds||[])]);
+  if(activeWorkout&&grantedPhaseBCredits&&grantedPhaseBCredits.length){
+    // Stashed so a Discard (cancelWorkout) can revert exactly these — see the fix comment above
+    // buildRoutineSeedPlan's commit block.
+    activeWorkout.grantedPhaseBCredits=grantedPhaseBCredits;
+    activeWorkout.grantedPhaseBMesoId=activeMesoId;
+  }
   if(activeWorkout&&activeWorkout.sourceRoutineId===r.id){
     activeWorkout.muscleSoreness=sorenessScores||{};
     if(volumeMode!=='plain'&&addSetExIds.size){
@@ -7718,6 +7802,12 @@ function confirmFinishWorkout(){
       muscleSoreness:activeWorkout.muscleSoreness||{},
       sorenessImpact:activeWorkout.sorenessImpact||{}};
     state.history.unshift(workout);invalidatePRCache();
+  }else{
+    // Nothing was actually done this session even though it wasn't explicitly discarded (e.g.
+    // finished immediately) — same as a Discard for the purposes of any Phase B credit already
+    // committed at start (see revertGrantedPhaseBCredits/buildRoutineSeedPlan's commit block):
+    // no real training happened, so it shouldn't count as this pass's extra-rotation set either.
+    revertGrantedPhaseBCredits();
   }
 
   const ids=activeWorkout.exercises.map(e=>e.exId);
@@ -7810,7 +7900,27 @@ function confirmFinishWorkout(){
   endWorkout();renderHistory();renderRoutinesList();maybeAutoSync();
 }
 function cancelWorkout(){
-  forgeConfirm('Discard Workout?','Everything you\'ve logged in this session will be lost. This cannot be undone.',()=>{activeMesoContext=null;endWorkout();});
+  forgeConfirm('Discard Workout?','Everything you\'ve logged in this session will be lost. This cannot be undone.',()=>{
+    revertGrantedPhaseBCredits();
+    activeMesoContext=null;endWorkout();
+  });
+}
+// Undoes exactly the Phase B extra-rotation credit(s) this specific session granted at start
+// (see the fix comment above buildRoutineSeedPlan's commit block) — looked up by the meso's
+// persistent id (not activeMesoContext.mesoIdx, which is about to be nulled a line below and
+// isn't guaranteed stable across saves anyway). Math.max(0,...) guards against ever going
+// negative if this is somehow called twice.
+function revertGrantedPhaseBCredits(){
+  if(!activeWorkout||!activeWorkout.grantedPhaseBCredits||!activeWorkout.grantedPhaseBCredits.length)return;
+  const m=state.mesocycles.find(mm=>mm.id===activeWorkout.grantedPhaseBMesoId);
+  if(!m||!m.extraRotationCredits)return;
+  let changed=false;
+  activeWorkout.grantedPhaseBCredits.forEach(muscle=>{
+    const c=m.extraRotationCredits[muscle];if(!c)return;
+    m.extraRotationCredits[muscle]={granted:Math.max(0,c.granted-1),cycleIdx:Math.max(0,c.cycleIdx-1)};
+    changed=true;
+  });
+  if(changed)save();
 }
 // Deliberately steps away from an in-progress workout, to come back to later — possibly days
 // later. Unlike endWorkout()/Discard, this explicitly KEEPS the saved draft in localStorage: the
