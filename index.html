@@ -608,7 +608,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-11.8</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-11.9</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1225,6 +1225,22 @@ const MUSCLE_COLORS={Chest:'#e8ff47',Back:'#47c8ff',Shoulders:'#ff8c00',Biceps:'
 // getMuscleVolume itself) because the Home screen's boot-time render chain can reach it well
 // before the script's own top-to-bottom pass would otherwise get there.
 const MUSCLE_VOLUME_WINDOW_DAYS=7;
+// Efficient Volume's equipment vocabulary — what getEfficientVolumeMechanism/normalizeEquipmentTag
+// recognize. There used to be a separate "Set Equipment" modal writing to its own ex.equipment
+// field here, duplicating the choice already made (and stored on ex.machine) when the exercise was
+// built via the guided picker. Removed — normalizeEquipmentTag (near getEfficientVolumeMechanism)
+// now derives this straight from ex.machine, so no separate assignment step exists or is needed.
+const EFFICIENT_VOLUME_EQUIPMENT_LIST=['Barbell','Dumbbell','Cable','Machine','Smith Machine','Bodyweight','Weighted','EZ Bar','Trap Bar','Kettlebell','Leg Press Machine','Plate','Resistance Band','Ab Wheel'];
+// Cap on Efficient Volume credit (drop sets / myo-rep bursts) relative to the reps a real set
+// actually achieves relative to the set it replaces — full credit (not a discount) if it hits
+// that target. Moved here (from its original spot much later in the file, near
+// getExerciseVolumeCredit) because the boot sequence's renderHomeScreen() call can reach
+// getExerciseVolumeCredit() via getMuscleVolume() when there's a workout logged this week —
+// and a `const` declared later in the script is still in the temporal dead zone at that point,
+// throwing "Cannot access before initialization" and aborting the rest of the boot chain
+// (checkForWorkoutDraft/initGoogleSyncWhenReady never run). Keep this above the boot call at
+// the bottom of the init block below.
+const EFFICIENT_VOLUME_CREDIT_CAP=1.0;
 // ── INDIRECT/FRACTIONAL VOLUME CREDIT (2026-08-11) ──
 // A secondary muscle doesn't get the same stimulus as the primary target, so it's credited at a
 // fraction of the primary's set count rather than a full set. Previously this was a single flat
@@ -8318,12 +8334,6 @@ function customizeLibraryVariant(rowIdx){
   openLibraryEditModal(r.muscle,r.name,null);
 }
 let mergeSourceExId=null;
-// Efficient Volume's equipment vocabulary — what getEfficientVolumeMechanism/normalizeEquipmentTag
-// recognize. There used to be a separate "Set Equipment" modal writing to its own ex.equipment
-// field here, duplicating the choice already made (and stored on ex.machine) when the exercise was
-// built via the guided picker. Removed — normalizeEquipmentTag (near getEfficientVolumeMechanism)
-// now derives this straight from ex.machine, so no separate assignment step exists or is needed.
-const EFFICIENT_VOLUME_EQUIPMENT_LIST=['Barbell','Dumbbell','Cable','Machine','Smith Machine','Bodyweight','Weighted','EZ Bar','Trap Bar','Kettlebell','Leg Press Machine','Plate','Resistance Band','Ab Wheel'];
 function openMergeExerciseModal(exId){
   const ex=getExercise(exId);if(!ex)return;
   mergeSourceExId=exId;
@@ -8667,7 +8677,6 @@ function hasEverTrainedMuscle(muscle){
 // which was carried over from the ORIGINAL "deliver extra volume" framing and no longer applied
 // once the feature became "match this set's volume, don't add to it"). Still genuinely partial
 // (honest, ratio-based) credit if it falls short — never inflated above 1.0 for an overshoot.
-const EFFICIENT_VOLUME_CREDIT_CAP=1.0;
 // One exercise's total volume credit for a session: each genuine normal/working set = 1 full
 // set; a drop set = a fraction of the reps it achieved relative to the most recent normal set
 // before it (its own natural reference point — a drop set always follows a real top set); a
