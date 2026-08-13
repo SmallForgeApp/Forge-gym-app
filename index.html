@@ -608,7 +608,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-11.9</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-11.10</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -5150,14 +5150,20 @@ function buildMyoBurstChain(refReps,isUni){
 // set position = fatigue depth, so these are never inserted mid-session), each a further ~20%
 // below the previous weight (ASSUMPTION, doc/user didn't specify a number), sized so their
 // combined reps land close to refReps — capped at 3 drops.
-function buildDropSetChain(refWeight,refReps){
+function buildDropSetChain(refWeight,refReps,isUni){
   const chain=[];
   let remaining=refReps,w=refWeight;
   for(let i=0;i<3&&remaining>0.5;i++){
     w=refWeight>0?Math.round(w*0.8*2)/2:0;
     let n=Math.max(1,Math.round(refReps*(i===0?0.6:0.4)));
     n=Math.min(n,Math.ceil(remaining));
-    chain.push({type:'dropset',weight:w,reps:n,repsL:0,repsR:0,rpe:null,done:false,
+    // repsL/repsR must be null (not 0) for a bilateral set — repsMetricOf() and the "Last:"
+    // display both use `repsL!=null||repsR!=null` to detect a unilateral set, and 0 satisfies
+    // that check just as much as a real number does. Hardcoding 0 here (pre-2026-08-13) made
+    // every drop set look unilateral with 0/0 reps — showing "x0/0" in Last: and, worse, making
+    // repsMetricOf() return 0 for every drop set, so Efficient Volume drop sets were silently
+    // counting as 0 reps toward weekly muscle volume in Review.
+    chain.push({type:'dropset',weight:w,reps:isUni?null:n,repsL:isUni?n:null,repsR:isUni?n:null,rpe:null,done:false,
       prevWeight:0,prevReps:0,prevRepsL:0,prevRepsR:0});
     remaining-=n;
   }
@@ -5189,7 +5195,7 @@ function applyEfficientVolumeSwap(exIdx,mechanism){
     // startRoutineWorkout) — Partials is meant to be the true final beyond-failure push, so it
     // needs to stay last even when a drop-set chain gets appended here. Pull it out, append the
     // chain, then put it back on the end.
-    const chain=buildDropSetChain(refWeight,refReps);
+    const chain=buildDropSetChain(refWeight,refReps,isUni);
     const partialsSet=ex.sets.find(s=>s.type==='partials');
     const rest=ex.sets.filter(s=>s!==refSet&&s.type!=='partials');
     ex.sets=partialsSet?[...rest,...chain,partialsSet]:[...rest,...chain];
