@@ -3958,7 +3958,12 @@ function grantMuscleVolumeProgress(m,routineId){
   });
   return grants;
 }
-function getMesoVolumeSuggestions(m,routineId){
+// liveMode (2026-08-15, session-overlap fix): when true, reads getMuscleVolumeLive instead of
+// pure history for each muscle's current volume — used only by reconcileRampExtraSets to re-check
+// still-unstarted exercises mid-session against what's actually been logged so far THIS session,
+// not just through yesterday. Every other caller (preview, workout start) leaves this off and
+// behaves exactly as before.
+function getMesoVolumeSuggestions(m,routineId,liveMode){
   if(!m||m.phase!=='training')return null;
   const r=getRoutine(routineId);
   if(!r)return null;
@@ -3976,7 +3981,7 @@ function getMesoVolumeSuggestions(m,routineId){
     const g=groups[muscle];
     if(!g.exIds.length)return;
     const priority=state.musclePriority[muscle]||'normal';
-    const rec=getVolumeRecommendation(muscle);
+    const rec=liveMode?getVolumeRecommendation(muscle,getMuscleVolumeLive(muscle).sets):getVolumeRecommendation(muscle);
     // Priority/back-burner ceiling (2026-08-09, see block comment above getEffectiveMRV) — a
     // priority muscle's real ceiling this pass can sit ABOVE the flat stored MRV that
     // getVolumeRecommendation's 'at-or-above-mrv' status is computed against, so that raw status
@@ -5746,7 +5751,16 @@ function startRoutineWorkout(i,sorenessScores,volumeMode,efficientVolumeOn){
   if(activeWorkout&&activeWorkout.sourceRoutineId===r.id){
     activeWorkout.muscleSoreness=sorenessScores||{};
     if(volumeMode!=='plain'&&addSetExIds.size){
-      activeWorkout.exercises.forEach((ex,exIdx)=>{if(addSetExIds.has(ex.exId))addSet(exIdx);});
+      // Tag each auto-added ramp-due set (2026-08-15, session-overlap fix) so
+      // reconcileRampExtraSets can later identify and safely remove exactly this row — never a
+      // set the user added themselves — if an earlier exercise in this same session ends up
+      // covering the gap first.
+      activeWorkout.exercises.forEach((ex,exIdx)=>{
+        if(!addSetExIds.has(ex.exId))return;
+        addSet(exIdx);
+        const added=ex.sets[ex.sets.length-1];
+        if(added)added._rampExtra=true;
+      });
     }
     // EFFICIENT VOLUME feature (redesigned 2026-08-06): a SEPARATE pass, independent of the
     // ramp-due-volume add above — runs AFTER the workout's real set counts are fully decided
@@ -6946,6 +6960,39 @@ function finishSetSlot(exIdx,setIdx,opts){
     startRestTimer(restSecs);
   }
   checkExerciseFeedbackTrigger(exIdx);
+  reconcileRampExtraSets();
+}
+// SESSION-OVERLAP FIX (2026-08-15): ramp-due extra sets are baked into set counts once, at the
+// very start of the workout (see the addSetExIds/_rampExtra tagging above) — before any real
+// credit exists yet from THIS session. Called every time a set slot is genuinely finished
+// (finishSetSlot, covering plain sets and the true end of a myo/dropset chain alike), this re-
+// checks every exercise that ISN'T started yet (no set with done===true — never touches an
+// exercise the user is already mid-way through) and still carries a tagged _rampExtra set: if
+// today's real progress so far (history + everything already logged this session, including
+// secondary/indirect credit — see getMuscleVolumeLive) means that muscle's target is already met,
+// the now-redundant tagged set is quietly removed. Never ADDS a set mid-session — only prunes an
+// over-grant; if an earlier exercise under-delivers, the gap just isn't closed by this feature
+// (a separate, bigger change — re-running full eligibility mid-session — not built here).
+function reconcileRampExtraSets(){
+  if(!activeWorkout||!activeWorkout.exercises)return;
+  if(!activeMesoContext)return;
+  const m=state.mesocycles[activeMesoContext.mesoIdx];
+  if(!m||!activeWorkout.sourceRoutineId)return;
+  const liveSuggestions=getMesoVolumeSuggestions(m,activeWorkout.sourceRoutineId,true);
+  const stillNeeded={};
+  (liveSuggestions||[]).forEach(s=>{if(s.action==='add_set')stillNeeded[s.muscle]=true;});
+  let changed=false;
+  activeWorkout.exercises.forEach(ex=>{
+    if(!ex.sets||!ex.sets.some(s=>s._rampExtra))return;
+    if(ex.sets.some(s=>s.done))return; // exercise already started — never pull a set out from under an in-progress exercise
+    const exData=getExercise(ex.exId);if(!exData)return;
+    if(stillNeeded[exData.muscle])return; // still genuinely below target even with today's progress counted — keep it
+    const idx=ex.sets.findIndex(s=>s._rampExtra);
+    if(idx<0)return;
+    ex.sets.splice(idx,1);
+    changed=true;
+  });
+  if(changed){renderActiveWorkout();updateWorkoutEstimate();}
 }
 function toggleMyoBurstDone(exIdx,setIdx,burstIdx){
   const set=activeWorkout.exercises[exIdx].sets[setIdx];
@@ -9237,6 +9284,28 @@ function getMuscleVolume(muscle){
   }));
   return{sets:Math.round(sets*10)/10,windowDays};
 }
+// SESSION-OVERLAP FIX (2026-08-15): getMuscleVolume only ever reads state.history, which the
+// CURRENT in-progress workout isn't part of until it's finished — so a ramp-due "add a set"
+// decision made at the very start of a session has no way to know that an earlier exercise in
+// THIS SAME SESSION already delivered real (direct or secondary) credit toward the same muscle by
+// the time a later exercise's card gets reached. This layers the active workout's own
+// already-logged (done) sets on top of the same trailing-window read, so a live re-check mid-
+// session sees today's real progress so far, not just history through yesterday. Only used by
+// reconcileRampExtraSets below — every other caller of getMuscleVolume/getVolumeRecommendation
+// (Review tab, priority modal, deload signal checks, etc.) is untouched and keeps reading pure
+// history, which is the correct semantics for a summary/decision screen, not a live in-session one.
+function getMuscleVolumeLive(muscle){
+  const base=getMuscleVolume(muscle);
+  if(!activeWorkout||!activeWorkout.exercises)return base;
+  let extra=0;
+  activeWorkout.exercises.forEach(ex=>{
+    const exData=getExercise(ex.exId);if(!exData)return;
+    const credit=getExerciseVolumeCredit(ex); // only counts sets with done===true, safe to call anytime mid-session
+    if(exData.muscle===muscle)extra+=credit;
+    else if(exData.secondary&&exData.secondary.split(',').some(s=>s.trim()===muscle))extra+=credit*getSecondaryMuscleFraction(exData,muscle);
+  });
+  return{sets:Math.round((base.sets+extra)*10)/10,windowDays:base.windowDays};
+}
 function getMuscleGroupVolumes(){
   const ms={};MUSCLE_GROUPS.forEach(m=>{ms[m]=getMuscleVolume(m).sets;});
   return ms;
@@ -9348,9 +9417,9 @@ function getPriorityImbalanceNotes(){
   return notes;
 }
 // Average sessions/week during the CURRENT pass of a mesocycle (from its first workout to its
-function getVolumeRecommendation(muscle){
+function getVolumeRecommendation(muscle,volOverride){
   const lm=getMuscleLandmarks(muscle);
-  const{sets:vol,windowDays}=getMuscleVolume(muscle);
+  const{sets:vol,windowDays}=volOverride!=null?{sets:volOverride,windowDays:MUSCLE_VOLUME_WINDOW_DAYS}:getMuscleVolume(muscle);
   const sfr=getMuscleSFRSignal(muscle);
   let status,action;
   if(sfr.maxJointPain!=null&&sfr.maxJointPain>=2){
