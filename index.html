@@ -455,6 +455,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
   <div class="topbar">
     <div><div class="topbar-title">Exercises</div><div class="topbar-sub">Exercise library</div></div>
     <div style="display:flex;gap:7px">
+      <button class="icon-btn" onclick="openInjuredExercisesModal()" title="Injured / Resting">🩹</button>
       <button class="icon-btn" onclick="openNewExerciseModal()">＋</button>
     </div>
   </div>
@@ -608,7 +609,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-11.10</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-15.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1183,6 +1184,28 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
   </div>
 </div>
 
+<!-- Injured / Resting Exercises -->
+<div class="modal-overlay" id="modal-injured-exercises">
+  <div class="modal"><div class="modal-handle"></div>
+    <div class="modal-title">Injured / Resting Exercises</div>
+    <div class="modal-body">
+      <div class="small text2" style="margin-bottom:12px">Mark specific exercises to sit out — useful for a joint or body-part injury that doesn't map to just one muscle. A flagged exercise seeds zero sets every session until you clear it here; nothing else about your routines or mesocycle changes.</div>
+      <div class="input-label">Reason (optional — groups exercises together)</div>
+      <input id="injured-ex-reason" placeholder="e.g. Left knee" style="margin-bottom:6px"/>
+      <div id="injured-ex-reason-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px"></div>
+      <div class="search-wrap" style="margin-bottom:10px"><span class="search-icon">🔍</span>
+        <input class="search-input" id="injured-ex-search" placeholder="Search your exercises..." oninput="renderInjuredExercisesList()">
+      </div>
+      <div id="injured-exercises-list"></div>
+      <div id="injured-ex-history-toggle" style="text-align:center;padding:10px 0"></div>
+      <div id="injured-ex-history-body" style="display:none"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary btn-full" onclick="closeModal('modal-injured-exercises')">Done</button>
+    </div>
+  </div>
+</div>
+
 <!-- Add Routine to Mesocycle -->
 <div class="modal-overlay" id="modal-add-routine-meso">
   <div class="modal"><div class="modal-handle"></div><div class="modal-title">Add to Mesocycle</div>
@@ -1225,6 +1248,12 @@ const MUSCLE_COLORS={Chest:'#e8ff47',Back:'#47c8ff',Shoulders:'#ff8c00',Biceps:'
 // getMuscleVolume itself) because the Home screen's boot-time render chain can reach it well
 // before the script's own top-to-bottom pass would otherwise get there.
 const MUSCLE_VOLUME_WINDOW_DAYS=7;
+// PRIORITY RAMP REDESIGN (2026-08-15) — see getMesoMuscleVolumeTarget/getRealWeeklyTrainingFrequency.
+// Declared up here, not near their own functions, for the same boot-chain-hoisting reason as
+// MUSCLE_VOLUME_WINDOW_DAYS above: getMesoMuscleVolumeTarget sits on the same
+// renderActiveMesoHero -> buildRoutineSeedPlan -> getMesoVolumeSuggestions boot-time chain.
+const MUSCLE_FREQ_WINDOW_DAYS=28; // trailing window for real-workouts-per-week (block-length/ceiling planning only)
+const LAST_HIT_CLAMP_DAYS=14; // caps the per-exercise real-gap increment so a long/injury gap can't dump a huge jump into one session
 // Efficient Volume's equipment vocabulary — what getEfficientVolumeMechanism/normalizeEquipmentTag
 // recognize. There used to be a separate "Set Equipment" modal writing to its own ex.equipment
 // field here, duplicating the choice already made (and stored on ex.machine) when the exercise was
@@ -1695,6 +1724,8 @@ function load(){
     state.volumeLandmarksRPMrv2Migrated=true;
   }
   if(!state.musclePriority)state.musclePriority={};
+  if(!state.injuredExercises)state.injuredExercises={};
+  if(!state.injuredExerciseHistory)state.injuredExerciseHistory=[];
   // Priority/back-burner history (2026-08-09) — global log of every meso-pass priority
   // selection, across ALL mesocycles, so suggestPriorityMuscles can rotate through the full
   // muscle list over time rather than the same 1-2 muscles repeating pass after pass. Separate
@@ -2207,6 +2238,20 @@ const DRIVE_FILENAME='forge-backup.json';
 let gAccessToken=null;
 let gTokenClient=null;
 let gDriveFileId=null;
+// Declared here rather than next to initGoogleSync (its only reader/writer, ~line 9180) — same
+// TDZ class as the 2026-08-11.9 EFFICIENT_VOLUME_CREDIT_CAP bug, found during a full audit for
+// that same bug class right after fixing it. initGoogleSyncWhenReady (called synchronously at
+// boot) calls initGoogleSync() immediately, without the setTimeout poll-retry, whenever
+// google.accounts HAPPENS to already be loaded at that exact instant (fast connection/cached GIS
+// script) — a real, timing-dependent condition, not guaranteed every boot, which is exactly why
+// this class of bug slips past testing. Inside initGoogleSync, a returning signed-in user with an
+// expired saved token hits gSilentAuthAttempt=true synchronously on the silent-refresh path —
+// if that line had run before this declaration executed, it would throw "Cannot access
+// 'gSilentAuthAttempt' before initialization," silently breaking the ENTIRE silent-refresh flow
+// (and, per the .9 precedent, potentially any code that would've run after it in the same boot
+// statement). This is a strong candidate for actually EXPLAINING the earlier-reported "permanently
+// signed out even when I try to sign in" symptom, on top of the popup/background-tab theory.
+let gSilentAuthAttempt=false;
 let pickerState={step:0,muscle:null,exDef:null,equipment:null,position:null,grip:null,isUni:false,modifier:null,modifierCustomMode:false,attachment:null,customValues:{},addingField:null,cablePosition:null,benchBack:null,benchSeat:null,showBenchSetup:false,usedLastConfig:false};
 const EXERCISE_CATALOGUE={
   Chest:[
@@ -2520,10 +2565,11 @@ function renderEditRoutineExList(){
     const color=MUSCLE_COLORS[ex.muscle]||'#aaa';
     const meta=editingRoutineMeta[id]||{repRange:null,useRIR:false,repRangeExplicit:false};
     const repLabel=meta.repRange?('Reps '+meta.repRange.min+(meta.repRange.min!==meta.repRange.max?'\u2013'+meta.repRange.max:'')+(meta.repRangeExplicit?'':' (default)')):'Set Rep Range';
-    return'<div class="edit-ex-row" data-routine-ex-idx="'+idx+'">'
+    const injured=isExerciseInjured(id);
+    return'<div class="edit-ex-row" data-routine-ex-idx="'+idx+'"'+(injured?' style="opacity:0.7"':'')+'>'
       +'<div style="width:22px;height:22px;border-radius:6px;background:var(--bg4);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--text2);flex-shrink:0">'+(idx+1)+'</div>'
       +'<span class="rd-muscle-dot" style="background:'+color+'"></span>'
-      +'<div style="flex:1;min-width:0"><div class="bold" style="font-size:13px">'+escHtml(ex.name)+'</div>'
+      +'<div style="flex:1;min-width:0"><div class="bold" style="font-size:13px">'+escHtml(ex.name)+(injured?' <span style="color:var(--red);font-size:11px">\ud83e\uddbd Resting</span>':'')+'</div>'
       +'<div class="small text2">'+escHtml([ex.muscle,ex.machine].filter(Boolean).join(' · '))+'</div>'
       +'<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">'
       +'<button class="sort-chip" style="font-size:11px;padding:4px 10px" onclick="openRepRangeEditor(\''+id+'\')">'+repLabel+'</button>'
@@ -2876,6 +2922,8 @@ function renderActiveMesoHero(){
         +'<span style="font-size:12px;color:var(--text2)">'+escHtml(ex.name)+'</span></div>';
     }).join('');
     const showBtn='<button onclick="event.stopPropagation();toggleMesoExList(\'' +exListId+ '\')" style="background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text3);font-size:10px;padding:2px 7px;cursor:pointer;flex-shrink:0">'+n+' ex</button>';
+    const restingCount=(r.exerciseIds||[]).filter(exId=>isExerciseInjured(exId)).length;
+    const restingBadge=restingCount?' <span class="tight-badge" style="background:rgba(255,71,87,0.15);color:var(--red)">\ud83e\uddbd '+restingCount+' RESTING</span>':'';
 
     if(isNext){
       const est=estimateRoutineTime(r.exerciseIds||[],r.id,getPredictedSetCounts(state.routines.indexOf(r)))||'—';
@@ -2885,7 +2933,7 @@ function renderActiveMesoHero(){
         +'<div style="width:40px;height:40px;border-radius:12px;background:'+col+'20;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+getCategoryIconSVG(muscat,20,col)+'</div>'
         +'<div style="flex:1;min-width:0">'
         +'<div style="font-size:10px;font-weight:800;letter-spacing:1px;color:var(--accent);text-transform:uppercase;margin-bottom:1px">Up Next</div>'
-        +'<div class="bold" style="font-size:15px;line-height:1.2">'+escHtml(r.name)+rirBadge+'</div>'
+        +'<div class="bold" style="font-size:15px;line-height:1.2">'+escHtml(r.name)+rirBadge+restingBadge+'</div>'
         +'<div style="display:flex;align-items:center;gap:6px;margin-top:4px">'+showBtn+'<span class="small text2">'+est+'</span></div>'
         +'</div>'
         +'<div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0">'
@@ -2902,7 +2950,7 @@ function renderActiveMesoHero(){
       return '<div style="display:flex;align-items:center;gap:8px;background:linear-gradient(90deg,#ff8c0014,transparent);border-bottom:1px solid var(--border);border-left:3px solid #ff8c00;padding:8px 4px 8px 7px">'
         +'<div style="width:19px;text-align:center;font-size:11px;color:#ff8c00;font-weight:700;flex-shrink:0">'+(idx+1)+'</div>'
         +'<div style="flex:1;min-width:0">'
-        +'<div class="tight-name">'+escHtml(r.name)+skipRirBadge+'</div>'
+        +'<div class="tight-name">'+escHtml(r.name)+skipRirBadge+restingBadge+'</div>'
         +'<div class="small" style="color:#ff8c00">Skipped — redo before it comes around again</div>'
         +'</div>'
         +'<button class="btn btn-primary btn-sm" onclick="startCatchUpSession('+mesoIdx+',\''+skipEntry.id+'\')" style="flex-shrink:0;font-weight:700">Revisit</button>'
@@ -2912,7 +2960,7 @@ function renderActiveMesoHero(){
       +'<div style="width:3px;background:'+col+';align-self:stretch;border-radius:2px;margin-right:8px;flex-shrink:0"></div>'
       +'<div style="width:22px;text-align:center;font-size:11px;color:var(--text3);font-weight:700;flex-shrink:0">'+(idx+1)+'</div>'
       +'<div style="width:28px;height:28px;border-radius:7px;background:'+col+'18;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin:0 8px">'+getCategoryIconSVG(muscat,14,col)+'</div>'
-      +'<div style="flex:1;min-width:0"><div class="tight-name">'+escHtml(r.name)+rirBadge+'</div></div>'
+      +'<div style="flex:1;min-width:0"><div class="tight-name">'+escHtml(r.name)+rirBadge+restingBadge+'</div></div>'
       +'<span class="small text3" style="flex-shrink:0">'+n+' ex</span>'
       +'</div>';
   }).join('');
@@ -3244,6 +3292,7 @@ function advanceMesoProgress(m,loggedExercises){
   if(!m.preDeloadBaselines)m.preDeloadBaselines={};
   if(!m.skipLog)m.skipLog=[];
   if(!m.extraRotationCredits)m.extraRotationCredits={}; // Decision 2 (Phase B) — reset at pass boundaries below
+  if(!m.muscleVolumeProgress)m.muscleVolumeProgress={}; // 2026-08-15 redesign — reset at pass boundaries below, same as extraRotationCredits
   // Any further progress (a finished workout, or another skip) invalidates the previous skip's
   // undo window — undo only ever applies to the single most recent skip, and only until
   // something else happens to this mesocycle.
@@ -3286,6 +3335,7 @@ function advanceMesoProgress(m,loggedExercises){
     m.preDeloadBaselines={};
     m.skipLog=[]; // a new pass starts — any still-open catch-up window from the last pass no longer applies
     m.extraRotationCredits={}; // Decision 2 (Phase B) — fresh pass, no extra-rotation credits carried over
+    m.muscleVolumeProgress={}; // 2026-08-15 redesign — fresh pass, no per-muscle progress carried over (a fresh selection re-floors at MEV/MV)
     m.rirRampAnchorTotal=null; // fresh pass — ramp computes against its own rotationsPerMeso, not a carried-over extension anchor
     if(m.baseRotationsPerMeso!=null){m.rotationsPerMeso=m.baseRotationsPerMeso;m.baseRotationsPerMeso=null;} // an extension only ever applies to the pass it was granted for
     m.phase=(totalRepeats>0&&m.repeatsDone>=totalRepeats)?'finished':'training';
@@ -3316,6 +3366,7 @@ function advanceMesoProgress(m,loggedExercises){
     m.rotationBaselines={};
     m.skipLog=[]; // a new pass starts — any still-open catch-up window from the last pass no longer applies
     m.extraRotationCredits={}; // Decision 2 (Phase B) — fresh pass, no extra-rotation credits carried over
+    m.muscleVolumeProgress={}; // 2026-08-15 redesign — fresh pass, no per-muscle progress carried over (a fresh selection re-floors at MEV/MV)
     m.rirRampAnchorTotal=null; // fresh pass — ramp computes against its own rotationsPerMeso, not a carried-over extension anchor
     if(m.baseRotationsPerMeso!=null){m.rotationsPerMeso=m.baseRotationsPerMeso;m.baseRotationsPerMeso=null;} // an extension only ever applies to the pass it was granted for
     m.phase=(totalRepeats>0&&m.repeatsDone>=totalRepeats)?'finished':'training';
@@ -3800,35 +3851,112 @@ function suggestPriorityMuscles(count){
     .slice(0,count)
     .map(x=>x.muscle);
 }
-// The volume ramp's target TOTAL weekly-equivalent set count for one muscle at the current
-// rotation — the actual primary progression axis under this redesign, not a bonus layered on
-// top of the RIR ramp. Branches by this pass's priority/back-burner status (see block comment
-// above getEffectiveMRV): priority climbs MEV\u2192effective MRV, back-burner climbs MV\u2192MEV,
-// and if the priority system hasn't been activated for this meso yet (no deload has happened to
-// prompt a selection), every muscle falls back to the original MEV\u2192MAV ramp unchanged — this
-// keeps existing/in-progress mesos and deload-disabled mesos behaving exactly as before.
-// Anything past this target is Phase B's job (getMesoVolumeSuggestions, extraIdx>0 branch) — +1
-// set per muscle per routine per extra rotation, gated on the SAME priority-aware ceiling (see
-// getMesoVolumeSuggestions) and on pain/high-fatigue flags. That ceiling only ever holds volume
-// steady for that one muscle — it has no path to end the training phase or trigger deload; the
-// stall check (decline across sessions, mainly) is the only trigger for that.
+// PRIORITY RAMP REDESIGN (2026-08-15, handover spec + follow-up discussion). Replaces the
+// rotation-fraction interpolation for priority/back-burner muscles with a stored, per-muscle
+// running total (m.muscleVolumeProgress[muscle].current) that only moves when a session actually
+// trains that muscle, by a real-time-scaled amount — a muscle trained less often (or after a gap)
+// gets a bigger jump per session, not a slower trickle, since MEV/MRV are weekly landmarks and a
+// "rotation" isn't a fixed amount of real time. Two ceilings, two different philosophies (resolved
+// point 1): Phase A's ceiling is the FLAT stored MRV, nothing elastic — once a muscle's progress
+// reaches it, it hands off individually to Phase B (getMesoVolumeSuggestions), which is the ONLY
+// place the elastic 150% getEffectiveMRV ceiling applies, earned one set at a time same as before.
+// A meso where the priority system hasn't activated yet (no deload has happened to prompt a
+// selection) keeps the ORIGINAL rotation-fraction MEV\u2192MAV ramp entirely untouched below.
+//
+// Real days since a muscle was last DIRECTLY trained (primary muscle match only, non-injured
+// exercise, a real logged/done set) — deliberately not counting indirect/secondary credit, which
+// still closes the gap toward the target via rec.vol in getMesoVolumeSuggestions, just doesn't
+// drive the increment itself (resolved point 4).
+function getDaysSinceMuscleDirectlyTrained(muscle){
+  for(let i=0;i<state.history.length;i++){
+    const w=state.history[i];
+    const hit=(w.exercises||[]).some(e=>{
+      const exData=getExercise(e.exId);
+      return exData&&exData.muscle===muscle&&!isExerciseInjured(e.exId)&&(e.sets||[]).some(s=>s.done);
+    });
+    if(hit)return Math.round((Date.now()-new Date(w.date))/864e5);
+  }
+  return null;
+}
+// 1 set per 7 real days since this muscle was last directly trained, clamped at
+// LAST_HIT_CLAMP_DAYS so a long gap (injured/resting exercise coming back, or any extended break)
+// can't dump a huge catch-up jump into a single session (resolved point 5 — applies to any gap,
+// not just injury-flagged ones, for one consistent rule).
+function computeVolumeProgressIncrement(muscle){
+  const days=getDaysSinceMuscleDirectlyTrained(muscle);
+  if(days==null)return 1; // never trained before in real history — treat like a normal week's worth
+  return Math.max(0,Math.round(Math.min(days,LAST_HIT_CLAMP_DAYS)/7));
+}
+// How many real weeks a muscle has been sitting in Phase B, for pacing the +1-set-per-week
+// mechanism in getMesoVolumeSuggestions — the per-muscle equivalent of the old pass-level
+// getMesoExtraRotationIndex, now timed off when THIS muscle individually entered Phase B
+// (m.muscleVolumeProgress[muscle].phaseBSince, stamped once in grantMuscleVolumeProgress) rather
+// than a rotation count shared by the whole pass.
+function getMuscleVolumeProgressPhaseBWeeks(m,muscle){
+  const p=m.muscleVolumeProgress&&m.muscleVolumeProgress[muscle];
+  if(!p||!p.phaseBSince)return 1; // no stamp on record (e.g. landmarks changed mid-pass) — treat as week 1
+  const days=Math.round((Date.now()-new Date(p.phaseBSince))/864e5);
+  return Math.max(1,Math.floor(days/7)+1);
+}
 function getMesoMuscleVolumeTarget(m,muscle){
   const lm=getMuscleLandmarks(muscle);
-  const frac=getMesoRampFraction(m);
-  if(!mesoHasActivePriority(m))return Math.round(lm.mev+(lm.mav-lm.mev)*frac);
-  if(mesoIsPriorityMuscle(m,muscle)){
-    const effMrv=getEffectiveMRV(m,muscle);
-    return Math.round(lm.mev+(effMrv-lm.mev)*frac);
+  if(!mesoHasActivePriority(m)){
+    const frac=getMesoRampFraction(m);
+    return Math.round(lm.mev+(lm.mav-lm.mev)*frac);
   }
-  // Back-burner floor-return (2026-08-11, user's explicit request): a back-burner muscle showing
-  // its own pain or high-fatigue signal drops straight back to MV and holds there — independent of
-  // the priority muscles and without forcing the real full-body deload (that stays priority-only,
-  // see checkEarlyDeloadSignals). Purely reactive per-call, no stored state: once the signal clears
-  // on a later call, this falls through to the normal MV\u2192MEV ramp again right where frac already
-  // is, same as if it had never dropped.
+  if(mesoIsPriorityMuscle(m,muscle)){
+    const stored=(m.muscleVolumeProgress&&m.muscleVolumeProgress[muscle]&&m.muscleVolumeProgress[muscle].current!=null)?m.muscleVolumeProgress[muscle].current:lm.mev;
+    return Math.round(Math.max(lm.mev,Math.min(stored,lm.mrv)));
+  }
+  // Back-burner floor-return (2026-08-11, unchanged): a back-burner muscle showing its own pain or
+  // high-fatigue signal drops straight back to MV and holds there — independent of the priority
+  // muscles and without forcing the real full-body deload (that stays priority-only). Purely
+  // reactive per-call; grantMuscleVolumeProgress also skips accumulating progress while flagged,
+  // so stored progress doesn't quietly keep climbing during a floor-return either.
   const rec=getVolumeRecommendation(muscle);
   if(rec.status==='pain-flag'||rec.status==='high-fatigue')return Math.round(lm.mv);
-  return Math.round(lm.mv+(lm.mev-lm.mv)*frac);
+  const stored=(m.muscleVolumeProgress&&m.muscleVolumeProgress[muscle]&&m.muscleVolumeProgress[muscle].current!=null)?m.muscleVolumeProgress[muscle].current:lm.mv;
+  return Math.round(Math.max(lm.mv,Math.min(stored,lm.mev)));
+}
+// Commit-time grant (called from buildRoutineSeedPlan's commit block, same pattern as the
+// existing Phase B extraRotationCredits grant): for every muscle this routine trains with a
+// non-injured exercise, advance its stored progress by the real-time-scaled increment, capped at
+// its Phase A ceiling (base MRV for priority, MEV for back-burner). One increment per muscle per
+// session, not per exercise — the number being grown is a single per-muscle total, same as the
+// target this feeds. Returns {muscle,delta} entries so a discarded/empty session can revert
+// exactly what it granted (see revertGrantedPhaseBCredits).
+function grantMuscleVolumeProgress(m,routineId){
+  if(!mesoHasActivePriority(m))return[];
+  const r=getRoutine(routineId);if(!r)return[];
+  const muscles=new Set();
+  (r.exerciseIds||[]).forEach(exId=>{
+    if(isExerciseInjured(exId))return;
+    const exData=getExercise(exId);
+    if(exData&&exData.muscle)muscles.add(exData.muscle);
+  });
+  if(!m.muscleVolumeProgress)m.muscleVolumeProgress={};
+  const grants=[];
+  muscles.forEach(muscle=>{
+    const isPriority=mesoIsPriorityMuscle(m,muscle);
+    if(!isPriority){
+      const rec=getVolumeRecommendation(muscle);
+      if(rec.status==='pain-flag'||rec.status==='high-fatigue')return; // floored — matches getMesoMuscleVolumeTarget's own floor-return, don't accumulate while flagged
+    }
+    const lm=getMuscleLandmarks(muscle);
+    const ceiling=isPriority?lm.mrv:lm.mev;
+    const floor=isPriority?lm.mev:lm.mv;
+    if(!m.muscleVolumeProgress[muscle])m.muscleVolumeProgress[muscle]={current:floor};
+    const cur=m.muscleVolumeProgress[muscle].current;
+    if(cur>=ceiling)return; // already at this muscle's Phase A ceiling — Phase B's job now, see getMesoVolumeSuggestions
+    const inc=computeVolumeProgressIncrement(muscle);
+    if(inc<=0)return;
+    const next=Math.min(ceiling,cur+inc);
+    if(next<=cur)return;
+    m.muscleVolumeProgress[muscle].current=next;
+    if(next>=ceiling&&!m.muscleVolumeProgress[muscle].phaseBSince)m.muscleVolumeProgress[muscle].phaseBSince=new Date().toISOString();
+    grants.push({muscle,delta:next-cur});
+  });
+  return grants;
 }
 function getMesoVolumeSuggestions(m,routineId){
   if(!m||m.phase!=='training')return null;
@@ -3843,7 +3971,6 @@ function getMesoVolumeSuggestions(m,routineId){
     groups[muscle].names.push(exData.name);
     groups[muscle].exIds.push(exId);
   });
-  const extraIdx=getMesoExtraRotationIndex(m);
   const suggestions=[];
   Object.keys(groups).forEach(muscle=>{
     const g=groups[muscle];
@@ -3862,28 +3989,41 @@ function getMesoVolumeSuggestions(m,routineId){
     const overreached=isMesoPriority
       ?(rec.status==='pain-flag'||rec.status==='high-fatigue')
       :(rec.status==='at-or-above-mrv'||rec.status==='pain-flag'||rec.status==='high-fatigue');
-    if(extraIdx>0){
-      // Phase B — past the configured rotationsPerMeso, still training (stall check hasn't fired).
-      // Deliberately NOT the Phase A logic below: instead of "add a set every eligible workout
-      // while under target", this grants at most ONE set per muscle per extra rotation, cycling
-      // round-robin through the muscle's sibling exercises in this routine (user spec,
-      // 2026-08-07) — see Decision 2 in the handover. Read-only here (preview-safe, this function
-      // is also called just to render the pre-workout note); the credit itself is only committed
-      // in startRoutineWorkout, once the workout actually begins.
-      const credit=(m.extraRotationCredits&&m.extraRotationCredits[muscle])||{granted:0,cycleIdx:0};
-      const mrv=isMesoPriority?getEffectiveMRV(m,muscle):isBackBurner?getMuscleLandmarks(muscle).mev:rec.landmarks.mrv;
-      const atMRV=rec.vol>=mrv;
-      if(!atMRV&&!overreached&&credit.granted<extraIdx){
-        const siblings=getMesoRoutineSiblingExIds(routineId,muscle);
-        const targetExId=siblings.length?siblings[credit.cycleIdx%siblings.length]:g.exIds[0];
-        const targetEx=getExercise(targetExId);
-        suggestions.push({muscle,action:'add_set',exerciseNames:[targetEx?targetEx.name:g.names[0]],exIds:[targetExId],priority,target:mrv,current:rec.vol,phaseB:true});
-      }else if(atMRV||overreached){
-        suggestions.push({muscle,action:'hold',exerciseNames:g.names,overrideReason:muscle+(isBackBurner?' has reached its back-burner ceiling (MEV) for this pass — holding steady.':' has reached its MRV for this pass — holding steady.')});
-      }else{
-        suggestions.push({muscle,action:'hold',exerciseNames:g.names,overrideReason:muscle+' already got this extra rotation\u2019s set — holding until the next one.'});
+    // PER-MUSCLE PHASE A/B HANDOFF (2026-08-15 redesign): a priority/back-burner muscle switches
+    // into Phase B individually, the moment ITS OWN stored progress (m.muscleVolumeProgress)
+    // reaches its Phase A ceiling — not when the whole pass exhausts a shared rotationsPerMeso
+    // count (the old getMesoExtraRotationIndex gate). A meso where the feature hasn't activated
+    // yet (mesoHasActivePriority false) always falls through to the original Phase A block below,
+    // unchanged.
+    if(mesoHasActivePriority(m)){
+      const lm=getMuscleLandmarks(muscle);
+      const phaseACeiling=isMesoPriority?lm.mrv:lm.mev;
+      const stored=(m.muscleVolumeProgress&&m.muscleVolumeProgress[muscle]&&m.muscleVolumeProgress[muscle].current!=null)?m.muscleVolumeProgress[muscle].current:(isMesoPriority?lm.mev:lm.mv);
+      if(stored>=phaseACeiling){
+        // Phase B — this muscle's own progress has reached its ceiling, stall check hasn't fired
+        // yet so the pass keeps training it. Deliberately NOT the Phase A logic below: instead of
+        // "add a set every eligible workout while under target", this grants at most ONE set per
+        // muscle per real week in Phase B, cycling round-robin through the muscle's sibling
+        // exercises in this routine (user spec, 2026-08-07 — unchanged mechanism, only the pacing
+        // gate is now per-muscle and real-time-based instead of pass-level rotation count). Read-
+        // only here (preview-safe, this function is also called just to render the pre-workout
+        // note); the credit itself is only committed in startRoutineWorkout.
+        const credit=(m.extraRotationCredits&&m.extraRotationCredits[muscle])||{granted:0,cycleIdx:0};
+        const weeksInPhaseB=getMuscleVolumeProgressPhaseBWeeks(m,muscle);
+        const mrv=isMesoPriority?getEffectiveMRV(m,muscle):lm.mev;
+        const atMRV=rec.vol>=mrv;
+        if(!atMRV&&!overreached&&credit.granted<weeksInPhaseB){
+          const siblings=getMesoRoutineSiblingExIds(routineId,muscle);
+          const targetExId=siblings.length?siblings[credit.cycleIdx%siblings.length]:g.exIds[0];
+          const targetEx=getExercise(targetExId);
+          suggestions.push({muscle,action:'add_set',exerciseNames:[targetEx?targetEx.name:g.names[0]],exIds:[targetExId],priority,target:mrv,current:rec.vol,phaseB:true});
+        }else if(atMRV||overreached){
+          suggestions.push({muscle,action:'hold',exerciseNames:g.names,overrideReason:muscle+(isBackBurner?' has reached its back-burner ceiling (MEV) for this pass — holding steady.':' has reached its MRV for this pass — holding steady.')});
+        }else{
+          suggestions.push({muscle,action:'hold',exerciseNames:g.names,overrideReason:muscle+' already got this week\u2019s extra set — holding until next week.'});
+        }
+        return;
       }
-      return;
     }
     const target=getMesoMuscleVolumeTarget(m,muscle);
     const belowTarget=rec.vol<target;
@@ -4315,23 +4455,28 @@ function renderPrioritySelectionList(){
   // Caution flags (2026-08-11, user's explicit request): a muscle with a recent pain or
   // high-fatigue signal shouldn't be silently pickable as priority — same status values
   // getMesoMuscleVolumeTarget's floor-return already reacts to, just surfaced BEFORE the choice
-  // here instead of after.
+  // here instead of after. Extended 2026-08-13 with 'resting': every exercise that trains this
+  // muscle is currently marked injured/resting (isMuscleFullyResting) — not blocked (the
+  // exercise-level system never hard-blocks), but picking it as priority would just make the
+  // volume-ceiling check report a misleading "structural limit" every pass, so flag it here first.
   const flagged={};
   Object.keys(state.volumeLandmarks||{}).forEach(muscle=>{
     const rec=getVolumeRecommendation(muscle);
     if(rec.status==='pain-flag'||rec.status==='high-fatigue')flagged[muscle]=rec.status;
+    else if(isMuscleFullyResting(muscle))flagged[muscle]='resting';
   });
   el.innerHTML=Object.keys(state.volumeLandmarks||{}).map(muscle=>{
     const active=priorityDraftMuscles.includes(muscle);
     const isSuggested=suggested.includes(muscle)&&!active;
     const isFlagged=!!flagged[muscle];
-    return '<button class="priority-pill'+(active?' active':'')+(isSuggested?' suggested':'')+(isFlagged?' flagged':'')+'" onclick="togglePriorityPill(\''+muscle+'\')">'+(isFlagged?'\u26a0\ufe0f ':'')+escHtml(muscle)+'</button>';
+    return '<button class="priority-pill'+(active?' active':'')+(isSuggested?' suggested':'')+(isFlagged?' flagged':'')+'" onclick="togglePriorityPill(\''+muscle+'\')">'+(isFlagged?(flagged[muscle]==='resting'?'\ud83e\uddbd ':'\u26a0\ufe0f '):'')+escHtml(muscle)+'</button>';
   }).join('');
   const capEl=document.getElementById('priority-select-caution');
   if(capEl){
     const names=Object.keys(flagged);
+    const reasonText=m=>flagged[m]==='pain-flag'?'joint pain':flagged[m]==='high-fatigue'?'high fatigue':'all its exercises are resting';
     capEl.innerHTML=names.length
-      ?'<div class="small" style="color:var(--red);margin-top:10px;line-height:1.5">\u26a0\ufe0f '+names.map(m=>escHtml(m)+' ('+(flagged[m]==='pain-flag'?'joint pain':'high fatigue')+')').join(', ')+' \u2014 flagged recently. Still fine to prioritize if that\'s intentional, just going in with eyes open.</div>'
+      ?'<div class="small" style="color:var(--red);margin-top:10px;line-height:1.5">\u26a0\ufe0f '+names.map(m=>escHtml(m)+' ('+reasonText(m)+')').join(', ')+' \u2014 flagged recently. Still fine to prioritize if that\'s intentional, just going in with eyes open.</div>'
       :'';
   }
 }
@@ -4387,26 +4532,54 @@ const PRIORITY_VOLUME_SET_CAP=10;
 // vs the full routine list for the cycle.
 function getPriorityMuscleWorkoutCoverage(m,muscle){
   const routineIds=m.routineIds||[];
+  // Only counts a workout as "training" the muscle if it has a non-injured exercise for it
+  // (2026-08-13 fix, user's explicit request) — previously counted any routine with a matching
+  // exercise regardless of isExerciseInjured, which overstated Y whenever every exercise for the
+  // muscle in that routine happened to be flagged resting (e.g. a whole leg day out for a knee).
   const training=routineIds.filter(rid=>{
     const r=getRoutine(rid);if(!r)return false;
-    return(r.exerciseIds||[]).some(exId=>{const exData=getExercise(exId);return exData&&exData.muscle===muscle;});
+    return(r.exerciseIds||[]).some(exId=>{const exData=getExercise(exId);return exData&&exData.muscle===muscle&&!isExerciseInjured(exId);});
   });
   return{training,total:routineIds};
 }
-// For each given muscle: Y = workouts already training it, ceiling = Y×10, compared against MRV.
-// Returns only muscles worth flagging — either a genuine gap (ceiling short of MRV, but closeable
-// by adding the muscle to an untrained workout) or a structural limit (even training it in EVERY
-// workout this split has still can't reach MRV — nothing to suggest, just a fact about the split).
+// REAL WEEKLY TRAINING FREQUENCY (2026-08-15 redesign): the old ceiling analysis counted workouts
+// in the meso's routine SEQUENCE and implicitly assumed one rotation = one real week — the exact
+// same rotation\u2260week bug the ramp redesign fixed elsewhere, just living here too. This counts
+// real completed workouts over a trailing calendar window instead, so it reflects actual training
+// frequency (which can run 3-4x/week some weeks, 6x others) rather than routine-sequence position.
+// Returns null if there isn't enough real history to trust the window (fewer than 4 logged
+// workouts in MUSCLE_FREQ_WINDOW_DAYS, i.e. averaging under ~1x/week) — callers fall back to
+// state.manualWeeklyFrequency, prompting for it if that's also unset.
+function getRealWeeklyTrainingFrequency(){
+  const cutoff=new Date(Date.now()-MUSCLE_FREQ_WINDOW_DAYS*864e5);
+  const count=state.history.filter(w=>w.duration>0&&new Date(w.date)>=cutoff).length;
+  if(count<4)return null;
+  return count/(MUSCLE_FREQ_WINDOW_DAYS/7);
+}
+function getEffectiveWeeklyTrainingFrequency(){
+  const real=getRealWeeklyTrainingFrequency();
+  return real!=null?real:(state.manualWeeklyFrequency||null);
+}
+// For each given muscle: real weekly frequency (see above) \u00d7 how much of the routine sequence
+// trains it \u00d7 10-set cap, compared against MRV. Returns only muscles worth flagging — a genuine
+// gap (ceiling short of MRV, but closeable by adding the muscle to an untrained workout), a
+// structural limit (even training every real session still can't reach MRV — a fact about total
+// training frequency or split design, not something a suggestion can fix), or (needsFrequencyInput)
+// a single flag when there isn't enough real history and no manual estimate has been entered yet.
 function getPriorityVolumeCeilingAnalysis(m,muscles){
+  const weeklyFreq=getEffectiveWeeklyTrainingFrequency();
+  if(weeklyFreq==null)return[{needsFrequencyInput:true}];
   return(muscles||[]).map(muscle=>{
     const{training,total}=getPriorityMuscleWorkoutCoverage(m,muscle);
     const y=training.length,totalWorkouts=total.length;
     const mrv=(state.volumeLandmarks[muscle]||{}).mrv||0;
-    const ceiling=y*PRIORITY_VOLUME_SET_CAP;
-    const structural=(totalWorkouts*PRIORITY_VOLUME_SET_CAP)<mrv;
+    const proportion=totalWorkouts?y/totalWorkouts:0;
+    const ceiling=Math.round(weeklyFreq*proportion*PRIORITY_VOLUME_SET_CAP);
+    const maxPossibleCeiling=Math.round(weeklyFreq*PRIORITY_VOLUME_SET_CAP); // if this muscle were trained every real session
+    const structural=maxPossibleCeiling<mrv;
     const gap=!structural&&ceiling<mrv;
     const eligibleRoutineIds=gap?total.filter(rid=>!training.includes(rid)):[];
-    return{muscle,y,totalWorkouts,mrv,ceiling,structural,gap,eligibleRoutineIds};
+    return{muscle,y,totalWorkouts,mrv,ceiling,weeklyFreq,structural,gap,eligibleRoutineIds};
   }).filter(a=>a.structural||a.gap);
 }
 let priorityVolumeCheckMesoIdx=null;
@@ -4444,11 +4617,26 @@ function getPriorityReorderSuggestions(m,muscles){
 function openPriorityVolumeCheckModal(mesoIdx,volumeAnalysis,reorderSuggestions){
   priorityVolumeCheckMesoIdx=mesoIdx;
   const body=document.getElementById('priority-volume-check-body');
+  // Not enough real workout history to compute a trustworthy weekly frequency (2026-08-15
+  // redesign) — ask for a rough estimate instead of silently guessing. Deliberately a single
+  // shared prompt, not per-muscle, since training frequency is a whole-person number, not a
+  // per-muscle one. savePriorityVolumeFrequencyEstimate re-runs the analysis once entered.
+  if(volumeAnalysis.length===1&&volumeAnalysis[0].needsFrequencyInput){
+    body.innerHTML='<div style="padding:12px 0">'
+      +'<div class="bold" style="margin-bottom:4px">How many workouts a week?</div>'
+      +'<div class="small text2" style="line-height:1.5;margin-bottom:10px">Not enough recent history to calculate this automatically yet — a rough weekly average is enough to plan the block length and flag any structural volume limits.</div>'
+      +'<div style="display:flex;gap:8px;align-items:center">'
+      +'<input type="number" id="priority-freq-input" min="1" max="14" step="0.5" placeholder="e.g. 4" inputmode="decimal" style="width:90px">'
+      +'<button class="btn btn-primary btn-sm" onclick="savePriorityVolumeFrequencyEstimate()">Save</button>'
+      +'</div></div>';
+    openModal('modal-priority-volume-check');
+    return;
+  }
   const volumeHtml=volumeAnalysis.map(a=>{
     if(a.structural){
       return '<div style="padding:12px 0;border-bottom:1px solid var(--border)">'
         +'<div class="bold" style="margin-bottom:4px">'+escHtml(a.muscle)+' — structural limit</div>'
-        +'<div class="small text2" style="line-height:1.5">Even trained in all '+a.totalWorkouts+' workouts this cycle, the max is '+((a.totalWorkouts*PRIORITY_VOLUME_SET_CAP))+' sets/week — short of its '+a.mrv+'-set MRV. Closing this gap would need a structural change to the split (an extra workout, or more sets per session than the '+PRIORITY_VOLUME_SET_CAP+'-set cap), not just moving this muscle around.</div>'
+        +'<div class="small text2" style="line-height:1.5">Even trained every real session at your current ~'+a.weeklyFreq.toFixed(1)+'x/week pace, the max is '+Math.round(a.weeklyFreq*PRIORITY_VOLUME_SET_CAP)+' sets/week — short of its '+a.mrv+'-set MRV. Closing this gap would need training more often overall, or more sets per session than the '+PRIORITY_VOLUME_SET_CAP+'-set cap, not just moving this muscle around.</div>'
         +'</div>';
     }
     const routineButtons=a.eligibleRoutineIds.map(rid=>{
@@ -4457,7 +4645,7 @@ function openPriorityVolumeCheckModal(mesoIdx,volumeAnalysis,reorderSuggestions)
     }).join('');
     return '<div style="padding:12px 0;border-bottom:1px solid var(--border)">'
       +'<div class="bold" style="margin-bottom:4px">'+escHtml(a.muscle)+' — '+a.ceiling+'/'+a.mrv+' sets/week ceiling</div>'
-      +'<div class="small text2" style="line-height:1.5">Currently trained in '+a.y+' of '+a.totalWorkouts+' workouts. Add it to one more to close the gap:</div>'
+      +'<div class="small text2" style="line-height:1.5">Currently trained in '+a.y+' of '+a.totalWorkouts+' workouts, at your current ~'+a.weeklyFreq.toFixed(1)+'x/week pace. Add it to one more workout to close the gap:</div>'
       +routineButtons
       +'</div>';
   }).join('');
@@ -4475,6 +4663,24 @@ function openPriorityVolumeCheckModal(mesoIdx,volumeAnalysis,reorderSuggestions)
   ):'';
   body.innerHTML=volumeHtml+reorderHtml;
   openModal('modal-priority-volume-check');
+}
+// Saves the manual weekly-frequency estimate (2026-08-15 redesign fallback) and re-runs the
+// ceiling/reorder check with it — a single shared number, not per-muscle (see the comment above
+// the input in openPriorityVolumeCheckModal). Once enough real history accumulates,
+// getRealWeeklyTrainingFrequency takes over again automatically and this stored value just stops
+// being read.
+function savePriorityVolumeFrequencyEstimate(){
+  const input=document.getElementById('priority-freq-input');
+  const val=input?parseFloat(input.value):NaN;
+  if(!val||val<=0){if(input)input.focus();return;}
+  state.manualWeeklyFrequency=val;
+  save();
+  const m=state.mesocycles[priorityVolumeCheckMesoIdx];
+  if(!m){closeModal('modal-priority-volume-check');return;}
+  const volumeAnalysis=getPriorityVolumeCeilingAnalysis(m,m.priorityMuscles||[]);
+  const reorderSuggestions=getPriorityReorderSuggestions(m,m.priorityMuscles||[]);
+  if(volumeAnalysis.length||reorderSuggestions.length)openPriorityVolumeCheckModal(priorityVolumeCheckMesoIdx,volumeAnalysis,reorderSuggestions);
+  else closeModal('modal-priority-volume-check');
 }
 // One-tap version of the reorder suggestion above — still fully reviewable/reversible afterward
 // via the routine editor's own drag-reorder (initRoutineExDragSort), so this isn't a one-way door.
@@ -4597,6 +4803,8 @@ function openMesocycleDetail(mi){
       const n=(r.exerciseIds||[]).length;
       const hasCustomReps=!!(m.slotRepRanges&&m.slotRepRanges[idx]&&Object.keys(m.slotRepRanges[idx]).length);
       const repsBadge=hasCustomReps?'<span class="tight-badge" style="background:rgba(var(--accent-rgb),0.13);color:var(--accent);margin-left:6px">CUSTOM REPS</span>':'';
+      const restingCount=(r.exerciseIds||[]).filter(id=>isExerciseInjured(id)).length;
+      const restingBadge=restingCount?'<span class="tight-badge" style="background:rgba(255,71,87,0.15);color:var(--red);margin-left:6px">\ud83e\uddbd '+restingCount+' RESTING</span>':'';
       const skipEntry=!isNext?getValidSkipEntry(m,idx):null;
       const revisitBtn=skipEntry?'<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();startCatchUpSession('+mi+',\''+skipEntry.id+'\')" style="padding:4px 8px;flex-shrink:0">Revisit</button>':'';
       const skippedTag=skipEntry?'<div class="small" style="color:#ff8c00">Skipped — redo before it comes around again</div>':'';
@@ -4606,7 +4814,7 @@ function openMesocycleDetail(mi){
           +'<div style="width:38px;height:38px;border-radius:11px;background:'+col+'20;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+getCategoryIconSVG(muscat,18,col)+'</div>'
           +'<div style="flex:1;min-width:0">'
           +'<div style="font-size:10px;font-weight:800;letter-spacing:1px;color:var(--accent);text-transform:uppercase;margin-bottom:2px">Up Next</div>'
-          +'<div class="bold" style="font-size:15px;line-height:1.2">'+escHtml(r.name)+repsBadge+rirBadge+'</div>'
+          +'<div class="bold" style="font-size:15px;line-height:1.2">'+escHtml(r.name)+repsBadge+rirBadge+restingBadge+'</div>'
           +'<div class="small text2" style="margin-top:2px">'+n+' exercise'+(n!==1?'s':'')+'</div>'
           +'</div>'
           +'<button class="btn btn-ghost btn-sm" onclick="openSlotRepRangeEditor('+idx+')" style="padding:6px 10px;flex-shrink:0;white-space:nowrap">Reps</button>'
@@ -4616,7 +4824,7 @@ function openMesocycleDetail(mi){
       return '<div class="edit-ex-row" data-meso-pos="'+idx+'" onclick="handleMesoRowClick(event,\''+rid+'\')" style="cursor:pointer'+(skipEntry?';border-left:3px solid #ff8c00;background:linear-gradient(90deg,#ff8c0014,transparent)':'')+'">'
         +'<div style="width:24px;height:24px;border-radius:6px;background:var(--bg4);color:var(--text2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">'+(idx+1)+'</div>'
         +'<div style="width:28px;height:28px;border-radius:8px;background:'+col+'18;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+getCategoryIconSVG(muscat,14,col)+'</div>'
-        +'<div style="flex:1"><div class="bold" style="font-size:13px">'+escHtml(r.name)+repsBadge+rirBadge+'</div><div class="small text2">'+n+' exercise'+(n!==1?'s':'')+'</div>'+skippedTag+'</div>'
+        +'<div style="flex:1"><div class="bold" style="font-size:13px">'+escHtml(r.name)+repsBadge+rirBadge+restingBadge+'</div><div class="small text2">'+n+' exercise'+(n!==1?'s':'')+'</div>'+skippedTag+'</div>'
         +revisitBtn
         +'<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openSlotRepRangeEditor('+idx+')" style="padding:4px 8px">Reps</button>'
         +'<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();removeRoutineFromMeso('+idx+')" style="padding:4px 8px">&#10005;</button>'
@@ -5102,9 +5310,10 @@ function openRoutineDetail(i){
         if(f){const done=f.sets.filter(s=>s.done);if(done.length){const isBW=ex.bw==='bw';lastStr=isBW?Math.max(...done.map(s=>repsMetricOf(s)))+' reps':Math.max(...done.map(s=>s.weight||0))+'kg';}break;}
       }
       const pr=getPR(id);
-      return'<div class="rd-ex-row">'
+      const injured=isExerciseInjured(id);
+      return'<div class="rd-ex-row"'+(injured?' style="opacity:0.7"':'')+'>'
         +'<div class="rd-ex-num">'+(idx+1)+'</div>'
-        +'<div class="rd-ex-info"><div class="rd-ex-name"><span class="rd-muscle-dot" style="background:'+color+'"></span>'+escHtml(ex.name)+'</div>'
+        +'<div class="rd-ex-info"><div class="rd-ex-name"><span class="rd-muscle-dot" style="background:'+color+'"></span>'+escHtml(ex.name)+(injured?' <span style="color:var(--red);font-size:12px">\ud83e\uddbd Resting</span>':'')+'</div>'
         +'<div class="rd-ex-sub">'+escHtml([ex.muscle,ex.secondary,ex.machine].filter(Boolean).join(' · '))+'</div>'
         +(ex.note?'<div class="rd-ex-note">📌 '+escHtml(ex.note)+'</div>':'')+'</div>'
         +'<div class="rd-last">'+(lastStr?'Last<br><strong>'+escHtml(lastStr)+'</strong>':'')
@@ -5384,9 +5593,23 @@ function buildRoutineSeedPlan(routineIdx,commit){
     });
     if(creditsChanged)save();
   }
+  // PRIORITY RAMP REDESIGN (2026-08-15): Phase A's per-muscle progress advances the same way —
+  // committed only when a workout actually starts, reverted on Discard/empty-finish (see
+  // revertGrantedPhaseBCredits). grantedVolumeProgress is returned so the caller can stash it on
+  // activeWorkout alongside grantedPhaseBCredits.
+  const grantedVolumeProgress=commit&&activeMeso?grantMuscleVolumeProgress(activeMeso,r.id):[];
+  if(grantedVolumeProgress.length)save();
   let mesoNote=null;
   const exercises=(r.exerciseIds||[]).map((id,idx)=>{
     const ex=getExercise(id);if(!ex)return null;
+    const sg=(r.supersetGroups&&r.supersetGroups[idx])||null;
+    // Injured/Resting exercise (2026-08-13, user's explicit request): seed ZERO sets and skip all
+    // the normal history/ramp/rep-range seeding logic below entirely — no target gets computed or
+    // touched, which is exactly what makes "clear the flag and it's back to as it was" true for
+    // free (see the comment on isExerciseInjured). supersetGroup is still preserved so a paired
+    // exercise's own advance logic isn't affected; finishSetSlot just finds nothing to complete
+    // here and moves on.
+    if(isExerciseInjured(id))return{exId:id,sets:[],supersetGroup:sg,repRange:resolveRepRangeForRoutine(r,id),useRIR:!!(r.rirModes&&r.rirModes[id]),injured:true};
     const prevRaw=getLastSets(id,r.id);
     // Sets logged as "This Workout Only" (routineSet===false, see addSet's split pill) never
     // seed forward into a future workout — that's the entire point of the distinction. Every
@@ -5396,8 +5619,6 @@ function buildRoutineSeedPlan(routineIdx,commit){
     // every routine-seeded set) defaults true, so nothing about current behavior changes for
     // sets that already exist.
     const prev=prevRaw.filter(s=>s.routineSet!==false);
-    // Restore saved superset group from routine
-    const sg=(r.supersetGroups&&r.supersetGroups[idx])||null;
     const slotOverride=(activeMesoContext&&activeMeso&&activeMeso.slotRepRanges&&activeMesoContext.routinePos!=null&&activeMeso.slotRepRanges[activeMesoContext.routinePos])
       ?activeMeso.slotRepRanges[activeMesoContext.routinePos][id]:null;
     const repRange=slotOverride||resolveRepRangeForRoutine(r,id);
@@ -5481,6 +5702,18 @@ function buildRoutineSeedPlan(routineIdx,commit){
   if(mesoHasActivePriority(activeMeso)){
     const priorityMsg='Priority this pass: '+activeMeso.priorityMuscles.join(', ')+'.';
     mesoNote=mesoNote?mesoNote+' '+priorityMsg:priorityMsg;
+    // Ramp progress visibility (2026-08-15 redesign follow-up): the stored per-muscle progress
+    // number otherwise only shows up indirectly through the volume suggestion note — surface it
+    // directly here, same visibility spirit as the priority-muscle line above, scoped to whichever
+    // priority muscles today's routine actually trains so it doesn't clutter with unrelated ones.
+    const trainedMuscles=[...new Set(exercises.map(e=>{const ex=getExercise(e.exId);return ex&&ex.muscle;}).filter(Boolean))];
+    const priorityProgress=trainedMuscles.filter(muscle=>mesoIsPriorityMuscle(activeMeso,muscle)).map(muscle=>{
+      const lm=getMuscleLandmarks(muscle);
+      const stored=(activeMeso.muscleVolumeProgress&&activeMeso.muscleVolumeProgress[muscle]&&activeMeso.muscleVolumeProgress[muscle].current!=null)?activeMeso.muscleVolumeProgress[muscle].current:lm.mev;
+      const inPhaseB=stored>=lm.mrv;
+      return muscle+' ramp: '+Math.round(stored)+'/'+lm.mrv+' sets'+(inPhaseB?' (Phase B)':'')+'.';
+    });
+    if(priorityProgress.length)mesoNote=mesoNote+' '+priorityProgress.join(' ');
     // Back-burner floor-return transparency (2026-08-11, follow-up to the floor-return feature in
     // getMesoMuscleVolumeTarget) — that function silently drops a flagged back-burner muscle's
     // target to MV; without this, the number changes with no visible explanation of why.
@@ -5491,19 +5724,24 @@ function buildRoutineSeedPlan(routineIdx,commit){
       mesoNote=mesoNote+' '+flooredMuscles.join(', ')+(flooredMuscles.length>1?' are':' is')+' back to MV this session — a recent pain/fatigue signal, holding until next deload.';
     }
   }
-  return{r,activeMeso,mesoRIRInfo,volSuggestions,addSetExIds,exercises,mesoNote,grantedPhaseBCredits,activeMesoId:activeMeso?activeMeso.id:null};
+  return{r,activeMeso,mesoRIRInfo,volSuggestions,addSetExIds,exercises,mesoNote,grantedPhaseBCredits,grantedVolumeProgress,activeMesoId:activeMeso?activeMeso.id:null};
 }
 function startRoutineWorkout(i,sorenessScores,volumeMode,efficientVolumeOn){
   volumeMode=volumeMode||'extra'; // other direct entry points (meso quick-start, Revisit, Routine Detail Start) bypass the picker — default preserves today's existing always-auto-add behavior for them
   const plan=buildRoutineSeedPlan(i,true);
   if(!plan)return;
-  const{r,activeMeso,mesoRIRInfo,volSuggestions,addSetExIds,exercises,mesoNote,grantedPhaseBCredits,activeMesoId}=plan;
+  const{r,activeMeso,mesoRIRInfo,volSuggestions,addSetExIds,exercises,mesoNote,grantedPhaseBCredits,grantedVolumeProgress,activeMesoId}=plan;
   beginWorkout(r.name,exercises,r.id,[...(r.exerciseIds||[])]);
   if(activeWorkout&&grantedPhaseBCredits&&grantedPhaseBCredits.length){
     // Stashed so a Discard (cancelWorkout) can revert exactly these — see the fix comment above
     // buildRoutineSeedPlan's commit block.
     activeWorkout.grantedPhaseBCredits=grantedPhaseBCredits;
     activeWorkout.grantedPhaseBMesoId=activeMesoId;
+  }
+  if(activeWorkout&&grantedVolumeProgress&&grantedVolumeProgress.length){
+    // Same revert safety net for Phase A's per-muscle progress grant (2026-08-15 redesign).
+    activeWorkout.grantedVolumeProgress=grantedVolumeProgress;
+    activeWorkout.grantedPhaseBMesoId=activeMesoId; // shared with the credits stash above — same meso, same revert call
   }
   if(activeWorkout&&activeWorkout.sourceRoutineId===r.id){
     activeWorkout.muscleSoreness=sorenessScores||{};
@@ -6416,6 +6654,15 @@ function getExerciseFeedbackWarningHtml(exId){
     return'<div class="exercise-soreness-warn mod">\ud83d\udd0d Rated Easy with flat pump the last two sessions \u2014 worth checking your setup/technique, or considering a swap.</div>';
   return'';
 }
+// Injured/Resting banner (2026-08-13) — exercise-level now, not muscle-level (see
+// isExerciseInjured). Zero sets get seeded for a flagged exercise (buildRoutineSeedPlan), so the
+// table below naturally renders empty; this banner explains why and offers the shortcut back to
+// clearing it. Manually adding a set here still works if the user decides to test it anyway —
+// nothing is locked, this is a seeding default, not a hard block.
+function getExerciseInjuredWarningHtml(exId){
+  if(!isExerciseInjured(exId))return'';
+  return'<div class="exercise-soreness-warn severe">\ud83e\uddbd Marked injured/resting \u2014 no sets seeded this session. Add one manually below if you want to test it, or clear the flag in Exercises \u2192 Injured/Resting.</div>';
+}
 function buildExerciseCard(exIdx){
   const ex=activeWorkout.exercises[exIdx];
   const exData=getExercise(ex.exId)||{name:'Unknown',muscle:'',machine:'',secondary:'',note:'',bw:'no'};
@@ -6423,6 +6670,7 @@ function buildExerciseCard(exIdx){
   const metaParts=[exData.muscle,exData.secondary,exData.machine].filter(Boolean);
   if(ex.repRange&&ex.repRange.max)metaParts.push('Target '+ex.repRange.min+'\u2013'+ex.repRange.max+' reps');
   const noteHtml=exData.note?'<div class="note-row"><span class="note-icon">📌</span><span class="note-text">'+escHtml(exData.note)+'</span></div>':'';
+  const injuredExHtml=getExerciseInjuredWarningHtml(ex.exId);
   const sorenessHtml=getMuscleSorenessWarningHtml(exData.muscle);
   const exFeedbackHtml=getExerciseFeedbackWarningHtml(ex.exId);
   const sugg=suggestNextLoad(ex.exId,ex,activeWorkout.sourceRoutineId);
@@ -6440,6 +6688,7 @@ function buildExerciseCard(exIdx){
     +'<button class="btn btn-ghost btn-sm" onclick="openNoteModal(\''+ex.exId+'\')">📌</button>'
     +'<button class="btn btn-danger btn-sm" onclick="removeExercise('+exIdx+')">✕</button></div></div>'
     +noteHtml
+    +injuredExHtml
     +sorenessHtml
     +exFeedbackHtml
     +suggHtml
@@ -7421,6 +7670,175 @@ function pickerAddExercise(){
   }
 }
 
+// Injured/Resting Exercises modal (2026-08-13, user's explicit request) — lists exercises
+// currently used in the user's OWN routines only (not the whole exercise DB), since the point is
+// picking which of your actual working exercises to sit out, not browsing the full library.
+function openInjuredExercisesModal(){
+  document.getElementById('injured-ex-search').value='';
+  document.getElementById('injured-ex-reason').value='';
+  document.getElementById('injured-ex-history-body').style.display='none';
+  renderInjuredExercisesList();
+  renderInjuredExerciseHistoryToggle();
+  openModal('modal-injured-exercises');
+}
+// Lightweight history section (2026-08-13 follow-up, user's explicit request) — collapsed by
+// default since it's reference material, not something needed every time the modal opens. Grouped
+// by reason text the same way the live "Currently Resting" section is, so a batch clear (multiple
+// exercises, same reason) reads as one entry with a date range, not N separate lines.
+function renderInjuredExerciseHistoryToggle(){
+  const toggleEl=document.getElementById('injured-ex-history-toggle');if(!toggleEl)return;
+  const hist=state.injuredExerciseHistory||[];
+  toggleEl.innerHTML=hist.length?'<button class="btn btn-ghost btn-sm" onclick="toggleInjuredExerciseHistory()">Show Past ('+hist.length+')</button>':'';
+}
+function toggleInjuredExerciseHistory(){
+  const body=document.getElementById('injured-ex-history-body');
+  const showing=body.style.display!=='none';
+  if(showing){body.style.display='none';return;}
+  const hist=state.injuredExerciseHistory||[];
+  const groups={};
+  hist.forEach(h=>{
+    const key=h.reason||'(no reason given)';
+    if(!groups[key])groups[key]=[];
+    groups[key].push(h);
+  });
+  body.innerHTML=Object.keys(groups).map(key=>{
+    const entries=groups[key];
+    const earliest=entries.reduce((a,b)=>new Date(a.since)<new Date(b.since)?a:b).since;
+    const latest=entries.reduce((a,b)=>new Date(a.until)>new Date(b.until)?a:b).until;
+    return '<div style="padding:8px 0;border-bottom:1px solid var(--border)">'
+      +'<div class="bold" style="font-size:13px">'+escHtml(key)+'</div>'
+      +'<div class="small text3">'+new Date(earliest).toLocaleDateString()+' \u2013 '+new Date(latest).toLocaleDateString()+' \u00b7 '+entries.length+' exercise'+(entries.length!==1?'s':'')+'</div>'
+      +'<div class="small text2" style="margin-top:2px">'+entries.map(e=>escHtml(e.name)).join(', ')+'</div>'
+      +'</div>';
+  }).join('');
+  body.style.display='block';
+}
+// Reason chips and group "Clear All" reference these by INDEX rather than embedding the free-typed
+// reason text in an onclick attribute — reason is user-typed free text, not a fixed internal enum,
+// so it could contain a quote and break the attribute (see the file-wide convention on this).
+let injuredExReasonList=[];
+function renderInjuredExercisesList(){
+  const el=document.getElementById('injured-exercises-list');if(!el)return;
+  const chipsEl=document.getElementById('injured-ex-reason-chips');
+  injuredExReasonList=getInjuredExerciseReasons();
+  if(chipsEl){
+    chipsEl.innerHTML=injuredExReasonList.map((r,i)=>'<button class="btn btn-ghost btn-sm" onclick="pickInjuredExReason('+i+')">'+escHtml(r)+'</button>').join('');
+  }
+  const exIds=[...new Set(state.routines.flatMap(r=>r.exerciseIds||[]))];
+  const allItems=exIds.map(id=>getExercise(id)).filter(Boolean);
+  // Grouped summary of what's currently flagged, by reason — lets a multi-exercise injury (e.g.
+  // "Left knee" across squat/leg press/lunge) be reviewed and cleared as one unit instead of
+  // hunting each exercise down individually in the full list below.
+  const injuredItems=allItems.filter(ex=>isExerciseInjured(ex.id));
+  let groupedHtml='';
+  if(injuredItems.length){
+    const groups={};
+    injuredItems.forEach(ex=>{
+      const info=state.injuredExercises[ex.id]||{};
+      const key=info.reason||'(no reason given)';
+      if(!groups[key])groups[key]=[];
+      groups[key].push(ex);
+    });
+    const groupKeys=Object.keys(groups);
+    groupedHtml='<div class="section-label" style="margin:0 0 6px">Currently Resting</div>'
+      +groupKeys.map((key,gi)=>
+        '<div style="background:var(--bg2);border-radius:10px;padding:10px 12px;margin-bottom:8px">'
+        +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">'
+        +'<span class="bold" style="font-size:13px">\ud83e\uddbd '+escHtml(key)+'</span>'
+        +'<button class="btn btn-ghost btn-sm" onclick="clearInjuredGroupByIndex('+gi+')">Clear All</button>'
+        +'</div>'
+        +'<div class="small text2">'+groups[key].map(ex=>escHtml(ex.name)).join(', ')+'</div>'
+        +'</div>'
+      ).join('')
+      +'<div class="section-label" style="margin:14px 0 6px">All Your Exercises</div>';
+    // Stashed for clearInjuredGroupByIndex — group KEYS aren't safe for a direct onclick either
+    // (same free-text reason problem), so keep the actual list keyed by index alongside the chips.
+    injuredExGroupKeys=groupKeys;
+  }
+  const q=(document.getElementById('injured-ex-search').value||'').toLowerCase().trim();
+  const items=allItems
+    .filter(ex=>!q||ex.name.toLowerCase().includes(q)||(ex.muscle||'').toLowerCase().includes(q))
+    .sort((a,b)=>(a.muscle||'').localeCompare(b.muscle||'')||a.name.localeCompare(b.name));
+  const listHtml=items.length?items.map(ex=>{
+    const injured=isExerciseInjured(ex.id);
+    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)'+(injured?';opacity:0.85':'')+'">'
+      +'<div style="min-width:0"><div class="bold" style="font-size:14px">'+(injured?'\ud83e\uddbd ':'')+escHtml(ex.name)+'</div><div class="small text3">'+escHtml(ex.muscle||'')+'</div></div>'
+      +'<button class="btn btn-sm '+(injured?'btn-danger':'btn-ghost')+'" onclick="toggleExerciseInjuredUI(\''+ex.id+'\')">'+(injured?'Clear':'Mark')+'</button>'
+      +'</div>';
+  }).join(''):'<div class="small text3" style="padding:12px 0">No matching exercises in your routines.</div>';
+  el.innerHTML=groupedHtml+listHtml;
+}
+let injuredExGroupKeys=[];
+function pickInjuredExReason(i){
+  const r=injuredExReasonList[i];if(r==null)return;
+  document.getElementById('injured-ex-reason').value=r;
+}
+function clearInjuredGroupByIndex(gi){
+  const key=injuredExGroupKeys[gi];if(key==null)return;
+  const ids=Object.keys(state.injuredExercises||{}).filter(id=>((state.injuredExercises[id]||{}).reason||'(no reason given)')===key);
+  if(!ids.length)return;
+  forgeConfirm('Clear all '+ids.length+' exercises under this reason?','They\'ll return to normal seeding next session.',()=>{
+    ids.forEach(id=>setExerciseInjured(id,false));
+    renderInjuredExercisesList();
+    renderInjuredExerciseHistoryToggle();
+  });
+}
+// Other exercises in the user's routines that share this one's primary muscle and aren't already
+// flagged — offered as a one-tap batch add right after marking (2026-08-13, user's explicit
+// request), since a real injury usually rules out more than a single exercise at once (e.g. a knee
+// injury affects squat AND leg press, not just whichever was marked first).
+// Priority muscle going fully resting mid-pass (2026-08-13 follow-up, user's explicit request) —
+// getMesoMuscleVolumeTarget already zeros an injured exercise's contribution automatically, but
+// nothing told the user their ACTIVE priority pick had silently stopped contributing real volume.
+// Checked right after marking new exercises injured (the only place isMuscleFullyResting can newly
+// flip true); offers to reopen the picker pre-loaded with the current selection minus the resting
+// muscle, rather than a fresh suggestPriorityMuscles() draft, so it reads as editing the existing
+// pick, not starting over.
+function checkPriorityMuscleWentResting(){
+  const m=state.mesocycles.find(mm=>mm.id===state.activeMesoId);
+  if(!m||!mesoHasActivePriority(m))return;
+  const stillResting=(m.priorityMuscles||[]).filter(muscle=>isMuscleFullyResting(muscle));
+  if(!stillResting.length)return;
+  const mi=state.mesocycles.indexOf(m);
+  forgeConfirm('Priority Muscle Now Resting',stillResting.join(', ')+' '+(stillResting.length>1?'are':'is')+' your priority pick this pass, but every exercise for '+(stillResting.length>1?'them':'it')+' is now marked injured/resting \u2014 it won\'t contribute real volume. Pick a replacement?',()=>{
+    priorityDraftMesoIdx=mi;
+    priorityDraftMuscles=(m.priorityMuscles||[]).filter(muscle=>!stillResting.includes(muscle));
+    document.getElementById('priority-select-meso-name').textContent=m.name||'Mesocycle';
+    renderPrioritySelectionList();
+    openModal('modal-priority-select');
+  },{cancelLabel:'Not Now',danger:false});
+}
+function suggestInjuredSiblings(exId,reason,onDone){
+  const ex=getExercise(exId);
+  const finish=()=>{if(onDone)onDone();};
+  if(!ex||!ex.muscle){finish();return;}
+  const exIds=[...new Set(state.routines.flatMap(r=>r.exerciseIds||[]))];
+  const siblings=exIds.filter(id=>id!==exId&&!isExerciseInjured(id))
+    .map(id=>getExercise(id)).filter(e=>e&&e.muscle===ex.muscle);
+  if(!siblings.length){finish();return;}
+  const ids=siblings.map(s=>s.id);
+  forgeConfirm('Also mark these '+ex.muscle+' exercises?',siblings.map(s=>s.name).join(', ')+' — also target '+ex.muscle+'. Mark them too under the same reason?',()=>{
+    ids.forEach(id=>setExerciseInjured(id,true,reason));
+    renderInjuredExercisesList();
+    finish();
+  },{cancelLabel:'No Thanks',danger:false,onCancel:finish});
+}
+function toggleExerciseInjuredUI(exId){
+  const ex=getExercise(exId);if(!ex)return;
+  const nowInjured=!isExerciseInjured(exId);
+  if(nowInjured){
+    const reason=(document.getElementById('injured-ex-reason').value||'').trim();
+    forgeConfirm('Mark "'+ex.name+'" as Injured/Resting?','Zero sets will be seeded for this exercise every session until you clear it here. Nothing else about your routines or mesocycle changes — you can still add a set manually if you decide to test it.'+(reason?' Grouped under "'+reason+'".':''),()=>{
+      setExerciseInjured(exId,true,reason);
+      renderInjuredExercisesList();
+      suggestInjuredSiblings(exId,reason,checkPriorityMuscleWentResting);
+    });
+  }else{
+    setExerciseInjured(exId,false);
+    renderInjuredExercisesList();
+    renderInjuredExerciseHistoryToggle();
+  }
+}
 function openNewExerciseModal(){openNewExerciseModalFromWorkout();}
 function openNewExerciseModalFromWorkout(){
   editingExId=null;fromWorkout=true;closeModal('modal-add-exercise');
@@ -7983,15 +8401,36 @@ function cancelWorkout(){
 // isn't guaranteed stable across saves anyway). Math.max(0,...) guards against ever going
 // negative if this is somehow called twice.
 function revertGrantedPhaseBCredits(){
-  if(!activeWorkout||!activeWorkout.grantedPhaseBCredits||!activeWorkout.grantedPhaseBCredits.length)return;
+  if(!activeWorkout)return;
+  const hasCredits=activeWorkout.grantedPhaseBCredits&&activeWorkout.grantedPhaseBCredits.length;
+  const hasProgress=activeWorkout.grantedVolumeProgress&&activeWorkout.grantedVolumeProgress.length;
+  if(!hasCredits&&!hasProgress)return;
   const m=state.mesocycles.find(mm=>mm.id===activeWorkout.grantedPhaseBMesoId);
-  if(!m||!m.extraRotationCredits)return;
+  if(!m)return;
   let changed=false;
-  activeWorkout.grantedPhaseBCredits.forEach(muscle=>{
-    const c=m.extraRotationCredits[muscle];if(!c)return;
-    m.extraRotationCredits[muscle]={granted:Math.max(0,c.granted-1),cycleIdx:Math.max(0,c.cycleIdx-1)};
-    changed=true;
-  });
+  if(hasCredits&&m.extraRotationCredits){
+    activeWorkout.grantedPhaseBCredits.forEach(muscle=>{
+      const c=m.extraRotationCredits[muscle];if(!c)return;
+      m.extraRotationCredits[muscle]={granted:Math.max(0,c.granted-1),cycleIdx:Math.max(0,c.cycleIdx-1)};
+      changed=true;
+    });
+  }
+  // Undoes exactly the Phase A per-muscle progress this session granted at start (2026-08-15
+  // redesign) — same discard-safety reasoning as the credits above. Floors back at the muscle's
+  // current floor (not below), and clears a phaseBSince stamp if the revert drops progress back
+  // under its ceiling, so a discarded session can't leave a phantom "already in Phase B" state.
+  if(hasProgress&&m.muscleVolumeProgress){
+    activeWorkout.grantedVolumeProgress.forEach(({muscle,delta})=>{
+      const p=m.muscleVolumeProgress[muscle];if(!p)return;
+      const isPriority=mesoIsPriorityMuscle(m,muscle);
+      const lm=getMuscleLandmarks(muscle);
+      const floor=isPriority?lm.mev:lm.mv;
+      const ceiling=isPriority?lm.mrv:lm.mev;
+      p.current=Math.max(floor,p.current-delta);
+      if(p.current<ceiling)p.phaseBSince=null;
+      changed=true;
+    });
+  }
   if(changed)save();
 }
 // Deliberately steps away from an in-progress workout, to come back to later — possibly days
@@ -8676,6 +9115,37 @@ function hasEverTrainedMuscle(muscle){
     return false;
   }));
 }
+// Whether EVERY routine exercise that primarily targets this muscle is currently marked
+// injured/resting (2026-08-13, user's explicit request) — powers Review's "resting on purpose" vs
+// "just neglected" split. A muscle with no primary exercises in any routine at all isn't a
+// "resting" situation, just untracked, so that returns false rather than a vacuous true.
+function isMuscleFullyResting(muscle){
+  const exIds=[...new Set(state.routines.flatMap(r=>r.exerciseIds||[]))];
+  const primaryExs=exIds.map(id=>getExercise(id)).filter(ex=>ex&&ex.muscle===muscle);
+  if(!primaryExs.length)return false;
+  return primaryExs.every(ex=>isExerciseInjured(ex.id));
+}
+// Periodic "still resting?" check-in (2026-08-13 follow-up, user's explicit request) — grouped by
+// reason (same convention as the management modal), measured from the EARLIEST exercise flagged
+// under that reason so a later sibling-add doesn't reset the clock. Never auto-clears or nags in
+// the workout itself — surfaced once, in Review, same as every other periodic signal in the app.
+const INJURY_CHECKIN_DAYS=21;
+function getInjuryCheckinNudges(){
+  const groups={};
+  Object.keys(state.injuredExercises||{}).forEach(exId=>{
+    const info=state.injuredExercises[exId]||{};
+    const key=info.reason||'(no reason given)';
+    if(!groups[key])groups[key]=[];
+    groups[key].push(info.since);
+  });
+  const nudges=[];
+  Object.keys(groups).forEach(key=>{
+    const earliest=groups[key].reduce((a,b)=>new Date(a)<new Date(b)?a:b);
+    const days=Math.floor((Date.now()-new Date(earliest).getTime())/86400000);
+    if(days>=INJURY_CHECKIN_DAYS)nudges.push({reason:key,days});
+  });
+  return nudges;
+}
 // EFFICIENT VOLUME feature: a drop set or myo-rep continuation earns credit based on what it
 // actually achieves relative to the set it replaces — full credit (not a discount) if it hits
 // that target, since the whole point of this feature is matching the same volume while saving
@@ -8773,6 +9243,46 @@ function getMuscleGroupVolumes(){
 }
 function getMuscleLandmarks(muscle){
   return state.volumeLandmarks[muscle]||{mv:0,mev:8,mav:16,mrv:22}; // sane fallback for an untracked muscle
+}
+// Injured/Resting EXERCISE status (2026-08-13, replaces an earlier muscle-level version per user's
+// explicit correction: "the options should be which exercises currently in routines should go to
+// zero" — a joint injury like a knee doesn't map cleanly onto one muscle, and the user wants to
+// pick exactly which exercises to sit out, not everything a muscle touches). Deliberately stores
+// NOTHING about target weight/reps — buildRoutineSeedPlan just seeds zero sets for a flagged
+// exercise instead of its normal history-based target, so clearing the flag needs no restore logic
+// at all: the next real seed reads real last-session history same as always, which is simply
+// whatever it was before the injury, since nothing new got logged in between ("return to as was").
+// Value carries an optional `reason` (2026-08-13 follow-up, user's explicit request) so multiple
+// exercises flagged for the same injury ("Left knee") group together in the management modal and
+// can be cleared as a batch, instead of each being a disconnected on/off switch.
+function isExerciseInjured(exId){
+  return !!(state.injuredExercises&&state.injuredExercises[exId]);
+}
+function setExerciseInjured(exId,injured,reason){
+  if(!state.injuredExercises)state.injuredExercises={};
+  if(injured){
+    state.injuredExercises[exId]={since:new Date().toISOString(),reason:(reason||'').trim()};
+  }else{
+    // Lightweight history on clear (2026-08-13 follow-up, user's explicit request) — snapshots the
+    // exercise NAME (not just its id) since the exercise itself could be renamed/deleted later and
+    // the history should still read sensibly. Grouped for display by matching `reason` text, same
+    // as the live "Currently Resting" grouping — no separate batch-id concept needed.
+    const prev=state.injuredExercises[exId];
+    if(prev){
+      const ex=getExercise(exId);
+      if(!state.injuredExerciseHistory)state.injuredExerciseHistory=[];
+      state.injuredExerciseHistory.push({exId,name:ex?ex.name:'(deleted exercise)',reason:prev.reason||'',since:prev.since,until:new Date().toISOString()});
+    }
+    delete state.injuredExercises[exId];
+  }
+  save();
+}
+// Every distinct non-empty reason currently in use, most-recently-used first — powers the reason
+// quick-picker in the management modal so re-flagging a sibling exercise for the same injury is a
+// single tap instead of retyping the label.
+function getInjuredExerciseReasons(){
+  const list=Object.values(state.injuredExercises||{}).filter(v=>v&&v.reason).sort((a,b)=>new Date(b.since)-new Date(a.since));
+  return[...new Set(list.map(v=>v.reason))];
 }
 // Aggregates recent Post-Exercise Feedback (pump/challenge/jointPain) and Pre-Workout Soreness
 // ratings for a muscle over the last 2 weeks — the recovery/stimulus-quality signal that sits
@@ -8930,17 +9440,23 @@ function renderReview(){
       +'</div>';
   }).join('');
   const zeroVolMuscles=MUSCLE_GROUPS.filter(m=>!ms[m]&&m!=='Full Body');
-  // Split "no recent volume" into two genuinely different situations (2026-08-09) — a muscle with
-  // real history that just hasn't been trained in the last 7 days reads completely differently
-  // than one that's never been touched, and conflating them under one "NOT TRAINED YET" label was
-  // actively misleading (see hasEverTrainedMuscle above). Was originally written around the old
-  // per-muscle adaptive cadence window (since replaced with a flat 7 days, see getMuscleVolume) —
-  // still just as relevant with a flat window, since "genuinely never" and "not this week" remain
-  // different situations either way.
-  const neverTrained=zeroVolMuscles.filter(m=>!hasEverTrainedMuscle(m));
-  const outsideCadence=zeroVolMuscles.filter(m=>hasEverTrainedMuscle(m));
+  // Split "no recent volume" into three genuinely different situations (2026-08-09, extended
+  // 2026-08-13 for the injured-exercise system) — a muscle with zero volume because every exercise
+  // that trains it is currently marked injured/resting reads completely differently from one
+  // that's simply been neglected, and lumping them together would make Review look like it's
+  // flagging a problem the user created on purpose.
+  const restingMuscles=zeroVolMuscles.filter(m=>isMuscleFullyResting(m));
+  const neverTrained=zeroVolMuscles.filter(m=>!hasEverTrainedMuscle(m)&&!restingMuscles.includes(m));
+  const outsideCadence=zeroVolMuscles.filter(m=>hasEverTrainedMuscle(m)&&!restingMuscles.includes(m));
   const untrained=zeroVolMuscles; // kept for the imbalance/no-core/no-calves checks below, which only care about "any recent volume" either way
   const sugg=[];
+  // Injury check-in nudge (2026-08-13 follow-up, user's explicit request) — placed BEFORE the
+  // no-workouts-this-week short circuit below, since a resting flag matters regardless of whether
+  // the user trained this week. Grouped by reason (same convention as the management modal),
+  // measured from the EARLIEST exercise in that group so a later sibling-add doesn't reset the
+  // clock. Never auto-clears anything — just a periodic "still the case?" visible in the one place
+  // the user already checks weekly, not an in-workout nag.
+  getInjuryCheckinNudges().forEach(n=>sugg.push({i:'🩹',t:(n.reason==='(no reason given)'?'An exercise':'"'+n.reason+'"')+' has been marked resting for '+n.days+'+ days. Still the case? Check Exercises \u2192 \ud83e\uddbd to update.'}));
   if(!ww.length){sugg.push({i:'💪',t:'No workouts this week yet. Start a session to begin tracking!'});}
   else{
     // REMOVED (2026-08-06, user's explicit choice): a generic "3+ high-RPE sessions -> consider
@@ -8976,6 +9492,7 @@ function renderReview(){
     +barsHtml
     +(neverTrained.length&&ww.length?'<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)"><div class="small text3" style="margin-bottom:5px">NOT TRAINED YET</div>'+neverTrained.map(m=>'<span class="muscle-tag">'+m+'</span>').join('')+'</div>':'')
     +(outsideCadence.length&&ww.length?'<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)"><div class="small text3" style="margin-bottom:5px">NOT TRAINED IN THE LAST 7 DAYS</div>'+outsideCadence.map(m=>{const d=getDaysSinceLastTrained(m);return '<span class="muscle-tag">'+m+(d!=null?' · '+d+'d ago':'')+'</span>';}).join('')+'</div>':'')
+    +(restingMuscles.length&&ww.length?'<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)"><div class="small text3" style="margin-bottom:5px">🩹 RESTING — EXERCISES MARKED INJURED</div>'+restingMuscles.map(m=>'<span class="muscle-tag">'+m+'</span>').join('')+'</div>':'')
     +'</div>'
     +'<div class="section-label">Suggestions &amp; Insights</div>'
     +'<div class="review-card" style="margin:0 16px 16px">'+sugg.map(s=>'<div class="suggestion-item"><span style="font-size:15px;margin-right:6px">'+s.i+'</span>'+s.t+'</div>').join('')+'</div>';
@@ -9177,7 +9694,6 @@ function toggleSyncHelp(){
   el.style.display=el.style.display==='none'?'block':'none';
 }
 
-let gSilentAuthAttempt=false;
 function initGoogleSync(){
   const clientId=getGoogleClientId();
   const setupWrap=document.getElementById('sync-setup-wrap');
