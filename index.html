@@ -609,7 +609,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-15.4</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-16.3</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -896,16 +896,25 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
 <div class="modal-overlay" id="modal-progress">
   <div class="modal"><div class="modal-handle"></div><div class="modal-title" id="progress-ex-name">Progress</div>
     <div class="modal-body">
-      <div class="chart-tabs" id="chart-tabs">
-        <div class="chart-tab active" onclick="setChartMetric('weight',this)">Weight</div>
-        <div class="chart-tab" onclick="setChartMetric('reps',this)">Reps</div>
-        <div class="chart-tab" onclick="setChartMetric('volume',this)">Volume</div>
-        <div class="chart-tab" onclick="setChartMetric('orm',this)">Est. 1RM</div>
+      <div class="chart-tabs" id="progress-main-tabs">
+        <div class="chart-tab progress-main-tab active" onclick="setProgressTab('history',this)">History</div>
+        <div class="chart-tab progress-main-tab" onclick="setProgressTab('charts',this)">Charts</div>
+        <div class="chart-tab progress-main-tab" onclick="setProgressTab('records',this)">Records</div>
       </div>
-      <div class="chart-wrap"><canvas id="progress-canvas"></canvas></div>
-      <div id="progress-stats" style="margin-top:10px"></div>
-      <div class="section-label" style="padding:12px 0 6px">Est. 1RM — Latest Session</div>
-      <div id="orm-breakdown"></div>
+      <div id="progress-tab-history"></div>
+      <div id="progress-tab-charts" style="display:none">
+        <div class="chart-tabs" id="chart-tabs">
+          <div class="chart-tab active" onclick="setChartMetric('weight',this)">Weight</div>
+          <div class="chart-tab" onclick="setChartMetric('reps',this)">Reps</div>
+          <div class="chart-tab" onclick="setChartMetric('volume',this)">Volume</div>
+          <div class="chart-tab" onclick="setChartMetric('orm',this)">Est. 1RM</div>
+        </div>
+        <div class="chart-wrap"><canvas id="progress-canvas"></canvas></div>
+        <div id="progress-stats" style="margin-top:10px"></div>
+        <div class="section-label" style="padding:12px 0 6px">Est. 1RM — Latest Session</div>
+        <div id="orm-breakdown"></div>
+      </div>
+      <div id="progress-tab-records" style="display:none"></div>
     </div>
     <div class="modal-actions"><button class="btn btn-primary btn-full" onclick="closeModal('modal-progress')">Close</button></div>
   </div>
@@ -1933,13 +1942,6 @@ function getRoutine(id){return state.routines.find(r=>r.id===id);}
 // uses — so this never lists an exercise from the database that's simply never been performed.
 // Reuses the exact collapsible-per-muscle-header pattern/CSS as Meso Review's "By Exercise".
 function getAllExercisePRs(){
-  // FIX (2026-08-16): hardened against malformed/legacy history entries. This now runs across
-  // the user's ENTIRE history (unlike getPR's normal call sites, which only ever touch exercises
-  // actively in the current workout), so it's the first thing to walk older entries that may not
-  // perfectly match today's shape. Every array access is now guarded so a bad entry gets skipped
-  // instead of throwing — an uncaught error here previously ran during the app's synchronous
-  // startup script and could abort all initialization code below it, breaking Start buttons
-  // app-wide even though this panel itself is just a Review-tab display.
   const exIds=new Set();
   (state.history||[]).forEach(w=>{
     (w&&w.exercises||[]).forEach(ex=>{
@@ -1960,12 +1962,18 @@ function getAllExercisePRs(){
 function getPR(exId){
   if(prCache[exId])return prCache[exId];
   let bw=0,br=0,bo=0;
-  state.history.forEach(w=>w.exercises.forEach(ex=>{
-    if(ex.exId!==exId)return;
+  // DEFENSIVE (2026-08-16): previously unguarded — safe as long as this was only ever called for
+  // one known-good exId mid-workout, but getAllExercisePRs now calls this in a loop across every
+  // exercise ID ever found in real history, so a single malformed entry anywhere in that history
+  // (missing/null .exercises or .sets, same class of real-data edge case as the startup-crash fix
+  // above) would throw here regardless of which exId triggered the loop. Same guard pattern as
+  // getAllExercisePRs, applied at the source.
+  (state.history||[]).forEach(w=>(w&&w.exercises||[]).forEach(ex=>{
+    if(!ex||ex.exId!==exId)return;
     // Only a genuine top-set effort counts as a record — a dropset or myo-rep set chases extra
     // reps via fatigue/rest-pause rather than a fresh max attempt, same standard as
     // getSessionsForExercise/getWeeklyMuscleVolume.
-    ex.sets.filter(s=>s.done&&(!s.type||s.type==='normal')).forEach(s=>{
+    (ex.sets||[]).filter(s=>s&&s.done&&(!s.type||s.type==='normal')).forEach(s=>{
       if((s.weight||0)>bw)bw=s.weight||0;
       const r=repsMetricOf(s);
       if(r>br)br=r;
@@ -2708,13 +2716,20 @@ function checkPriorityReorderAfterEdit(routineId){
     save();
   });
 }
-// FIX (2026-08-16): each pre-render isolated in its own try/catch. Previously all four ran as one
-// unguarded statement — an uncaught error partway through (e.g. inside renderReview, which as of
-// 15.4 also walks the full workout history for the new Personal Records panel) aborted this whole
-// top-level script at that line, silently skipping every declaration and addEventListener call
-// below it in the file (including the document click handler and the Start-routine flow's own
-// state setup). That took down Start buttons everywhere even though the actual failure had
-// nothing to do with them. Isolating these means a single bad render only breaks that one panel.
+// STARTUP CRASH FIX (2026-08-16, root-caused and diagnosed by the user directly — see their
+// fix-instructions-startup-crash.md): this app is one linear <script> block, so an uncaught
+// exception thrown by ANY unconditional top-level statement halts every top-level statement
+// written after it in the file — including the global click-delegation listener, the
+// popstate/modal-stack handler, and `let` state variable initialization the Start-routine flow
+// depends on. getAllExercisePRs() (new in 15.4, called eagerly here via renderReview \u2192
+// renderReviewPRBody) walks the user's ENTIRE real history with no guards on w.exercises/ex.sets
+// — far more surface area than any prior startup-path code touched — and threw on a real-data
+// edge case my testing never hit, silently breaking Start everywhere despite Start itself having
+// nothing to do with it. Isolating each startup render call is the actual fix — this specific
+// throw is also hardened below (getAllExercisePRs guards + renderReviewPRBody try/catch), but the
+// STANDING RULE going forward: nothing added to this unconditional startup path may be allowed to
+// throw uncaught, since the failure mode isn't local to the feature that broke — it cascades and
+// kills unrelated parts of the app that happen to be defined later in the file.
 [renderRoutinesList,renderExerciseDB,renderHistory,renderReview].forEach(fn=>{
   try{fn();}catch(e){console.error(fn.name+' failed during startup:',e);}
 });
@@ -4537,8 +4552,6 @@ let mesoReviewOpenMuscles=new Set();
 let reviewPRsOpenMuscles=new Set();
 function renderReviewPRBody(){
   const body=document.getElementById('review-prs-body');if(!body)return;
-  // FIX (2026-08-16): isolate this panel's render — see getAllExercisePRs comment for why an
-  // uncaught error here is worse than usual (it can run during app startup).
   let byMuscle;
   try{byMuscle=getAllExercisePRs();}
   catch(e){console.error('renderReviewPRBody failed:',e);body.innerHTML='<div class="small text2" style="text-align:center;padding:14px 0">Couldn\'t load records</div>';return;}
@@ -5697,10 +5710,16 @@ function buildRoutineSeedPlan(routineIdx,commit){
   // Same target used for the "aim for N RIR today" banner — reused below to pre-fill each
   // working set's RPE/RIR field to what THIS cycle is actually asking for, rather than whatever
   // was hit last session (which reflects last session's effort, not today's target).
-  const mesoRIRInfo=activeMeso?getMesoTargetRIR(activeMeso):null;
+  // DEFENSIVE (2026-08-16): these two are today's newest, least-battle-tested additions —
+  // wrapped so that if either throws on some real-data edge case my own testing never hit, the
+  // enhancement is skipped for this call instead of blocking Start Workout entirely. An
+  // enhancement failing silently is far better than the core action failing silently.
+  let mesoRIRInfo=null;
+  try{mesoRIRInfo=activeMeso?getMesoTargetRIR(activeMeso):null;}catch(e){console.error('getMesoTargetRIR failed, continuing without it:',e);mesoRIRInfo=null;}
   // Computed once up front so it can both auto-apply an extra set below (once activeWorkout
   // exists) and drive the note text later, without computing it twice.
-  const volSuggestions=activeMeso?getMesoVolumeSuggestions(activeMeso,r.id):null;
+  let volSuggestions=null;
+  try{volSuggestions=activeMeso?getMesoVolumeSuggestions(activeMeso,r.id):null;}catch(e){console.error('getMesoVolumeSuggestions failed, continuing without it:',e);volSuggestions=null;}
   const addSetExIds=new Set();
   (volSuggestions||[]).forEach(s=>{if(s.action==='add_set')(s.exIds||[]).forEach(id=>addSetExIds.add(id));});
   // Decision 2 (Phase B): commit the extra-rotation credit now that the workout is actually
@@ -5732,7 +5751,10 @@ function buildRoutineSeedPlan(routineIdx,commit){
   // committed only when a workout actually starts, reverted on Discard/empty-finish (see
   // revertGrantedPhaseBCredits). grantedVolumeProgress is returned so the caller can stash it on
   // activeWorkout alongside grantedPhaseBCredits.
-  const grantedVolumeProgress=commit&&activeMeso?grantMuscleVolumeProgress(activeMeso,r.id):[];
+  let grantedVolumeProgress=[];
+  if(commit&&activeMeso){
+    try{grantedVolumeProgress=grantMuscleVolumeProgress(activeMeso,r.id)||[];}catch(e){console.error('grantMuscleVolumeProgress failed, continuing without it:',e);grantedVolumeProgress=[];}
+  }
   if(grantedVolumeProgress.length)save();
   let mesoNote=null;
   const exercises=(r.exerciseIds||[]).map((id,idx)=>{
@@ -6845,9 +6867,8 @@ function buildExerciseCard(exIdx){
   const effortHdr=ex.useRIR?'RIR':'RPE';
   const isUni=!!exData.uni;
   wrap.innerHTML='<div class="exercise-header">'
-    +'<div><div class="exercise-name">'+escHtml(exData.name)+'</div><div class="exercise-meta">'+escHtml(metaParts.join(' · '))+'</div></div>'
+    +'<div><div class="exercise-name" style="cursor:pointer;color:var(--accent)" onclick="openProgressModal(\''+ex.exId+'\')">'+escHtml(exData.name)+' \u203a</div><div class="exercise-meta">'+escHtml(metaParts.join(' · '))+'</div></div>'
     +'<div style="display:flex;gap:4px">'
-    +'<button class="btn btn-ghost btn-sm" onclick="openProgressModal(\''+ex.exId+'\')">📈</button>'
     +'<button class="btn btn-ghost btn-sm" onclick="openNoteModal(\''+ex.exId+'\')">📌</button>'
     +'<button class="btn btn-danger btn-sm" onclick="removeExercise('+exIdx+')">✕</button></div></div>'
     +noteHtml
@@ -7109,7 +7130,7 @@ function finishSetSlot(exIdx,setIdx,opts){
     startRestTimer(restSecs);
   }
   checkExerciseFeedbackTrigger(exIdx);
-  reconcileRampExtraSets();
+  try{reconcileRampExtraSets();}catch(e){console.error('reconcileRampExtraSets failed, skipping:',e);}
 }
 // SESSION-OVERLAP FIX (2026-08-15): ramp-due extra sets are baked into set counts once, at the
 // very start of the workout (see the addSetExIds/_rampExtra tagging above) — before any real
@@ -8263,17 +8284,126 @@ function saveExerciseNote(){
 }
 
 // ── PROGRESS CHART ──
+// PROGRESS MODAL REDESIGN (2026-08-16, user's request, modeled on Strong's exercise detail
+// screen: History / Charts / Records tabs). History and Records are new; Charts reuses the
+// existing chart exactly as before. All three read from the same real per-exercise data, walked
+// defensively (same guard pattern as getPR/getAllExercisePRs' 2026-08-16 hardening) since this is
+// now a much heavier real-history read than the modal's original single-chart version was.
+function getExerciseSessionHistory(exId){
+  const sessions=[];
+  (state.history||[]).forEach(w=>{
+    (w&&w.exercises||[]).forEach(ex=>{
+      if(!ex||ex.exId!==exId)return;
+      const doneSets=(ex.sets||[]).filter(s=>s&&s.done&&(!s.type||s.type==='normal'));
+      if(!doneSets.length)return;
+      sessions.push({date:w.date,sets:doneSets.map(s=>({weight:s.weight||0,reps:repsMetricOf(s),orm:calcORM(s.weight||0,repsMetricOf(s)),repsL:s.repsL,repsR:s.repsR}))});
+    });
+  });
+  sessions.sort((a,b)=>new Date(b.date)-new Date(a.date));
+  return sessions;
+}
+// Best weight ever logged AT each exact rep count, with the estimated 1RM that performance
+// implies — same "Records" table shape as Strong's rep-range breakdown.
+function getExerciseRepRangeRecords(exId){
+  const best={};
+  (state.history||[]).forEach(w=>{
+    (w&&w.exercises||[]).forEach(ex=>{
+      if(!ex||ex.exId!==exId)return;
+      (ex.sets||[]).filter(s=>s&&s.done&&(!s.type||s.type==='normal')).forEach(s=>{
+        const reps=repsMetricOf(s);if(reps<1)return;
+        const weight=s.weight||0;
+        if(!best[reps]||weight>best[reps].weight)best[reps]={weight,date:w.date,orm:calcORM(weight,reps)};
+      });
+    });
+  });
+  return best;
+}
+function getExerciseMaxSessionVolume(exId){
+  let max=0;
+  (state.history||[]).forEach(w=>{
+    (w&&w.exercises||[]).forEach(ex=>{
+      if(!ex||ex.exId!==exId)return;
+      const vol=(ex.sets||[]).filter(s=>s&&s.done&&(!s.type||s.type==='normal')).reduce((a,s)=>a+(s.weight||0)*(repsMetricOf(s)||0),0);
+      if(vol>max)max=vol;
+    });
+  });
+  return Math.round(max);
+}
+function renderProgressHistoryTab(){
+  const el=document.getElementById('progress-tab-history');if(!el)return;
+  const sessions=getExerciseSessionHistory(progressExId);
+  if(!sessions.length){el.innerHTML='<div class="small text2" style="text-align:center;padding:20px 0">No sessions logged yet</div>';return;}
+  el.innerHTML=sessions.map(sess=>{
+    const d=new Date(sess.date);
+    const dateStr=d.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'})+' at '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+    const rows=sess.sets.map((s,i)=>{
+      const hasSplit=s.repsL!=null||s.repsR!=null;
+      const loadStr=(s.weight||'BW')+'kg × '+(hasSplit?(s.repsL||0)+'/'+(s.repsR||0):s.reps);
+      return '<div style="display:flex;justify-content:space-between;padding:3px 0"><span class="small text2">'+(i+1)+'  '+loadStr+'</span><span class="small" style="color:var(--accent);font-family:monospace">'+s.orm+'</span></div>';
+    }).join('');
+    return '<div class="review-card" style="margin:0 0 10px">'
+      +'<div class="bold" style="font-size:13px">'+escHtml(dateStr)+'</div>'
+      +'<div style="display:flex;justify-content:space-between;margin-top:8px"><span class="small text3">Sets Performed</span><span class="small text3">1RM</span></div>'
+      +rows+'</div>';
+  }).join('');
+}
+function renderProgressRecordsTab(){
+  const el=document.getElementById('progress-tab-records');if(!el)return;
+  const pr=getPR(progressExId);
+  if(!pr||(!pr.weight&&!pr.reps)){el.innerHTML='<div class="small text2" style="text-align:center;padding:20px 0">No records yet</div>';return;}
+  const maxVol=getExerciseMaxSessionVolume(progressExId);
+  const repRecords=getExerciseRepRangeRecords(progressExId);
+  const repKeys=Object.keys(repRecords).map(Number).sort((a,b)=>a-b);
+  let html='<div class="section-label" style="padding:10px 0 6px">Personal Records</div>'
+    +'<div class="review-card" style="margin:0 0 12px">'
+    +'<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span class="small text2">Estimated 1RM</span><span class="bold">'+pr.orm+'kg</span></div>'
+    +'<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span class="small text2">Max weight</span><span class="bold">'+pr.weight+'kg</span></div>'
+    +'<div style="display:flex;justify-content:space-between;padding:6px 0"><span class="small text2">Max session volume</span><span class="bold">'+maxVol+'kg</span></div>'
+    +'</div>';
+  if(repKeys.length){
+    html+='<div class="section-label" style="padding:10px 0 6px">Best By Rep Count</div><div class="review-card" style="margin:0">'
+      +'<div style="display:flex;justify-content:space-between;padding:4px 0"><span class="small text3">REPS</span><span class="small text3">BEST</span><span class="small text3">EST. 1RM</span></div>';
+    repKeys.forEach(reps=>{
+      const r=repRecords[reps];
+      const d=new Date(r.date).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
+      html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--border)">'
+        +'<span class="small text2" style="width:26px">'+reps+'</span>'
+        +'<span style="flex:1;text-align:center"><div class="small">'+r.weight+'kg (×'+reps+')</div><div class="small text3">'+escHtml(d)+'</div></span>'
+        +'<span class="small" style="color:var(--accent);font-family:monospace;width:56px;text-align:right">'+r.orm+'kg</span>'
+        +'</div>';
+    });
+    html+='</div>';
+  }
+  el.innerHTML=html;
+}
+let progressActiveTab='history';
+function setProgressTab(tab,el){
+  progressActiveTab=tab;
+  document.querySelectorAll('#progress-main-tabs .progress-main-tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  ['history','charts','records'].forEach(t=>{
+    const panel=document.getElementById('progress-tab-'+t);
+    if(panel)panel.style.display=(t===tab?'':'none');
+  });
+  if(tab==='history')renderProgressHistoryTab();
+  else if(tab==='charts')setTimeout(renderProgressChart,50);
+  else if(tab==='records')renderProgressRecordsTab();
+}
 function openProgressModal(exId){
-  progressExId=exId;chartMetric='weight';
+  progressExId=exId;chartMetric='weight';progressActiveTab='history';
   const ex=getExercise(exId);
   document.getElementById('progress-ex-name').textContent=(ex?ex.name:'Exercise')+' — Progress';
-  document.querySelectorAll('.chart-tab').forEach((t,i)=>t.classList.toggle('active',i===0));
-  setTimeout(renderProgressChart,50);
+  document.querySelectorAll('#progress-main-tabs .progress-main-tab').forEach((t,i)=>t.classList.toggle('active',i===0));
+  document.querySelectorAll('#chart-tabs .chart-tab').forEach((t,i)=>t.classList.toggle('active',i===0));
+  document.getElementById('progress-tab-history').style.display='';
+  document.getElementById('progress-tab-charts').style.display='none';
+  document.getElementById('progress-tab-records').style.display='none';
+  renderProgressHistoryTab();
   openModal('modal-progress');
 }
 function setChartMetric(m,el){
   chartMetric=m;
-  document.querySelectorAll('.chart-tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('#chart-tabs .chart-tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');renderProgressChart();
 }
 function renderProgressChart(){
@@ -8289,9 +8419,9 @@ function renderProgressChart(){
   // trusting the exercise's current uni flag, so old data from before/after a uni-status change
   // still reads correctly.
   const points=[];
-  state.history.slice().reverse().forEach(w=>{
-    const found=w.exercises.find(e=>e.exId===progressExId);if(!found)return;
-    const done=found.sets.filter(s=>s.done);if(!done.length)return;
+  (state.history||[]).slice().reverse().forEach(w=>{
+    const found=(w&&w.exercises||[]).find(e=>e&&e.exId===progressExId);if(!found)return;
+    const done=(found.sets||[]).filter(s=>s&&s.done);if(!done.length)return;
     let val=0;
     if(chartMetric==='weight')val=Math.max(...done.map(s=>s.weight||0));
     else if(chartMetric==='reps')val=Math.max(...done.map(s=>repsMetricOf(s)));
@@ -8342,7 +8472,7 @@ function renderProgressChart(){
     +'<div class="week-stat" style="flex:1"><div class="week-stat-val" style="color:'+(parseFloat(pct)>=0?'var(--green)':'var(--red)')+'">'+(parseFloat(pct)>=0?'+':'')+pct+'%</div><div class="week-stat-lbl">Progress</div></div>'
     +'<div class="week-stat" style="flex:1"><div class="week-stat-val">'+points.length+'</div><div class="week-stat-lbl">Sessions</div></div></div>';
   let latestSets=[];
-  for(let i=state.history.length-1;i>=0;i--){const f=state.history[i].exercises.find(e=>e.exId===progressExId);if(f){latestSets=f.sets.filter(s=>s.done);break;}}
+  for(let i=(state.history||[]).length-1;i>=0;i--){const w=state.history[i];const f=(w&&w.exercises||[]).find(e=>e&&e.exId===progressExId);if(f){latestSets=(f.sets||[]).filter(s=>s&&s.done);break;}}
   ormEl.innerHTML=latestSets.length?latestSets.map((s,i)=>{const hasSplit=s.repsL!=null||s.repsR!=null;return'<div class="orm-row"><span>Set '+(i+1)+': '+(s.weight||'BW')+'kg x '+(hasSplit?(s.repsL||0)+'/'+(s.repsR||0):s.reps)+' reps</span><span style="color:var(--accent);font-family:monospace">~'+calcORM(s.weight||0,repsMetricOf(s))+'kg</span></div>';}).join(''):'<div class="small text2">No recent data</div>';
 }
 
@@ -9189,9 +9319,47 @@ function renderHistory(){
     list.appendChild(div);
   });
 }
+// Which sets in a PAST workout were genuine PRs AT THE TIME (2026-08-15, user's request — the
+// live toast is the only place a PR ever showed up; reviewing an old workout couldn't tell you
+// which sets had been records). Can't just reuse getPR/checkSetForPR here — those aggregate ALL
+// of state.history, which already includes this very workout, so every set would just tie itself
+// instead of exceeding a real "before this workout" baseline. Instead: builds the weight/e1RM
+// ceiling from every workout strictly EARLIER than this one, then walks this workout's own sets
+// in order, flagging + advancing the ceiling progressively — exactly reproducing what the live
+// toast would have shown set-by-set as it happened, same weight/e1RM logic as the current
+// checkSetForPR (no standalone reps-only check, same reasoning as that fix).
+function getHistoricalSetPRFlags(w){
+  const sorted=state.history.slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const wTime=new Date(w.date).getTime();
+  const running={}; // exId -> {bw,bo}
+  sorted.forEach(pw=>{
+    if(new Date(pw.date).getTime()>=wTime)return; // strictly before — same-timestamp entries treated as not-yet-happened, avoids double-counting this workout against itself
+    pw.exercises.forEach(ex=>{
+      const r=running[ex.exId]||(running[ex.exId]={bw:0,bo:0});
+      ex.sets.filter(s=>s.done&&(!s.type||s.type==='normal')).forEach(s=>{
+        if((s.weight||0)>r.bw)r.bw=s.weight||0;
+        const o=calcORM(s.weight||0,repsMetricOf(s));if(o>r.bo)r.bo=o;
+      });
+    });
+  });
+  const flags={}; // exId -> array of booleans, parallel to that exercise's sets array
+  w.exercises.forEach(ex=>{
+    const r=running[ex.exId]||(running[ex.exId]={bw:0,bo:0});
+    flags[ex.exId]=ex.sets.map(s=>{
+      if(!s.done||(s.type&&s.type!=='normal'))return false;
+      const o=calcORM(s.weight||0,repsMetricOf(s));
+      const isPR=(s.weight||0)>r.bw||o>r.bo;
+      if((s.weight||0)>r.bw)r.bw=s.weight||0;
+      if(o>r.bo)r.bo=o;
+      return isPR;
+    });
+  });
+  return flags;
+}
 function openHistoryDetail(id){
   const w=state.history.find(h=>h.id===id);if(!w)return;
   const d=new Date(w.date);
+  const prFlags=getHistoricalSetPRFlags(w);
   document.getElementById('history-detail-title').textContent=w.name;
   let html='<div class="small text2" style="margin-bottom:10px">'+d.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'})+'</div>';
   if(w.mesoProgress){
@@ -9215,7 +9383,8 @@ function openHistoryDetail(id){
         const t=SET_TYPES.find(x=>x.id===s.type)||SET_TYPES[0];
         const rpe=s.rpe!=null?'<span style="color:var(--orange)"> · '+(useRIR?'RIR ':'RPE ')+s.rpe+'</span>':'';
         const hasSplitH=s.repsL!=null||s.repsR!=null;
-        html+='<div class="small text2" style="padding:3px 0">Set '+(i+1)+' <span class="badge '+t.badgeClass+'">'+t.label+'</span> — '+(s.weight||'BW')+'kg x '+(hasSplitH?(s.repsL||0)+'/'+(s.repsR||0):s.reps)+' reps'+rpe+'</div>';
+        const isPR=prFlags[ex.exId]&&prFlags[ex.exId][i];
+        html+='<div class="small text2" style="padding:3px 0">Set '+(i+1)+' <span class="badge '+t.badgeClass+'">'+t.label+'</span> — '+(s.weight||'BW')+'kg x '+(hasSplitH?(s.repsL||0)+'/'+(s.repsR||0):s.reps)+' reps'+rpe+(isPR?' <span style="color:var(--accent)">🏆 PR</span>':'')+'</div>';
         if(s.rpe!=null)allEff.push(useRIR?(10-s.rpe):s.rpe);
       }
     });
