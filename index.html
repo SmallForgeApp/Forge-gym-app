@@ -623,7 +623,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-16.7</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-17.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1800,7 +1800,7 @@ function getRoutineHistorySessions(routineId,limit){
   // most recent sessions — keeping the average current if pace/rest habits change over time.
   // Pull a larger pool than needed before filtering, so outliers don't just get replaced by
   // shrinking the effective window.
-  const pool=state.history.filter(w=>w.routineId===routineId&&w.duration>0).slice(0,(limit||8)*3);
+  const pool=(state.history||[]).filter(w=>w&&w.routineId===routineId&&w.duration>0).slice(0,(limit||8)*3);
   return filterPlausibleSessions(pool).slice(0,limit||8);
 }
 // `isFloor` (2026-08-08, user's correction): a real historical average already reflects true
@@ -1833,7 +1833,7 @@ function estimateSecondsForSets(totalSets,exerciseIds,routineId){
   let t=0;
   (exerciseIds||[]).forEach(exId=>{
     let sc=3;
-    for(let i=state.history.length-1;i>=0;i--){const f=state.history[i].exercises.find(e=>e.exId===exId);if(f){sc=f.sets.filter(s=>s.done).length||3;break;}}
+    sc=getLastLoggedSetCount(exId,3);
     t+=sc*45+(sc-1)*getSetRestTime(exId)+60;
   });
   return{sec:t,isFloor:true};
@@ -1844,7 +1844,7 @@ function estimateRoutineTime(exerciseIds,routineId,predictedSetsByExId){
   exerciseIds.forEach(exId=>{
     if(predictedSetsByExId&&predictedSetsByExId[exId]!=null){predictedSets+=predictedSetsByExId[exId];return;}
     let sc=3;
-    for(let i=state.history.length-1;i>=0;i--){const f=state.history[i].exercises.find(e=>e.exId===exId);if(f){sc=f.sets.filter(s=>s.done).length||3;break;}}
+    sc=getLastLoggedSetCount(exId,3);
     predictedSets+=sc;
   });
   const est=estimateSecondsForSets(predictedSets,exerciseIds,routineId);
@@ -1949,6 +1949,31 @@ function invalidatePRCache(){prCache={};}
 // Central exercise lookup — used throughout instead of repeating state.exercises.find(...)
 // everywhere, so any future change to how exercises are indexed only needs to happen here.
 function getExercise(id){return state.exercises.find(e=>e.id===id);}
+// SHARED, HARDENED (2026-08-16 audit): consolidates several duplicated "reverse-scan real history
+// for the last time this exercise was logged" blocks that existed inline at multiple call sites,
+// none of them guarded against a malformed history entry — same crash class as the getPR/
+// getMuscleVolume fixes, just not on the startup path so lower severity, but still a landmine.
+// One hardened implementation instead of N unguarded copies.
+function getLastLoggedSetCount(exId,fallback){
+  fallback=fallback||3;
+  for(let i=(state.history||[]).length-1;i>=0;i--){
+    const w=state.history[i];if(!w)continue;
+    const f=(w.exercises||[]).find(e=>e&&e.exId===exId);
+    if(f)return(f.sets||[]).filter(s=>s&&s.done).length||fallback;
+  }
+  return fallback;
+}
+function getLastLoggedDisplayStr(exId,isBW){
+  for(let i=(state.history||[]).length-1;i>=0;i--){
+    const w=state.history[i];if(!w)continue;
+    const f=(w.exercises||[]).find(e=>e&&e.exId===exId);
+    if(!f)continue;
+    const done=(f.sets||[]).filter(s=>s&&s.done);
+    if(!done.length)return'';
+    return isBW?Math.max(...done.map(s=>repsMetricOf(s)))+' reps':Math.max(...done.map(s=>s.weight||0))+'kg';
+  }
+  return'';
+}
 function getRoutine(id){return state.routines.find(r=>r.id===id);}
 // Personal Records section, Review tab (2026-08-15, user's request — PRs were only ever visible
 // as a one-time toast during the live set, nowhere to revisit afterward). Only exercises that
@@ -2812,13 +2837,14 @@ function getSuggestedRoutine(){
 
   // 1. Find routine most commonly done on today's day of week
   const dayFreq={};
-  state.history.forEach(w=>{
+  (state.history||[]).forEach(w=>{
+    if(!w)return;
     const wDay=days[new Date(w.date).getDay()];
     if(wDay!==todayName) return;
     // Match to a routine by name overlap or exercise overlap
     state.routines.forEach((r,i)=>{
       const ids=r.exerciseIds||[];
-      const exIds=w.exercises.map(e=>e.exId);
+      const exIds=(w.exercises||[]).map(e=>e&&e.exId);
       const overlap=ids.filter(id=>exIds.includes(id)).length;
       if(overlap>=Math.min(2,ids.length*0.5)){
         dayFreq[i]=(dayFreq[i]||0)+1;
@@ -2829,9 +2855,9 @@ function getSuggestedRoutine(){
   if(bestByDay) return parseInt(bestByDay[0]);
 
   // 2. Find routine typically done after the last completed workout
-  if(state.history.length>=2){
+  if(state.history.length>=2&&state.history[0]){
     const lastWorkout=state.history[0];
-    const lastExIds=lastWorkout.exercises.map(e=>e.exId);
+    const lastExIds=(lastWorkout.exercises||[]).map(e=>e&&e.exId);
     // Find which routine matches last workout
     let lastRoutineIdx=-1;
     let bestOverlap=0;
@@ -2849,8 +2875,9 @@ function getSuggestedRoutine(){
 
   // 3. Return the routine done least recently (most overdue)
   const lastDone={};
-  state.history.forEach(w=>{
-    const exIds=w.exercises.map(e=>e.exId);
+  (state.history||[]).forEach(w=>{
+    if(!w)return;
+    const exIds=(w.exercises||[]).map(e=>e&&e.exId);
     state.routines.forEach((r,i)=>{
       const ids=r.exerciseIds||[];
       const overlap=ids.filter(id=>exIds.includes(id)).length;
@@ -2880,7 +2907,7 @@ function getWeekBuckets(numWeeks){
   for(let i=numWeeks-1;i>=0;i--){
     const start=new Date(thisMonday);start.setDate(thisMonday.getDate()-7*i);
     const end=new Date(start);end.setDate(start.getDate()+7);
-    const count=state.history.filter(w=>{const d=new Date(w.date);return d>=start&&d<end;}).length;
+    const count=(state.history||[]).filter(w=>{if(!w)return false;const d=new Date(w.date);return d>=start&&d<end;}).length;
     buckets.push({start,count});
   }
   return buckets;
@@ -3169,7 +3196,7 @@ function renderMesocycles(){
     card.style.cssText=isActive?'border-color:var(--accent)44;box-shadow:0 0 0 1px var(--accent)22,0 8px 28px rgba(0,0,0,0.35)':'';
     card.onclick=()=>openMesocycleDetail(mi);
     const totalInCycle=routineIds.length;
-    const completedCount=state.history.filter(w=>w.mesoId===m.id).length;
+    const completedCount=(state.history||[]).filter(w=>w&&w.mesoId===m.id).length;
     const cyclesPct=totalInCycle?(m.currentPos||0)/totalInCycle*100:0;
     const phaseBadge=m.phase==='deload'
       ?'<span class="tight-badge" style="background:#ff8c0022;color:#ff8c00;margin-left:6px">DELOAD</span>'
@@ -3323,7 +3350,7 @@ function loggedOrHistoryFallback(loggedExercises,routine){
 // rather than an independently-tracked landmark.
 function reassessVolumeLandmarks(m){
   const justFinishedRepeat=m.repeatsDone; // already incremented by the caller — this IS the pass that just ended
-  const passSessions=state.history.filter(w=>w.mesoId===m.id&&w.mesoProgress&&w.mesoProgress.repeat===justFinishedRepeat);
+  const passSessions=(state.history||[]).filter(w=>w&&w.mesoId===m.id&&w.mesoProgress&&w.mesoProgress.repeat===justFinishedRepeat);
   if(!passSessions.length)return;
   const muscles=new Set();
   (m.routineIds||[]).forEach(rid=>{
@@ -3373,6 +3400,7 @@ function advanceMesoProgress(m,loggedExercises){
   if(!m.skipLog)m.skipLog=[];
   if(!m.extraRotationCredits)m.extraRotationCredits={}; // Decision 2 (Phase B) — reset at pass boundaries below
   if(!m.muscleVolumeProgress)m.muscleVolumeProgress={}; // 2026-08-15 redesign — reset at pass boundaries below, same as extraRotationCredits
+  if(m.rirRampTimeFractionHighWater==null)m.rirRampTimeFractionHighWater=0; // 2026-08-17 monotonicity fix — reset at pass boundaries below
   // Any further progress (a finished workout, or another skip) invalidates the previous skip's
   // undo window — undo only ever applies to the single most recent skip, and only until
   // something else happens to this mesocycle.
@@ -3416,6 +3444,7 @@ function advanceMesoProgress(m,loggedExercises){
     m.skipLog=[]; // a new pass starts — any still-open catch-up window from the last pass no longer applies
     m.extraRotationCredits={}; // Decision 2 (Phase B) — fresh pass, no extra-rotation credits carried over
     m.muscleVolumeProgress={}; // 2026-08-15 redesign — fresh pass, no per-muscle progress carried over (a fresh selection re-floors at MEV/MV)
+    m.rirRampTimeFractionHighWater=0; // 2026-08-17 monotonicity fix — fresh pass, floor resets so the new pass's ramp starts from 0 again
     m.rirRampAnchorTotal=null; // fresh pass — ramp computes against its own rotationsPerMeso, not a carried-over extension anchor
     if(m.baseRotationsPerMeso!=null){m.rotationsPerMeso=m.baseRotationsPerMeso;m.baseRotationsPerMeso=null;} // an extension only ever applies to the pass it was granted for
     m.phase=(totalRepeats>0&&m.repeatsDone>=totalRepeats)?'finished':'training';
@@ -3447,6 +3476,7 @@ function advanceMesoProgress(m,loggedExercises){
     m.skipLog=[]; // a new pass starts — any still-open catch-up window from the last pass no longer applies
     m.extraRotationCredits={}; // Decision 2 (Phase B) — fresh pass, no extra-rotation credits carried over
     m.muscleVolumeProgress={}; // 2026-08-15 redesign — fresh pass, no per-muscle progress carried over (a fresh selection re-floors at MEV/MV)
+    m.rirRampTimeFractionHighWater=0; // 2026-08-17 monotonicity fix — fresh pass, floor resets so the new pass's ramp starts from 0 again
     m.rirRampAnchorTotal=null; // fresh pass — ramp computes against its own rotationsPerMeso, not a carried-over extension anchor
     if(m.baseRotationsPerMeso!=null){m.rotationsPerMeso=m.baseRotationsPerMeso;m.baseRotationsPerMeso=null;} // an extension only ever applies to the pass it was granted for
     m.phase=(totalRepeats>0&&m.repeatsDone>=totalRepeats)?'finished':'training';
@@ -3741,6 +3771,15 @@ function getMesoSetAdjustments(m,exId,routineId,repRange){
 // isn't enough real training-frequency data yet \u2014 reuses the exact same
 // getEffectiveWeeklyTrainingFrequency fallback/threshold as the volume redesign, including its
 // manual-estimate fallback.
+// MONOTONICITY FIX (2026-08-17, user's report — RIR target moved BACKWARD between two sessions in
+// the same rotation, 1 RIR then 2 RIR next time, despite rotationsDone only ever increasing).
+// Root cause: weeklyFreq is a ROLLING 28-day average, recomputed fresh on every call — it can
+// drift down between two sessions even as real elapsed days strictly increases, so the raw
+// timeFraction here is NOT guaranteed monotonic on its own (rotationFraction in getMesoTargetRIR
+// below IS monotonic by construction, rotationsDone never decreases — this was the only non-
+// monotonic half of the min()). Callers needing a stable, never-regressing value should floor
+// this raw fraction against m.rirRampTimeFractionHighWater (see getMesoTargetRIR) rather than use
+// it directly — kept pure/unfloored here so it stays simple to test and reason about in isolation.
 function getMesoRealTimeRampFraction(m){
   const weeklyFreq=getEffectiveWeeklyTrainingFrequency();
   if(!weeklyFreq)return null;
@@ -3759,14 +3798,14 @@ function getMesoRealTimeRampFraction(m){
 function getMesoPassStartDate(m){
   const passRepeat=(m.repeatsDone||0)+1;
   let earliest=null;
-  state.history.forEach(w=>{
-    if(w.mesoId!==m.id||!w.mesoProgress||w.mesoProgress.repeat!==passRepeat)return;
+  (state.history||[]).forEach(w=>{
+    if(!w||w.mesoId!==m.id||!w.mesoProgress||w.mesoProgress.repeat!==passRepeat)return;
     const d=new Date(w.date).getTime();
     if(earliest==null||d<earliest)earliest=d;
   });
   return earliest;
 }
-function getMesoTargetRIR(m,rotNumOverride){
+function getMesoTargetRIR(m,rotNumOverride,commit){
   if(!m)return null;
   if(m.phase==='finished')return null;
   if(m.phase==='deload')return{deload:true,rir:m.deloadTargetRIR!=null?m.deloadTargetRIR:4};
@@ -3785,7 +3824,16 @@ function getMesoTargetRIR(m,rotNumOverride){
   const rotationFraction=rampTotal<=1?1:((rampRotNum-1)/(rampTotal-1));
   // 2026-08-15: real-time brake, see getMesoRealTimeRampFraction above — min() means whichever
   // signal (rotations completed, or real days elapsed) says you're LESS far into the pass wins.
-  const timeFraction=rampTotal>1?getMesoRealTimeRampFraction(m):null;
+  // 2026-08-17: the raw timeFraction isn't monotonic on its own (rolling weeklyFreq can drift), so
+  // it's floored against a stored high-water mark before being used, guaranteeing this can never
+  // hand back a lower RIR target... below, that is, a target further along the ramp, than a
+  // session you've already actually started. The floor only ever ADVANCES, and only at real
+  // commit (workout start, commit===true) — a preview render (commit falsy, the default) reads
+  // the floor but never raises it, so previews can't lock in progress you haven't actually done.
+  const rawTimeFraction=rampTotal>1?getMesoRealTimeRampFraction(m):null;
+  const highWater=m.rirRampTimeFractionHighWater||0;
+  const timeFraction=rawTimeFraction!=null?Math.max(rawTimeFraction,highWater):(highWater||null);
+  if(commit&&rawTimeFraction!=null&&rawTimeFraction>highWater)m.rirRampTimeFractionHighWater=rawTimeFraction;
   const fraction=timeFraction!=null?Math.min(rotationFraction,timeFraction):rotationFraction;
   const start=Math.min(cap,end+rampTotal-1);
   const rir=rampTotal<=1?end:Math.round(start+(end-start)*fraction);
@@ -4209,7 +4257,7 @@ function getEfficientVolumeEligibility(m,routineId,routineIdx){
     if(predicted&&predicted[exId]!=null)sc=predicted[exId];
     else{
       sc=3;
-      for(let i=state.history.length-1;i>=0;i--){const f=state.history[i].exercises.find(e=>e.exId===exId);if(f){sc=f.sets.filter(s=>s.done).length||3;break;}}
+      sc=getLastLoggedSetCount(exId,3);
     }
     if(sc>=2)exIds.push(exId);
   });
@@ -4714,7 +4762,7 @@ function getPriorityMuscleWorkoutCoverage(m,muscle){
 // state.manualWeeklyFrequency, prompting for it if that's also unset.
 function getRealWeeklyTrainingFrequency(){
   const cutoff=new Date(Date.now()-MUSCLE_FREQ_WINDOW_DAYS*864e5);
-  const count=state.history.filter(w=>w.duration>0&&new Date(w.date)>=cutoff).length;
+  const count=(state.history||[]).filter(w=>w&&w.duration>0&&new Date(w.date)>=cutoff).length;
   if(count<4)return null;
   return count/(MUSCLE_FREQ_WINDOW_DAYS/7);
 }
@@ -5404,14 +5452,7 @@ function openGymSetupPreview(i){
       const ex=getExercise(id);if(!ex)return'';
       const color=MUSCLE_COLORS[ex.muscle]||'#aaa';
       let lastStr='';
-      for(let h=state.history.length-1;h>=0;h--){
-        const f=state.history[h].exercises.find(e=>e.exId===id);
-        if(f){
-          const done=f.sets.filter(s=>s.done);
-          if(done.length){const isBW=ex.bw==='bw';lastStr=isBW?Math.max(...done.map(s=>repsMetricOf(s)))+' reps':Math.max(...done.map(s=>s.weight||0))+'kg';}
-          break;
-        }
-      }
+      lastStr=getLastLoggedDisplayStr(id,ex.bw==='bw');
       const sc=seedByExId[id]!=null?seedByExId[id]:3;
       const setupBits=[];
       if(ex.machine)setupBits.push(ex.machine);
@@ -5467,10 +5508,7 @@ function openRoutineDetail(i){
       const ex=getExercise(id);if(!ex)return'';
       const color=MUSCLE_COLORS[ex.muscle]||'#aaa';
       let lastStr='';
-      for(let h=state.history.length-1;h>=0;h--){
-        const f=state.history[h].exercises.find(e=>e.exId===id);
-        if(f){const done=f.sets.filter(s=>s.done);if(done.length){const isBW=ex.bw==='bw';lastStr=isBW?Math.max(...done.map(s=>repsMetricOf(s)))+' reps':Math.max(...done.map(s=>s.weight||0))+'kg';}break;}
-      }
+      lastStr=getLastLoggedDisplayStr(id,ex.bw==='bw');
       const pr=getPR(id);
       const injured=isExerciseInjured(id);
       return'<div class="rd-ex-row"'+(injured?' style="opacity:0.7"':'')+'>'
@@ -5651,7 +5689,7 @@ function renderEfficientVolumeToggle(r,activeMeso,eligibility){
   (r.exerciseIds||[]).forEach(exId=>{
     if(predictedSetsByExId&&predictedSetsByExId[exId]!=null){predictedSets+=predictedSetsByExId[exId];return;}
     let sc=3;
-    for(let i=state.history.length-1;i>=0;i--){const f=state.history[i].exercises.find(e=>e.exId===exId);if(f){sc=f.sets.filter(s=>s.done).length||3;break;}}
+    sc=getLastLoggedSetCount(exId,3);
     predictedSets+=sc;
   });
   const offEst=estimateSecondsForSets(predictedSets,r.exerciseIds||[],r.id);
@@ -5729,7 +5767,13 @@ function buildRoutineSeedPlan(routineIdx,commit){
   // enhancement is skipped for this call instead of blocking Start Workout entirely. An
   // enhancement failing silently is far better than the core action failing silently.
   let mesoRIRInfo=null;
-  try{mesoRIRInfo=activeMeso?getMesoTargetRIR(activeMeso):null;}catch(e){console.error('getMesoTargetRIR failed, continuing without it:',e);mesoRIRInfo=null;}
+  const rirHighWaterBefore=activeMeso?activeMeso.rirRampTimeFractionHighWater:null;
+  try{mesoRIRInfo=activeMeso?getMesoTargetRIR(activeMeso,null,commit):null;}catch(e){console.error('getMesoTargetRIR failed, continuing without it:',e);mesoRIRInfo=null;}
+  // getMesoTargetRIR may have just mutated activeMeso.rirRampTimeFractionHighWater (commit-time
+  // monotonicity floor, 2026-08-17) — that needs to actually persist even on a session where
+  // nothing else below happens to change, or the fix only holds until the next page load.
+  const rirHighWaterChanged=activeMeso&&activeMeso.rirRampTimeFractionHighWater!==rirHighWaterBefore;
+  if(rirHighWaterChanged)save();
   // Computed once up front so it can both auto-apply an extra set below (once activeWorkout
   // exists) and drive the note text later, without computing it twice.
   let volSuggestions=null;
@@ -6530,7 +6574,8 @@ function getSetTarget(exId,workoutEx,setIdx,exData,routineId){
 // falling through to an older session that happened to have a rating would use stale evidence.
 function getLastJointPain(exId){
   for(let i=0;i<state.history.length;i++){
-    const ex=(state.history[i].exercises||[]).find(e=>e.exId===exId);
+    const w=state.history[i];if(!w)continue;
+    const ex=(w.exercises||[]).find(e=>e&&e.exId===exId);
     if(ex)return ex.feedback&&ex.feedback.jointPain!=null?ex.feedback.jointPain:null;
   }
   return null;
@@ -6539,7 +6584,8 @@ function getLastJointPain(exId){
 // "Too Much"/extreme fatigue or cramping, see PEF_FIELDS). See getSetTarget's usage above.
 function getLastWorkloadTooMuch(exId){
   for(let i=0;i<state.history.length;i++){
-    const ex=(state.history[i].exercises||[]).find(e=>e.exId===exId);
+    const w=state.history[i];if(!w)continue;
+    const ex=(w.exercises||[]).find(e=>e&&e.exId===exId);
     if(ex)return!!(ex.feedback&&ex.feedback.challenge===3);
   }
   return false;
@@ -6837,7 +6883,8 @@ function getMuscleSorenessWarningHtml(muscle){
 function getLastNExerciseFeedback(exId,n){
   const out=[];
   for(let i=0;i<state.history.length&&out.length<n;i++){
-    const ex=(state.history[i].exercises||[]).find(e=>e.exId===exId);
+    const w=state.history[i];if(!w)continue;
+    const ex=(w.exercises||[]).find(e=>e&&e.exId===exId);
     if(ex)out.push(ex.feedback||null); // logged but no feedback given still counts as "the session" so a same-value streak below can't silently skip past it
   }
   return out;
@@ -6846,9 +6893,18 @@ function getExerciseFeedbackWarningHtml(exId){
   const recent=getLastNExerciseFeedback(exId,2);
   const last=recent[0];
   if(!last)return'';
-  if(last.jointPain>=2)return'<div class="exercise-soreness-warn severe">\ud83d\uded1 Joint pain flagged last session on this exercise \u2014 target backed off automatically. Ease in and stop if it repeats.</div>';
+  // BUG FIX (2026-08-16, user's report): jointPain>=2 and challenge===3 (Workload "Too Much")
+  // each independently back off the next target in getSetTarget above — a session with BOTH
+  // stacks both backoffs onto the same number. This banner used to be a plain if-chain with early
+  // returns, so only the first match ever displayed — the number moved for two reasons but only
+  // one was ever explained. Now checked as independent booleans so the combined case gets its own
+  // message instead of silently dropping one.
+  const hasPain=last.jointPain>=2;
+  const hasWorkload=last.challenge===3;
+  if(hasPain&&hasWorkload)return'<div class="exercise-soreness-warn severe">\ud83d\uded1\ud83d\udd25 Joint pain AND Too Much workload flagged last session \u2014 target backed off twice automatically. Ease in, and consider swapping this exercise if either keeps happening.</div>';
+  if(hasPain)return'<div class="exercise-soreness-warn severe">\ud83d\uded1 Joint pain flagged last session on this exercise \u2014 target backed off automatically. Ease in and stop if it repeats.</div>';
   if(last.jointPain===1)return'<div class="exercise-soreness-warn mod">\u26a0\ufe0f Mild joint ache reported last session on this exercise \u2014 keep an eye on how it feels today.</div>';
-  if(last.challenge===3)return'<div class="exercise-soreness-warn severe">\ud83d\udd25 Rated Too Much last session \u2014 target backed off automatically. Worth checking form, or swapping this exercise if it keeps happening.</div>';
+  if(hasWorkload)return'<div class="exercise-soreness-warn severe">\ud83d\udd25 Rated Too Much last session \u2014 target backed off automatically. Worth checking form, or swapping this exercise if it keeps happening.</div>';
   if(recent.length===2&&recent[1]&&last.challenge===0&&last.pump===0&&recent[1].challenge===0&&recent[1].pump===0)
     return'<div class="exercise-soreness-warn mod">\ud83d\udd0d Rated Easy with flat pump the last two sessions \u2014 worth checking your setup/technique, or considering a swap.</div>';
   return'';
@@ -8381,6 +8437,27 @@ function renderProgressHistoryTab(){
       +rows+'</div>';
   }).join('');
 }
+// Groups consecutive rep-count rows that cite the exact same real performance into one row
+// (2026-08-17, user's report — a sparsely-logged exercise where every real set happened to be
+// done at the same weight can otherwise repeat one identical line for many rows in a row, which
+// reads as padding/fabricated granularity rather than real distinct data, even though each row IS
+// individually correct per the "best weight for N-or-more reps" ladder). Purely a display
+// collapse — getExerciseRepRangeRecords itself is unchanged, still one real entry per rep
+// threshold; this only merges ADJACENT rows that would otherwise show byte-for-byte identical
+// weight/reps/date into a single "N–M" row.
+function groupRepRangeRecords(repRecords,repKeys){
+  const groups=[];
+  repKeys.forEach(n=>{
+    const r=repRecords[n];
+    const prev=groups[groups.length-1];
+    if(prev&&prev.r.weight===r.weight&&prev.r.reps===r.reps&&prev.r.date===r.date){
+      prev.to=n;
+    }else{
+      groups.push({from:n,to:n,r});
+    }
+  });
+  return groups;
+}
 function renderProgressRecordsTab(){
   const el=document.getElementById('progress-tab-records');if(!el)return;
   const pr=getPR(progressExId);
@@ -8388,20 +8465,22 @@ function renderProgressRecordsTab(){
   const maxVol=getExerciseMaxSessionVolume(progressExId);
   const repRecords=getExerciseRepRangeRecords(progressExId);
   const repKeys=Object.keys(repRecords).map(Number).sort((a,b)=>a-b);
+  const repGroups=groupRepRangeRecords(repRecords,repKeys);
   let html='<div class="section-label" style="padding:10px 0 6px">Personal Records</div>'
     +'<div class="review-card" style="margin:0 0 12px">'
     +'<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span class="small text2">Estimated 1RM</span><span class="bold">'+pr.orm+'kg</span></div>'
     +'<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span class="small text2">Max weight</span><span class="bold">'+pr.weight+'kg</span></div>'
     +'<div style="display:flex;justify-content:space-between;padding:6px 0"><span class="small text2">Max session volume</span><span class="bold">'+maxVol+'kg</span></div>'
     +'</div>';
-  if(repKeys.length){
+  if(repGroups.length){
     html+='<div class="section-label" style="padding:10px 0 6px">Best By Rep Count</div><div class="review-card" style="margin:0">'
       +'<div style="display:flex;justify-content:space-between;padding:4px 0"><span class="small text3">REPS</span><span class="small text3">BEST</span><span class="small text3">EST. 1RM</span></div>';
-    repKeys.forEach(n=>{
-      const r=repRecords[n];
+    repGroups.forEach(g=>{
+      const r=g.r;
+      const label=g.from===g.to?String(g.from):g.from+'\u2013'+g.to;
       const d=new Date(r.date).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
       html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--border)">'
-        +'<span class="small text2" style="width:26px">'+n+'</span>'
+        +'<span class="small text2" style="width:36px">'+label+'</span>'
         +'<span style="flex:1;text-align:center"><div class="small">'+r.weight+'kg (×'+r.reps+')</div><div class="small text3">'+escHtml(d)+'</div></span>'
         +'<span class="small" style="color:var(--accent);font-family:monospace;width:56px;text-align:right">'+r.orm+'kg</span>'
         +'</div>';
@@ -9185,8 +9264,9 @@ function confirmMergeExercise(targetId){
 // rep-range overrides, RIR-anchor baselines, skip logs) — those are rarer, mid-cycle-only, and
 // migrating them safely would need much more certainty about which cycle/slot they came from.
 function performExerciseMerge(sourceId,targetId){
-  state.history.forEach(w=>{
-    (w.exercises||[]).forEach(ex=>{if(ex.exId===sourceId)ex.exId=targetId;});
+  (state.history||[]).forEach(w=>{
+    if(!w)return;
+    (w.exercises||[]).forEach(ex=>{if(ex&&ex.exId===sourceId)ex.exId=targetId;});
   });
   state.routines.forEach(r=>{
     if(!r.exerciseIds||!r.exerciseIds.includes(sourceId))return;
@@ -9300,16 +9380,17 @@ function renderHistory(){
   // Build a mesocycle summary map: mesoId → {name, startedAt, completedWorkouts}
   const mesoMap={};
   (state.mesocycles||[]).forEach(m=>{
-    const workoutsInMeso=state.history.filter(w=>w.mesoId===m.id);
+    const workoutsInMeso=(state.history||[]).filter(w=>w&&w.mesoId===m.id);
     const daysSinceStart=m.startedAt?Math.floor((Date.now()-new Date(m.startedAt))/(1000*60*60*24)):null;
     mesoMap[m.id]={name:m.name,count:workoutsInMeso.length,days:daysSinceStart};
   });
 
-  state.history.forEach(w=>{
+  (state.history||[]).forEach(w=>{
+    if(!w)return;
     const d=new Date(w.date);
     const ds=d.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
-    let vol=0,sets=0;w.exercises.forEach(ex=>ex.sets.forEach(s=>{if(s.done){sets++;vol+=(s.weight||0)*(s.reps||0);}}));
-    const names=w.exercises.slice(0,3).map(ex=>{const e=getExercise(ex.exId);return e?e.name:'?';}).join(', ')+(w.exercises.length>3?' +'+(w.exercises.length-3)+' more':'');
+    let vol=0,sets=0;(w.exercises||[]).forEach(ex=>{if(ex)(ex.sets||[]).forEach(s=>{if(s&&s.done){sets++;vol+=(s.weight||0)*(s.reps||0);}});});
+    const names=(w.exercises||[]).slice(0,3).map(ex=>{const e=ex&&getExercise(ex.exId);return e?e.name:'?';}).join(', ')+((w.exercises||[]).length>3?' +'+((w.exercises||[]).length-3)+' more':'');
     // BUG FIX (2026-08-09, user's report — Review showed Triceps as untrained while a History
     // card's muscle pills showed it worked that same day): this used to list a muscle for EVERY
     // exercise that was part of the workout, regardless of whether any of its sets were actually
@@ -9396,7 +9477,7 @@ function getHistoricalSetPRFlags(w){
   return flags;
 }
 function openHistoryDetail(id){
-  const w=state.history.find(h=>h.id===id);if(!w)return;
+  const w=(state.history||[]).find(h=>h&&h.id===id);if(!w)return;
   const d=new Date(w.date);
   const prFlags=getHistoricalSetPRFlags(w);
   document.getElementById('history-detail-title').textContent=w.name;
@@ -9440,7 +9521,7 @@ function openHistoryDetail(id){
   if(allEff.length)html+='<div class="mt12 small" style="color:var(--orange)">Avg effort (RPE-equivalent): '+(allEff.reduce((a,b)=>a+b,0)/allEff.length).toFixed(1)+'</div>';
   document.getElementById('history-detail-body').innerHTML=html;
   trendTargets.forEach(t=>drawHistoryTrendSparkline(t.canvasId,t.exId,d));
-  document.getElementById('history-delete-btn').onclick=()=>{if(confirm('Delete this workout?')){state.history=state.history.filter(h=>h.id!==id);invalidatePRCache();save();renderHistory();closeModal('modal-history-detail');}};
+  document.getElementById('history-delete-btn').onclick=()=>{if(confirm('Delete this workout?')){state.history=(state.history||[]).filter(h=>h&&h.id!==id);invalidatePRCache();save();renderHistory();closeModal('modal-history-detail');}};
   openModal('modal-history-detail');
 }
 // Small trend line for one exercise, using history up to and including `cutoffDate` only — a
@@ -9454,10 +9535,10 @@ function drawHistoryTrendSparkline(canvasId,exId,cutoffDate){
   canvas.width=(wrap&&wrap.clientWidth)||280;canvas.height=36;
   ctx.clearRect(0,0,canvas.width,canvas.height);
   const points=[];
-  state.history.slice().reverse().forEach(hw=>{
-    if(new Date(hw.date)>cutoffDate)return;
-    const found=hw.exercises.find(e=>e.exId===exId);if(!found)return;
-    const done=found.sets.filter(s=>s.done);if(!done.length)return;
+  (state.history||[]).slice().reverse().forEach(hw=>{
+    if(!hw||new Date(hw.date)>cutoffDate)return;
+    const found=(hw.exercises||[]).find(e=>e&&e.exId===exId);if(!found)return;
+    const done=(found.sets||[]).filter(s=>s&&s.done);if(!done.length)return;
     const val=Math.max(...done.map(s=>calcORM(s.weight||0,repsMetricOf(s))));
     if(val>0)points.push(val);
   });
@@ -9481,12 +9562,14 @@ function drawHistoryTrendSparkline(canvasId,exId,cutoffDate){
 function exportHistory(){
   if(!state.history.length){alert('No workout history to export.');return;}
   const rows=[['Date','Workout','Exercise','Set','Type','Weight(kg)','Reps','Effort','Mode','Volume','Notes']];
-  state.history.forEach(w=>{
+  (state.history||[]).forEach(w=>{
+    if(!w)return;
     const date=new Date(w.date).toLocaleDateString('en-GB');
-    w.exercises.forEach(ex=>{
+    (w.exercises||[]).forEach(ex=>{
+      if(!ex)return;
       const exData=getExercise(ex.exId);
       const modeLbl=ex.useRIR?'RIR':'RPE';
-      ex.sets.forEach((s,i)=>{if(s.done)rows.push([date,w.name,exData?exData.name:'?',i+1,s.type||'normal',s.weight||0,s.reps||0,s.rpe!=null?s.rpe:'',s.rpe!=null?modeLbl:'',((s.weight||0)*(s.reps||0)).toFixed(0),w.notes||'']);});
+      (ex.sets||[]).forEach((s,i)=>{if(s&&s.done)rows.push([date,w.name,exData?exData.name:'?',i+1,s.type||'normal',s.weight||0,s.reps||0,s.rpe!=null?s.rpe:'',s.rpe!=null?modeLbl:'',((s.weight||0)*(s.reps||0)).toFixed(0),w.notes||'']);});
     });
   });
   const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
@@ -9504,11 +9587,12 @@ function exportHistory(){
 function getWeeklyMuscleVolume(windowDays){
   windowDays=windowDays||7;
   const now=new Date();const wa=new Date(now-windowDays*864e5);
-  const ww=state.history.filter(w=>new Date(w.date)>=wa);
+  const ww=(state.history||[]).filter(w=>w&&new Date(w.date)>=wa);
   const ms={};MUSCLE_GROUPS.forEach(m=>ms[m]=0);
-  ww.forEach(w=>w.exercises.forEach(ex=>{
+  ww.forEach(w=>(w.exercises||[]).forEach(ex=>{
+    if(!ex)return;
     const exData=getExercise(ex.exId);if(!exData)return;
-    const done=ex.sets.filter(s=>s.done&&(!s.type||s.type==='normal')).length;
+    const done=(ex.sets||[]).filter(s=>s&&s.done&&(!s.type||s.type==='normal')).length;
     if(exData.muscle)ms[exData.muscle]=(ms[exData.muscle]||0)+done;
     if(exData.secondary)exData.secondary.split(',').forEach(sm=>{const t=sm.trim();if(t&&ms[t]!==undefined)ms[t]=(ms[t]||0)+done*getSecondaryMuscleFraction(exData,t);});
   }));
@@ -9519,8 +9603,8 @@ function getWeeklyMuscleVolume(windowDays){
 // and says nothing about whether it was ever trained at all. Added 2026-08-09 to split Review's
 // zero-recent-volume bucket into "never trained" vs "trained before, just not this week".
 function hasEverTrainedMuscle(muscle){
-  return state.history.some(w=>w.exercises.some(ex=>{
-    if(!(ex.sets||[]).some(s=>s.done))return false;
+  return (state.history||[]).some(w=>w&&(w.exercises||[]).some(ex=>{
+    if(!ex||!(ex.sets||[]).some(s=>s&&s.done))return false;
     const exData=getExercise(ex.exId);
     if(!exData)return false;
     if(exData.muscle===muscle)return true;
@@ -9735,7 +9819,7 @@ function getInjuredExerciseReasons(){
 // session should flag caution even if most sessions were pain-free.
 function getMuscleSFRSignal(muscle){
   const cutoff=new Date(Date.now()-14*864e5);
-  const recent=state.history.filter(w=>new Date(w.date)>=cutoff);
+  const recent=(state.history||[]).filter(w=>w&&new Date(w.date)>=cutoff);
   let pumpSum=0,pumpN=0,challengeSum=0,challengeN=0,maxJointPain=-1,jointPainN=0,sorenessSum=0,sorenessN=0;
   let impactSum=0,impactN=0;
   recent.forEach(w=>{
@@ -9829,9 +9913,10 @@ function getVolumeRecommendation(muscle,volOverride){
 }
 function getDaysSinceLastTrained(muscle){
   let latest=null;
-  state.history.forEach(w=>{
-    if(!w.exercises.some(ex=>{
-      if(!(ex.sets||[]).some(s=>s.done))return false;
+  (state.history||[]).forEach(w=>{
+    if(!w)return;
+    if(!(w.exercises||[]).some(ex=>{
+      if(!ex||!(ex.sets||[]).some(s=>s&&s.done))return false;
       const exData=getExercise(ex.exId);
       if(!exData)return false;
       if(exData.muscle===muscle)return true;
@@ -9849,7 +9934,7 @@ function renderReview(){
   const ms=getMuscleGroupVolumes(); // muscle-vs-landmark comparisons: flat rolling 7 days (see MUSCLE_VOLUME_WINDOW_DAYS/getMuscleVolume)
   const now=new Date();
   let vol=0,sets=0,rpeAll=[];const days=new Set();let consec=0;
-  ww.forEach(w=>{days.add(new Date(w.date).toDateString());w.exercises.forEach(ex=>{const useRIR=!!ex.useRIR;ex.sets.forEach(s=>{if(s.done&&s.type!=='partials'){sets++;vol+=(s.weight||0)*(s.reps||0);if(s.rpe!=null)rpeAll.push(useRIR?(10-s.rpe):s.rpe);}});});});
+  ww.forEach(w=>{if(!w)return;days.add(new Date(w.date).toDateString());(w.exercises||[]).forEach(ex=>{if(!ex)return;const useRIR=!!ex.useRIR;(ex.sets||[]).forEach(s=>{if(s&&s.done&&s.type!=='partials'){sets++;vol+=(s.weight||0)*(s.reps||0);if(s.rpe!=null)rpeAll.push(useRIR?(10-s.rpe):s.rpe);}});});});
   for(let i=0;i<7;i++){const d=new Date(now-i*864e5);if(days.has(d.toDateString()))consec++;else break;}
   const avgRPE=rpeAll.length?(rpeAll.reduce((a,b)=>a+b,0)/rpeAll.length).toFixed(1):'—';
   const statsHtml='<div class="week-stat-row" style="padding:14px 16px 0">'
@@ -10658,6 +10743,56 @@ function closeModal(id){
     history.back();
   }
 }
+// SWIPE-TO-DISMISS (2026-08-17, user's request): every bottom-sheet modal already shows a
+// horizontal drag handle purely as a visual affordance — it didn't actually respond to touch.
+// One delegated listener covers all 31 modals rather than wiring each individually. Only starts
+// tracking a drag when the touch begins ON a .modal-handle (so normal scrolling inside a modal's
+// body is completely unaffected); follows the finger by translating the modal down (never up —
+// dragging up doesn't do anything, matches standard bottom-sheet behavior), and on release either
+// commits to closeModal (past ~25% of the sheet's own height, or a fast enough flick even if
+// short) or snaps back to open with a transition, matching the same easing the existing
+// open/close transform already uses.
+(function initModalSwipeToDismiss(){
+ try{
+  let dragEl=null,dragModalId=null,startY=0,currentY=0,startTime=0,dragging=false;
+  function findOpenModalOverlay(handle){
+    let el=handle;
+    while(el&&!el.classList.contains('modal-overlay'))el=el.parentElement;
+    return el;
+  }
+  document.addEventListener('touchstart',e=>{
+    const handle=e.target.closest&&e.target.closest('.modal-handle');
+    if(!handle)return;
+    const overlay=findOpenModalOverlay(handle);
+    if(!overlay||!overlay.classList.contains('open'))return;
+    dragEl=overlay.querySelector('.modal');
+    if(!dragEl)return;
+    dragModalId=overlay.id;
+    startY=currentY=e.touches[0].clientY;
+    startTime=Date.now();
+    dragging=true;
+    dragEl.style.transition='none';
+  },{passive:true});
+  document.addEventListener('touchmove',e=>{
+    if(!dragging||!dragEl)return;
+    currentY=e.touches[0].clientY;
+    const dy=Math.max(0,currentY-startY); // only follow downward drags
+    dragEl.style.transform='translateY('+dy+'px)';
+  },{passive:true});
+  document.addEventListener('touchend',()=>{
+    if(!dragging||!dragEl)return;
+    dragging=false;
+    const dy=Math.max(0,currentY-startY);
+    const elapsed=Math.max(1,Date.now()-startTime);
+    const velocity=dy/elapsed; // px/ms
+    const threshold=dragEl.offsetHeight*0.25;
+    dragEl.style.transition='';
+    dragEl.style.transform='';
+    if(dy>threshold||(dy>40&&velocity>0.5))closeModal(dragModalId);
+    dragEl=null;dragModalId=null;
+  },{passive:true});
+ }catch(e){console.error('initModalSwipeToDismiss failed to initialize, swipe-to-dismiss unavailable this session:',e);}
+})();
 window.addEventListener('popstate',()=>{
   if(skipNextPopstate>0){skipNextPopstate--;return;}
   if(modalStack.length){
