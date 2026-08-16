@@ -1933,15 +1933,24 @@ function getRoutine(id){return state.routines.find(r=>r.id===id);}
 // uses — so this never lists an exercise from the database that's simply never been performed.
 // Reuses the exact collapsible-per-muscle-header pattern/CSS as Meso Review's "By Exercise".
 function getAllExercisePRs(){
+  // FIX (2026-08-16): hardened against malformed/legacy history entries. This now runs across
+  // the user's ENTIRE history (unlike getPR's normal call sites, which only ever touch exercises
+  // actively in the current workout), so it's the first thing to walk older entries that may not
+  // perfectly match today's shape. Every array access is now guarded so a bad entry gets skipped
+  // instead of throwing — an uncaught error here previously ran during the app's synchronous
+  // startup script and could abort all initialization code below it, breaking Start buttons
+  // app-wide even though this panel itself is just a Review-tab display.
   const exIds=new Set();
-  state.history.forEach(w=>w.exercises.forEach(ex=>{
-    if(ex.sets.some(s=>s.done&&(!s.type||s.type==='normal')))exIds.add(ex.exId);
-  }));
+  (state.history||[]).forEach(w=>{
+    (w&&w.exercises||[]).forEach(ex=>{
+      if(ex&&(ex.sets||[]).some(s=>s&&s.done&&(!s.type||s.type==='normal')))exIds.add(ex.exId);
+    });
+  });
   const byMuscle={};
   exIds.forEach(exId=>{
     const exData=getExercise(exId);if(!exData)return;
     const pr=getPR(exId);
-    if(!pr.weight&&!pr.reps)return; // defensive — shouldn't happen given the exIds filter above, but a genuinely empty PR has nothing worth listing
+    if(!pr||(!pr.weight&&!pr.reps))return; // defensive — shouldn't happen given the exIds filter above, but a genuinely empty PR has nothing worth listing
     const muscle=exData.muscle||'Other';
     (byMuscle[muscle]=byMuscle[muscle]||[]).push({exId,name:exData.name,isBW:exData.bw==='bw',...pr});
   });
@@ -2699,7 +2708,16 @@ function checkPriorityReorderAfterEdit(routineId){
     save();
   });
 }
-renderRoutinesList();renderExerciseDB();renderHistory();renderReview();
+// FIX (2026-08-16): each pre-render isolated in its own try/catch. Previously all four ran as one
+// unguarded statement — an uncaught error partway through (e.g. inside renderReview, which as of
+// 15.4 also walks the full workout history for the new Personal Records panel) aborted this whole
+// top-level script at that line, silently skipping every declaration and addEventListener call
+// below it in the file (including the document click handler and the Start-routine flow's own
+// state setup). That took down Start buttons everywhere even though the actual failure had
+// nothing to do with them. Isolating these means a single bad render only breaks that one panel.
+[renderRoutinesList,renderExerciseDB,renderHistory,renderReview].forEach(fn=>{
+  try{fn();}catch(e){console.error(fn.name+' failed during startup:',e);}
+});
 
 // ── ROUTINES ──
 function daysAgo(dateStr){
@@ -4519,7 +4537,11 @@ let mesoReviewOpenMuscles=new Set();
 let reviewPRsOpenMuscles=new Set();
 function renderReviewPRBody(){
   const body=document.getElementById('review-prs-body');if(!body)return;
-  const byMuscle=getAllExercisePRs();
+  // FIX (2026-08-16): isolate this panel's render — see getAllExercisePRs comment for why an
+  // uncaught error here is worse than usual (it can run during app startup).
+  let byMuscle;
+  try{byMuscle=getAllExercisePRs();}
+  catch(e){console.error('renderReviewPRBody failed:',e);body.innerHTML='<div class="small text2" style="text-align:center;padding:14px 0">Couldn\'t load records</div>';return;}
   const muscles=Object.keys(byMuscle).sort();
   if(!muscles.length){body.innerHTML='<div class="small text2" style="text-align:center;padding:14px 0">Complete workouts to start setting records</div>';return;}
   let html='';
