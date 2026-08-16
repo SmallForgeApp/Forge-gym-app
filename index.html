@@ -623,7 +623,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-16.5</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-16.7</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -8318,19 +8318,39 @@ function getExerciseSessionHistory(exId){
 }
 // Best weight ever logged AT each exact rep count, with the estimated 1RM that performance
 // implies — same "Records" table shape as Strong's rep-range breakdown.
+// "Best weight for N-OR-MORE reps" ladder (2026-08-16, corrected per user's Strong screenshot —
+// the left number isn't an exact rep count you performed, it's a minimum-reps THRESHOLD: row N is
+// the heaviest set anywhere in history whose actual reps were >= N. A heavy low-rep set can win
+// several consecutive rows in a row (a 90kg×6 set is simultaneously your best "at least 1 rep"
+// through "at least 6 reps" performance, since nothing heavier ever met even the loosest of those
+// thresholds) until a row's threshold exceeds what that set actually did, at which point the next
+// heaviest set that still qualifies takes over. Confirmed against the user's real squat data:
+// this exact algorithm reproduces their screenshot row-for-row (90kg×6 for rows 1-6, then 80kg×10
+// for 7-9). Dense/sequential 1..maxReps by construction — the highest-rep set ever always
+// qualifies for every row, so there's no gap to skip, unlike the old exact-bucket version.
 function getExerciseRepRangeRecords(exId){
-  const best={};
+  const allSets=[];
   (state.history||[]).forEach(w=>{
     (w&&w.exercises||[]).forEach(ex=>{
       if(!ex||ex.exId!==exId)return;
       (ex.sets||[]).filter(s=>s&&s.done&&(!s.type||s.type==='normal')).forEach(s=>{
         const reps=repsMetricOf(s);if(reps<1)return;
-        const weight=s.weight||0;
-        if(!best[reps]||weight>best[reps].weight)best[reps]={weight,date:w.date,orm:calcORM(weight,reps)};
+        allSets.push({weight:s.weight||0,reps,date:w.date});
       });
     });
   });
-  return best;
+  if(!allSets.length)return{};
+  const maxReps=Math.max(...allSets.map(s=>s.reps));
+  const table={};
+  for(let n=1;n<=maxReps;n++){
+    let best=null;
+    allSets.forEach(s=>{
+      if(s.reps<n)return;
+      if(!best||s.weight>best.weight||(s.weight===best.weight&&s.reps>best.reps))best=s;
+    });
+    if(best)table[n]={weight:best.weight,reps:best.reps,date:best.date,orm:calcORM(best.weight,best.reps)};
+  }
+  return table;
 }
 function getExerciseMaxSessionVolume(exId){
   let max=0;
@@ -8377,12 +8397,12 @@ function renderProgressRecordsTab(){
   if(repKeys.length){
     html+='<div class="section-label" style="padding:10px 0 6px">Best By Rep Count</div><div class="review-card" style="margin:0">'
       +'<div style="display:flex;justify-content:space-between;padding:4px 0"><span class="small text3">REPS</span><span class="small text3">BEST</span><span class="small text3">EST. 1RM</span></div>';
-    repKeys.forEach(reps=>{
-      const r=repRecords[reps];
+    repKeys.forEach(n=>{
+      const r=repRecords[n];
       const d=new Date(r.date).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
       html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--border)">'
-        +'<span class="small text2" style="width:26px">'+reps+'</span>'
-        +'<span style="flex:1;text-align:center"><div class="small">'+r.weight+'kg (×'+reps+')</div><div class="small text3">'+escHtml(d)+'</div></span>'
+        +'<span class="small text2" style="width:26px">'+n+'</span>'
+        +'<span style="flex:1;text-align:center"><div class="small">'+r.weight+'kg (×'+r.reps+')</div><div class="small text3">'+escHtml(d)+'</div></span>'
         +'<span class="small" style="color:var(--accent);font-family:monospace;width:56px;text-align:right">'+r.orm+'kg</span>'
         +'</div>';
     });
@@ -9343,24 +9363,29 @@ function renderHistory(){
 // toast would have shown set-by-set as it happened, same weight/e1RM logic as the current
 // checkSetForPR (no standalone reps-only check, same reasoning as that fix).
 function getHistoricalSetPRFlags(w){
-  const sorted=state.history.slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
+  // DEFENSIVE (2026-08-16 audit): this had the exact same unguarded state.history-walk pattern
+  // as the getPR/getAllExercisePRs startup crash — written the SAME session that lesson was
+  // learned, just not caught at the time since it's only reachable via History detail, not boot.
+  const sorted=(state.history||[]).filter(Boolean).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
   const wTime=new Date(w.date).getTime();
   const running={}; // exId -> {bw,bo}
   sorted.forEach(pw=>{
-    if(new Date(pw.date).getTime()>=wTime)return; // strictly before — same-timestamp entries treated as not-yet-happened, avoids double-counting this workout against itself
-    pw.exercises.forEach(ex=>{
+    if(!pw||new Date(pw.date).getTime()>=wTime)return; // strictly before — same-timestamp entries treated as not-yet-happened, avoids double-counting this workout against itself
+    (pw.exercises||[]).forEach(ex=>{
+      if(!ex)return;
       const r=running[ex.exId]||(running[ex.exId]={bw:0,bo:0});
-      ex.sets.filter(s=>s.done&&(!s.type||s.type==='normal')).forEach(s=>{
+      (ex.sets||[]).filter(s=>s&&s.done&&(!s.type||s.type==='normal')).forEach(s=>{
         if((s.weight||0)>r.bw)r.bw=s.weight||0;
         const o=calcORM(s.weight||0,repsMetricOf(s));if(o>r.bo)r.bo=o;
       });
     });
   });
   const flags={}; // exId -> array of booleans, parallel to that exercise's sets array
-  w.exercises.forEach(ex=>{
+  (w.exercises||[]).forEach(ex=>{
+    if(!ex)return;
     const r=running[ex.exId]||(running[ex.exId]={bw:0,bo:0});
-    flags[ex.exId]=ex.sets.map(s=>{
-      if(!s.done||(s.type&&s.type!=='normal'))return false;
+    flags[ex.exId]=(ex.sets||[]).map(s=>{
+      if(!s||!s.done||(s.type&&s.type!=='normal'))return false;
       const o=calcORM(s.weight||0,repsMetricOf(s));
       const isPR=(s.weight||0)>r.bw||o>r.bo;
       if((s.weight||0)>r.bw)r.bw=s.weight||0;
@@ -9549,7 +9574,12 @@ function getInjuryCheckinNudges(){
 // fractions capped at EFFICIENT_VOLUME_CREDIT_CAP.
 function getExerciseVolumeCredit(ex){
   let credit=0,refReps=0;
-  (ex.sets||[]).forEach(s=>{
+  // DEFENSIVE (2026-08-16 audit): a null/malformed set inside ex.sets is real-world possible (this
+  // is called from every volume-walking function above, several of which walk the user's entire
+  // history) — guard it here once, at the source, rather than relying on every caller to filter
+  // first.
+  (ex&&ex.sets||[]).forEach(s=>{
+    if(!s)return;
     const isNormal=!s.type||s.type==='normal';
     if(isNormal&&s.done){credit+=1;refReps=repsMetricOf(s)||refReps;}
     else if(s.type==='dropset'&&s.done){
@@ -9558,7 +9588,7 @@ function getExerciseVolumeCredit(ex){
     }
     if(s.myoBursts&&s.myoBursts.length){
       const baseReps=repsMetricOf(s)||refReps;
-      const burstReps=s.myoBursts.filter(b=>b.done).reduce((a,b)=>a+repsMetricOf(b),0);
+      const burstReps=s.myoBursts.filter(b=>b&&b.done).reduce((a,b)=>a+repsMetricOf(b),0);
       if(burstReps>0)credit+=baseReps>0?Math.min(EFFICIENT_VOLUME_CREDIT_CAP,burstReps/baseReps):0;
     }
   });
@@ -9617,7 +9647,12 @@ function getMuscleVolume(muscle){
   const windowDays=MUSCLE_VOLUME_WINDOW_DAYS;
   const cutoff=new Date(Date.now()-windowDays*864e5);
   let sets=0;
-  state.history.filter(w=>new Date(w.date)>=cutoff).forEach(w=>w.exercises.forEach(ex=>{
+  // DEFENSIVE (2026-08-16 audit — same crash class as the getPR/getAllExercisePRs startup fix,
+  // found while proactively checking for more instances). This is the single most-called real-
+  // history walker in the app (feeds getVolumeRecommendation, which nearly everything else reads
+  // from), so it's the highest-value one to harden even though it wasn't the one that crashed.
+  (state.history||[]).filter(w=>w&&new Date(w.date)>=cutoff).forEach(w=>(w.exercises||[]).forEach(ex=>{
+    if(!ex)return;
     const exData=getExercise(ex.exId);if(!exData)return;
     const credit=getExerciseVolumeCredit(ex);
     if(exData.muscle===muscle)sets+=credit;
