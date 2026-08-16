@@ -280,6 +280,9 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .chart-tabs{display:flex;gap:6px;margin-bottom:10px;}
 .chart-tab{padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;border:1px solid var(--border);background:var(--bg4);cursor:pointer;transition:all 0.15s;}
 .chart-tab.active{background:var(--accent);color:#0a0a0f;border-color:var(--accent);}
+.progress-main-tabs{display:flex;gap:18px;border-bottom:1px solid var(--border);margin-bottom:12px;}
+.progress-main-tab{padding:8px 0;font-size:13px;font-weight:700;letter-spacing:0.3px;color:var(--text3);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:all 0.15s;}
+.progress-main-tab.active{color:var(--accent);border-bottom-color:var(--accent);}
 .warmup-item{display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--border);}
 .warmup-item:last-child{border-bottom:none;}
 .warmup-check{width:24px;height:24px;border-radius:7px;border:2px solid var(--border);background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s;color:transparent;font-size:12px;flex-shrink:0;}
@@ -609,7 +612,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-16.3</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-16.4</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -896,10 +899,10 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
 <div class="modal-overlay" id="modal-progress">
   <div class="modal"><div class="modal-handle"></div><div class="modal-title" id="progress-ex-name">Progress</div>
     <div class="modal-body">
-      <div class="chart-tabs" id="progress-main-tabs">
-        <div class="chart-tab progress-main-tab active" onclick="setProgressTab('history',this)">History</div>
-        <div class="chart-tab progress-main-tab" onclick="setProgressTab('charts',this)">Charts</div>
-        <div class="chart-tab progress-main-tab" onclick="setProgressTab('records',this)">Records</div>
+      <div class="progress-main-tabs" id="progress-main-tabs">
+        <div class="progress-main-tab active" onclick="setProgressTab('history',this)">History</div>
+        <div class="progress-main-tab" onclick="setProgressTab('charts',this)">Charts</div>
+        <div class="progress-main-tab" onclick="setProgressTab('records',this)">Records</div>
       </div>
       <div id="progress-tab-history"></div>
       <div id="progress-tab-charts" style="display:none">
