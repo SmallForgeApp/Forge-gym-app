@@ -609,7 +609,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-15.3</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-15.4</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1927,6 +1927,27 @@ function invalidatePRCache(){prCache={};}
 // everywhere, so any future change to how exercises are indexed only needs to happen here.
 function getExercise(id){return state.exercises.find(e=>e.id===id);}
 function getRoutine(id){return state.routines.find(r=>r.id===id);}
+// Personal Records section, Review tab (2026-08-15, user's request — PRs were only ever visible
+// as a one-time toast during the live set, nowhere to revisit afterward). Only exercises that
+// have at least one real logged (done, normal-type) set ever — same standard getPR itself already
+// uses — so this never lists an exercise from the database that's simply never been performed.
+// Reuses the exact collapsible-per-muscle-header pattern/CSS as Meso Review's "By Exercise".
+function getAllExercisePRs(){
+  const exIds=new Set();
+  state.history.forEach(w=>w.exercises.forEach(ex=>{
+    if(ex.sets.some(s=>s.done&&(!s.type||s.type==='normal')))exIds.add(ex.exId);
+  }));
+  const byMuscle={};
+  exIds.forEach(exId=>{
+    const exData=getExercise(exId);if(!exData)return;
+    const pr=getPR(exId);
+    if(!pr.weight&&!pr.reps)return; // defensive — shouldn't happen given the exIds filter above, but a genuinely empty PR has nothing worth listing
+    const muscle=exData.muscle||'Other';
+    (byMuscle[muscle]=byMuscle[muscle]||[]).push({exId,name:exData.name,isBW:exData.bw==='bw',...pr});
+  });
+  Object.values(byMuscle).forEach(list=>list.sort((a,b)=>a.name.localeCompare(b.name)));
+  return byMuscle;
+}
 function getPR(exId){
   if(prCache[exId])return prCache[exId];
   let bw=0,br=0,bo=0;
@@ -4495,6 +4516,40 @@ function getMesoReviewData(m){
   return{exerciseSummaries,muscleSummaries};
 }
 let mesoReviewOpenMuscles=new Set();
+let reviewPRsOpenMuscles=new Set();
+function renderReviewPRBody(){
+  const body=document.getElementById('review-prs-body');if(!body)return;
+  const byMuscle=getAllExercisePRs();
+  const muscles=Object.keys(byMuscle).sort();
+  if(!muscles.length){body.innerHTML='<div class="small text2" style="text-align:center;padding:14px 0">Complete workouts to start setting records</div>';return;}
+  let html='';
+  muscles.forEach(muscle=>{
+    const exs=byMuscle[muscle];
+    const open=reviewPRsOpenMuscles.has(muscle);
+    // Muscle names are a fixed internal set (MUSCLE_GROUPS/'Other'), not free text — safe to
+    // interpolate directly into the onclick, same convention as toggleMesoReviewMuscle.
+    html+='<div class="muscle-group-header" onclick="toggleReviewPRMuscle(\''+muscle+'\')">'
+      +'<span class="bold" style="font-size:13px">'+escHtml(muscle)+'</span>'
+      +'<span style="display:flex;align-items:center;gap:6px"><span class="text3 small">'+exs.length+' exercise'+(exs.length!==1?'s':'')+'</span><span class="text3">'+(open?'\u25be':'\u25b8')+'</span></span>'
+      +'</div>';
+    if(open){
+      html+='<div style="padding:0 0 4px 2px">'+exs.map(s=>{
+        const loadStr=s.isBW?s.reps+' reps':s.weight+'kg \u00d7 '+s.reps;
+        return '<div class="pr-row-link" style="padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="openProgressModal(\''+s.exId+'\')">'
+          +'<div style="display:flex;justify-content:space-between;align-items:center">'
+          +'<span class="bold" style="font-size:13px">'+escHtml(s.name)+'</span>'
+          +'<span class="small" style="color:var(--accent)">\u203a</span></div>'
+          +'<div class="small text3">Best: '+loadStr+(s.orm?' \u00b7 ~'+s.orm+'kg e1RM':'')+'</div>'
+          +'</div>';
+      }).join('')+'</div>';
+    }
+  });
+  body.innerHTML=html;
+}
+function toggleReviewPRMuscle(muscle){
+  if(reviewPRsOpenMuscles.has(muscle))reviewPRsOpenMuscles.delete(muscle);else reviewPRsOpenMuscles.add(muscle);
+  renderReviewPRBody();
+}
 // Priority/back-burner selection modal (2026-08-09) — draft state for the multi-select pills,
 // separate from m.priorityMuscles itself so nothing gets written to the meso until Confirm.
 let priorityDraftMesoIdx=null;
@@ -8661,7 +8716,8 @@ function renderExRow(r,muscle,list){
     }
   }
   if(soloEx){
-    dropdownItems+='<div class="r-dropdown-item" onclick="event.stopPropagation();openMergeExerciseModal(\''+soloEx.id+'\');closeAllDropdowns()">'+uiIcon('merge',15,'currentColor')+' Merge into...</div>';
+    dropdownItems+='<div class="r-dropdown-item" onclick="event.stopPropagation();openProgressModal(\''+soloEx.id+'\');closeAllDropdowns()">📈 View Progress</div>'
+      +'<div class="r-dropdown-item" onclick="event.stopPropagation();openMergeExerciseModal(\''+soloEx.id+'\');closeAllDropdowns()">'+uiIcon('merge',15,'currentColor')+' Merge into...</div>';
   }
 
 
@@ -9127,7 +9183,10 @@ function openHistoryDetail(id){
   w.exercises.forEach((ex,exIdx)=>{
     const exData=getExercise(ex.exId);
     const useRIR=!!ex.useRIR;
-    html+='<div class="bold mt12">'+(exData?escHtml(exData.name):'Unknown')+'</div>';
+    // Exercise name is tappable (2026-08-15, user's request) — jumps straight to that exercise's
+    // all-time Progress Chart, same modal/data as the in-workout 📈 button and the new Review tab
+    // Personal Records list. Closes this modal first rather than stacking two full-screen modals.
+    html+='<div class="bold mt12"'+(exData?' style="cursor:pointer;color:var(--accent)" onclick="closeModal(\'modal-history-detail\');openProgressModal(\''+ex.exId+'\')"':'')+'>'+(exData?escHtml(exData.name)+' \u203a':'Unknown')+'</div>';
     if(exData)html+='<div class="small text3">'+[exData.muscle,exData.machine].filter(Boolean).join(' · ')+'</div>';
     ex.sets.forEach((s,i)=>{
       if(s.done){
@@ -9640,8 +9699,11 @@ function renderReview(){
     +(outsideCadence.length&&ww.length?'<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)"><div class="small text3" style="margin-bottom:5px">NOT TRAINED IN THE LAST 7 DAYS</div>'+outsideCadence.map(m=>{const d=getDaysSinceLastTrained(m);return '<span class="muscle-tag">'+m+(d!=null?' · '+d+'d ago':'')+'</span>';}).join('')+'</div>':'')
     +(restingMuscles.length&&ww.length?'<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)"><div class="small text3" style="margin-bottom:5px">🩹 RESTING — EXERCISES MARKED INJURED</div>'+restingMuscles.map(m=>'<span class="muscle-tag">'+m+'</span>').join('')+'</div>':'')
     +'</div>'
+    +'<div class="section-label">Personal Records</div>'
+    +'<div class="review-card" style="margin:0 16px 10px"><div id="review-prs-body"></div></div>'
     +'<div class="section-label">Suggestions &amp; Insights</div>'
     +'<div class="review-card" style="margin:0 16px 16px">'+sugg.map(s=>'<div class="suggestion-item"><span style="font-size:15px;margin-right:6px">'+s.i+'</span>'+s.t+'</div>').join('')+'</div>';
+  renderReviewPRBody();
 }
 
 // ── PLATE CALC ──
