@@ -193,7 +193,8 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .modal-overlay.open{opacity:1;pointer-events:all;}
 .modal{background:var(--bg2);border-radius:24px 24px 0 0;width:100%;max-height:92vh;overflow-y:auto;padding-bottom:env(safe-area-inset-bottom,20px);transform:translateY(100%);transition:transform 0.3s ease;}
 .modal-overlay.open .modal{transform:translateY(0);}
-.modal-handle{width:40px;height:4px;background:var(--border);border-radius:2px;margin:12px auto 0;}
+.modal-handle{width:100%;height:36px;position:relative;cursor:grab;touch-action:none;}
+.modal-handle::after{content:'';position:absolute;top:12px;left:50%;transform:translateX(-50%);width:40px;height:4px;background:var(--border);border-radius:2px;}
 .modal-title{font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:1.5px;padding:14px 20px 4px;}
 .modal-body{padding:12px 20px 20px;}.modal-actions{display:flex;gap:10px;padding:0 20px 8px;}
 .soreness-row{display:flex;flex-direction:column;padding:10px 0;border-bottom:1px solid var(--border);gap:6px;}
@@ -623,7 +624,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-17.1</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-17.5</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -3780,15 +3781,36 @@ function getMesoSetAdjustments(m,exId,routineId,repRange){
 // monotonic half of the min()). Callers needing a stable, never-regressing value should floor
 // this raw fraction against m.rirRampTimeFractionHighWater (see getMesoTargetRIR) rather than use
 // it directly — kept pure/unfloored here so it stays simple to test and reason about in isolation.
+// MISCALIBRATION FIX (2026-08-17, user's report — rotation 3 of 4 showed 2 RIR when pure
+// rotation-based pacing (and the user's own expectation) says it should be 1 RIR). Root cause:
+// weeklyFreq below used to come from getEffectiveWeeklyTrainingFrequency(), a TRAILING 28-day
+// rolling average that reaches back before this pass even started — if the weeks right before
+// this pass began were slower (a deload, a break, anything), that stale pre-pass data drags the
+// estimate down for a pass that's actually been running at a faster, sustained pace the whole
+// time it's been active. Now prefers this pass's OWN observed cadence (real workouts logged in
+// THIS pass \u00f7 real days elapsed in THIS pass) once there's enough of it to trust (>=2 real
+// workouts logged, >=3 real days elapsed — avoids a wildly noisy estimate from, say, 2 sessions
+// logged one day apart implying an absurd 7x/week pace); falls back to the general trailing
+// average only before that point, since a brand-new pass has no within-pass data yet to prefer.
+// NOTE for future-me: if this still doesn't match rotation-only pacing after a couple more real
+// sessions, that's no longer a miscalibration — it means the pass's actual real cadence genuinely
+// hasn't kept up with what completing that many rotations would require, and the brake holding
+// RIR back is doing its real protective job, not malfunctioning.
 function getMesoRealTimeRampFraction(m){
-  const weeklyFreq=getEffectiveWeeklyTrainingFrequency();
+  const passStart=getMesoPassStartDate(m);
+  const realElapsedDays=passStart!=null?Math.max(0,(Date.now()-passStart)/864e5):0;
+  const passWorkoutsSoFar=getMesoPassWorkoutCount(m);
+  let weeklyFreq=null;
+  if(passWorkoutsSoFar>=2&&realElapsedDays>=3){
+    weeklyFreq=passWorkoutsSoFar/(realElapsedDays/7);
+  }else{
+    weeklyFreq=getEffectiveWeeklyTrainingFrequency();
+  }
   if(!weeklyFreq)return null;
   const seqLen=(m.routineIds||[]).length||1;
   const expectedTotalWorkouts=(m.rotationsPerMeso||1)*seqLen;
   const expectedRealDays=(expectedTotalWorkouts/weeklyFreq)*7;
   if(!expectedRealDays)return null;
-  const passStart=getMesoPassStartDate(m);
-  const realElapsedDays=passStart!=null?Math.max(0,(Date.now()-passStart)/864e5):0;
   return Math.max(0,Math.min(1,realElapsedDays/expectedRealDays));
 }
 // Earliest workout logged in the pass currently in progress for this meso \u2014 identified via the
@@ -3804,6 +3826,12 @@ function getMesoPassStartDate(m){
     if(earliest==null||d<earliest)earliest=d;
   });
   return earliest;
+}
+// Real workouts logged so far in the pass currently in progress — same mesoId/mesoProgress.repeat
+// tagging as getMesoPassStartDate above, used by getMesoRealTimeRampFraction's within-pass rate.
+function getMesoPassWorkoutCount(m){
+  const passRepeat=(m.repeatsDone||0)+1;
+  return (state.history||[]).filter(w=>w&&w.mesoId===m.id&&w.mesoProgress&&w.mesoProgress.repeat===passRepeat).length;
 }
 function getMesoTargetRIR(m,rotNumOverride,commit){
   if(!m)return null;
@@ -6779,6 +6807,11 @@ const PEF_FIELDS=[
   {field:'jointPain',label:'Joint / Acute Pain',legend:'0 No pain \u00b7 1 Mild ache \u00b7 2 Sharp pain'}
 ];
 let pefDraft={},pefPanelOpenIdxs=new Set();
+// SUPERSET FEEDBACK-SURVEY FIX (2026-08-17) — see finishSetSlot/savePEFeedback below. Holds the
+// scroll/focus target for a superset's next exercise while a just-completed exercise's feedback
+// survey is still waiting to be answered, so the jump can happen once the survey is actually
+// submitted instead of firing immediately and carrying the screen away from it.
+let pendingSupersetJump=null;
 // Called whenever a set is marked done — checks internally whether that was the exercise's last
 // remaining set and feedback hasn't already been given, and if so opens the panel immediately
 // without a full card rebuild (direct DOM update on the existing panel node).
@@ -6809,6 +6842,9 @@ function hideExerciseFeedbackIfIncomplete(exIdx){
   pefPanelOpenIdxs.delete(exIdx);
   const panel=document.getElementById('pef-panel-'+exIdx);
   if(panel)panel.style.display='none';
+  // A survey that's no longer showing has nothing left to defer the jump until — drop it rather
+  // than leave it pointing at a survey submission that may never come.
+  if(pendingSupersetJump&&pendingSupersetJump.exIdx===exIdx)pendingSupersetJump=null;
 }
 function openExerciseFeedback(exIdx){
   const ex=activeWorkout.exercises[exIdx];if(!ex)return;
@@ -6852,6 +6888,16 @@ function savePEFeedback(exIdx){
   if(panel)panel.style.display='none';
   updatePEFSummary(exIdx);
   scheduleSaveActiveWorkoutDraft();
+  // Deferred superset jump (2026-08-17 fix) — see finishSetSlot's aboutToShowFeedback check.
+  // Survey's been answered now, so it's safe to carry the screen to the next superset exercise.
+  if(pendingSupersetJump&&pendingSupersetJump.exIdx===exIdx){
+    const{nextGroupIdx,nextSetIdx}=pendingSupersetJump;
+    pendingSupersetJump=null;
+    setTimeout(()=>{
+      const nextRow=document.getElementById('set-row-'+nextGroupIdx+'-'+nextSetIdx);
+      if(nextRow){nextRow.scrollIntoView({behavior:'smooth',block:'center'});const inp=nextRow.querySelector('.set-input');if(inp)inp.focus();}
+    },300);
+  }
 }
 function updatePEFSummary(exIdx){
   const ex=activeWorkout&&activeWorkout.exercises[exIdx];
@@ -7181,11 +7227,24 @@ function finishSetSlot(exIdx,setIdx,opts){
     const nextGroupIdx=groupIdxs[(myPos+1)%groupIdxs.length];
     const nextEx=activeWorkout.exercises[nextGroupIdx];
     const nextSetIdx=nextEx.sets.findIndex((s,si)=>!s.done&&si>=setIdx)||nextEx.sets.findIndex(s=>!s.done);
+    // SUPERSET FEEDBACK-SURVEY FIX (2026-08-17, user's report): this exercise finishing its LAST
+    // set is exactly the moment checkExerciseFeedbackTrigger below might open its feedback survey
+    // — the auto-jump used to fire regardless, 300ms later, yanking scroll/focus to the next
+    // superset exercise and carrying the screen away before the survey was even seen, making it
+    // very easy to miss entirely. Checks the SAME completeness condition
+    // checkExerciseFeedbackTrigger itself uses; if this exercise is about to show its survey, the
+    // jump is deferred (pendingSupersetJump) rather than fired now — it happens once
+    // savePEFeedback actually submits that survey instead.
+    const aboutToShowFeedback=!ex.feedback&&ex.sets.length&&ex.sets.every(s=>s.done&&(!s.myoBursts||s.myoBursts.every(b=>b.done)));
     if(nextSetIdx>=0){
-      setTimeout(()=>{
-        const nextRow=document.getElementById('set-row-'+nextGroupIdx+'-'+nextSetIdx);
-        if(nextRow){nextRow.scrollIntoView({behavior:'smooth',block:'center'});const inp=nextRow.querySelector('.set-input');if(inp)inp.focus();}
-      },300);
+      if(aboutToShowFeedback){
+        pendingSupersetJump={exIdx,nextGroupIdx,nextSetIdx};
+      }else{
+        setTimeout(()=>{
+          const nextRow=document.getElementById('set-row-'+nextGroupIdx+'-'+nextSetIdx);
+          if(nextRow){nextRow.scrollIntoView({behavior:'smooth',block:'center'});const inp=nextRow.querySelector('.set-input');if(inp)inp.focus();}
+        },300);
+      }
     }
   }
   if(!(opts.chainComplete&&ex.supersetGroup!=null)){
@@ -8384,6 +8443,39 @@ function getExerciseSessionHistory(exId){
 // this exact algorithm reproduces their screenshot row-for-row (90kg×6 for rows 1-6, then 80kg×10
 // for 7-9). Dense/sequential 1..maxReps by construction — the highest-rep set ever always
 // qualifies for every row, so there's no gap to skip, unlike the old exact-bucket version.
+// "BEST PERFORMANCES" RANKING (2026-08-17, replaces the rep-count ladder below per user's
+// explicit direction — they want rank position by overall performance QUALITY, weighing weight
+// and reps together via the same estimated-1RM formula used everywhere else, NOT indexed by rep
+// count at all). One entry per real SESSION (that session's single best set by estimated 1RM,
+// tie-broken by heavier weight), not one per individual set — otherwise two identical top sets
+// logged back-to-back in the same session would occupy two separate rank slots, which isn't a
+// second genuine performance. Ranked descending, so rank 1 is your all-time best, rank 2 your
+// second-best, etc.
+function getExerciseBestPerformances(exId,limit){
+  limit=limit||10;
+  const bestPerSession=[];
+  (state.history||[]).forEach(w=>{
+    if(!w)return;
+    (w.exercises||[]).forEach(ex=>{
+      if(!ex||ex.exId!==exId)return;
+      let best=null;
+      (ex.sets||[]).forEach(s=>{
+        if(!s||!s.done||(s.type&&s.type!=='normal'))return;
+        const reps=repsMetricOf(s);if(reps<1)return;
+        const weight=s.weight||0;
+        const orm=calcORM(weight,reps);
+        if(!best||orm>best.orm||(orm===best.orm&&weight>best.weight))best={weight,reps,date:w.date,orm};
+      });
+      if(best)bestPerSession.push(best);
+    });
+  });
+  bestPerSession.sort((a,b)=>b.orm-a.orm||b.weight-a.weight);
+  return bestPerSession.slice(0,limit);
+}
+// SUPERSEDED 2026-08-17 by getExerciseBestPerformances above — left defined (unused) rather than
+// deleted, in case anything else ever needs the "best weight for N-or-more reps" shape. This was
+// the original Strong-matching design (validated row-for-row against the user's real squat
+// screenshot at the time) before the user asked for ranked-by-performance instead.
 function getExerciseRepRangeRecords(exId){
   const allSets=[];
   (state.history||[]).forEach(w=>{
@@ -8463,24 +8555,20 @@ function renderProgressRecordsTab(){
   const pr=getPR(progressExId);
   if(!pr||(!pr.weight&&!pr.reps)){el.innerHTML='<div class="small text2" style="text-align:center;padding:20px 0">No records yet</div>';return;}
   const maxVol=getExerciseMaxSessionVolume(progressExId);
-  const repRecords=getExerciseRepRangeRecords(progressExId);
-  const repKeys=Object.keys(repRecords).map(Number).sort((a,b)=>a-b);
-  const repGroups=groupRepRangeRecords(repRecords,repKeys);
+  const best=getExerciseBestPerformances(progressExId,10);
   let html='<div class="section-label" style="padding:10px 0 6px">Personal Records</div>'
     +'<div class="review-card" style="margin:0 0 12px">'
     +'<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span class="small text2">Estimated 1RM</span><span class="bold">'+pr.orm+'kg</span></div>'
     +'<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span class="small text2">Max weight</span><span class="bold">'+pr.weight+'kg</span></div>'
     +'<div style="display:flex;justify-content:space-between;padding:6px 0"><span class="small text2">Max session volume</span><span class="bold">'+maxVol+'kg</span></div>'
     +'</div>';
-  if(repGroups.length){
-    html+='<div class="section-label" style="padding:10px 0 6px">Best By Rep Count</div><div class="review-card" style="margin:0">'
-      +'<div style="display:flex;justify-content:space-between;padding:4px 0"><span class="small text3">REPS</span><span class="small text3">BEST</span><span class="small text3">EST. 1RM</span></div>';
-    repGroups.forEach(g=>{
-      const r=g.r;
-      const label=g.from===g.to?String(g.from):g.from+'\u2013'+g.to;
+  if(best.length){
+    html+='<div class="section-label" style="padding:10px 0 6px">Best Performances</div><div class="review-card" style="margin:0">'
+      +'<div style="display:flex;justify-content:space-between;padding:4px 0"><span class="small text3">RANK</span><span class="small text3">PERFORMANCE</span><span class="small text3">EST. 1RM</span></div>';
+    best.forEach((r,i)=>{
       const d=new Date(r.date).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
       html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--border)">'
-        +'<span class="small text2" style="width:36px">'+label+'</span>'
+        +'<span class="small text2" style="width:26px">'+(i+1)+'</span>'
         +'<span style="flex:1;text-align:center"><div class="small">'+r.weight+'kg (×'+r.reps+')</div><div class="small text3">'+escHtml(d)+'</div></span>'
         +'<span class="small" style="color:var(--accent);font-family:monospace;width:56px;text-align:right">'+r.orm+'kg</span>'
         +'</div>';
@@ -10760,8 +10848,17 @@ function closeModal(id){
     while(el&&!el.classList.contains('modal-overlay'))el=el.parentElement;
     return el;
   }
+  function resetDrag(){
+    if(dragEl){dragEl.style.transition='';dragEl.style.transform='';}
+    dragEl=null;dragModalId=null;dragging=false;
+  }
   document.addEventListener('touchstart',e=>{
-    const handle=e.target.closest&&e.target.closest('.modal-handle');
+    // 2026-08-17 fix: user's report — the bare 4px-tall bar was too small a target to hit
+    // consistently (matches the CSS change above, which grows the actual tappable box to 36px
+    // full-width while keeping the same thin visual bar via ::after). Also accept a touch
+    // starting on the title text right next to it, matching how most native bottom sheets let you
+    // grab anywhere in the header, not one exact pixel-thin strip.
+    const handle=e.target.closest&&e.target.closest('.modal-handle, .modal-title');
     if(!handle)return;
     const overlay=findOpenModalOverlay(handle);
     if(!overlay||!overlay.classList.contains('open'))return;
@@ -10781,16 +10878,23 @@ function closeModal(id){
   },{passive:true});
   document.addEventListener('touchend',()=>{
     if(!dragging||!dragEl)return;
-    dragging=false;
     const dy=Math.max(0,currentY-startY);
     const elapsed=Math.max(1,Date.now()-startTime);
     const velocity=dy/elapsed; // px/ms
     const threshold=dragEl.offsetHeight*0.25;
-    dragEl.style.transition='';
-    dragEl.style.transform='';
-    if(dy>threshold||(dy>40&&velocity>0.5))closeModal(dragModalId);
-    dragEl=null;dragModalId=null;
+    const shouldClose=dy>threshold||(dy>40&&velocity>0.5);
+    const idToClose=dragModalId;
+    resetDrag();
+    if(shouldClose)closeModal(idToClose);
   },{passive:true});
+  // FIX (2026-08-17): touchend alone isn't the only way a touch sequence can end — the browser
+  // can fire touchcancel instead (an interrupted gesture, an OS-level swipe, a stray scroll
+  // conflict), which this previously didn't listen for at all. Without this, `dragging` and
+  // `dragEl` could get stuck pointing at a drag that never properly finished, so the NEXT
+  // legitimate touchstart on a different modal (or even the same one) could inherit stale state —
+  // a plausible contributor to "worked once, then stopped" beyond just the small hit target.
+  // Always snaps back rather than closing, same as an under-threshold release.
+  document.addEventListener('touchcancel',resetDrag,{passive:true});
  }catch(e){console.error('initModalSwipeToDismiss failed to initialize, swipe-to-dismiss unavailable this session:',e);}
 })();
 window.addEventListener('popstate',()=>{
