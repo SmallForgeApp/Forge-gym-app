@@ -398,7 +398,14 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     </div>
   </div>
   <div class="scroll pb">
-    <div class="sec-hdr"><span class="sec-hdr-title">All Routines</span></div>
+    <div class="sec-hdr" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <span class="sec-hdr-title">All Routines</span>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="exportAllRoutines()">📤 Export All</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('routine-import-file-input').click()">📂 Import</button>
+        <input type="file" id="routine-import-file-input" accept="application/json" style="display:none" onchange="importRoutinesFile(this.files[0]);this.value=''"/>
+      </div>
+    </div>
     <div id="routines-list"></div>
   </div>
   <div class="bottom-nav" id="nav-routines"></div>
@@ -624,7 +631,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-17.5</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-20.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -2304,6 +2311,7 @@ function uiIcon(name, size, color){
     trash:`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19,6l-1,14a2,2,0,0,1-2,2H8a2,2,0,0,1-2-2L5,6"/><path d="M10,11v6"/><path d="M14,11v6"/></svg>`,
     merge:`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><path d="M6 3v7a4 4 0 0 0 4 4h8"/><path d="M14 10l4 4-4 4"/><path d="M6 14v7"/></svg>`,
     refresh:`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>`,
+    download:`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
   };
   return map[name]||'';
 }
@@ -3159,6 +3167,7 @@ function renderRoutinesList(){
       +'<div class="r-dropdown-item" onclick="beginRoutineWithSorenessCheck('+i+');closeAllDropdowns()">'+uiIcon('play',15,'currentColor')+' Start Workout</div>'
       +'<div class="r-dropdown-item" onclick="openEditRoutineModal_fromList('+i+');closeAllDropdowns()">'+uiIcon('pencil',15,'currentColor')+' Edit</div>'
       +'<div class="r-dropdown-item" onclick="duplicateRoutine('+i+');closeAllDropdowns()">'+uiIcon('copy',15,'currentColor')+' Duplicate</div>'
+      +'<div class="r-dropdown-item" onclick="exportRoutine('+i+');closeAllDropdowns()">'+uiIcon('download',15,'currentColor')+' Export</div>'
       +'<div class="r-dropdown-item" onclick="openAddRoutineToMesoModal('+i+');closeAllDropdowns()">'+uiIcon('grid',15,'currentColor')+' Add to Mesocycle</div>'
       +'<div class="r-dropdown-item danger" onclick="deleteRoutine('+i+');closeAllDropdowns()">'+uiIcon('trash',15,'currentColor')+' Delete</div>'
       +'</div>';
@@ -10292,6 +10301,114 @@ function importBackup(file){
       location.reload();
     }catch(err){
       alert('Could not read backup file: '+err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+// ============================================================
+// ROUTINE EXPORT / IMPORT (single routine or all routines, as a
+// standalone JSON file — separate from the full-state backup above.
+// Designed for round-tripping through an external editor/LLM: export
+// a routine, edit the JSON, re-import. Exercise matching on import is
+// by (muscle,name) — an exact match reuses the existing exercise (and
+// its history/PRs), anything else creates a new exercise record.
+// ============================================================
+function collectExercisesForRoutines(routines){
+  const ids=new Set();
+  (routines||[]).forEach(r=>(r.exerciseIds||[]).forEach(id=>ids.add(id)));
+  return[...ids].map(id=>getExercise(id)).filter(Boolean);
+}
+function downloadRoutineExport(routines,filenameLabel){
+  const exercises=collectExercisesForRoutines(routines);
+  const payload={
+    forgeExport:'routines',
+    version:1,
+    exportedAt:new Date().toISOString(),
+    routines:routines.map(r=>{
+      const out={name:r.name,desc:r.desc||'',exerciseIds:[...(r.exerciseIds||[])],repRanges:{...(r.repRanges||{})},rirModes:{...(r.rirModes||{})}};
+      if(r.supersetGroups)out.supersetGroups=[...r.supersetGroups];
+      return out;
+    }),
+    exercises:exercises.map(e=>({...e}))
+  };
+  const data=JSON.stringify(payload,null,2);
+  const a=document.createElement('a');
+  a.href='data:application/json;charset=utf-8,'+encodeURIComponent(data);
+  const slug=(filenameLabel||'routine').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'routine';
+  a.download='forge-'+slug+'-'+new Date().toISOString().split('T')[0]+'.json';
+  a.click();
+}
+function exportRoutine(routineIdx){
+  const r=state.routines[routineIdx];
+  if(!r)return;
+  downloadRoutineExport([r],r.name);
+}
+function exportAllRoutines(){
+  if(!state.routines.length){alert('No routines to export.');return;}
+  downloadRoutineExport(state.routines,'all-routines');
+}
+function findMatchingExerciseForImport(exData){
+  const name=(exData.name||'').trim().toLowerCase();
+  const muscle=exData.muscle||'';
+  return state.exercises.find(e=>e.muscle===muscle&&(e.name||'').trim().toLowerCase()===name);
+}
+function importRoutinesFromData(data){
+  const idMap={};
+  let newExerciseCount=0,matchedExerciseCount=0;
+  (data.exercises||[]).forEach(exData=>{
+    const existing=findMatchingExerciseForImport(exData);
+    if(existing){
+      idMap[exData.id]=existing.id;
+      matchedExerciseCount++;
+    }else{
+      const newId=uid();
+      const rest={...exData};delete rest.id;
+      state.exercises.push({id:newId,...rest});
+      idMap[exData.id]=newId;
+      newExerciseCount++;
+    }
+  });
+  const existingNames=new Set(state.routines.map(r=>r.name));
+  let importedCount=0;
+  (data.routines||[]).forEach(rData=>{
+    let name=(rData.name||'Imported Routine').trim()||'Imported Routine';
+    if(existingNames.has(name)){
+      let n=2,candidate=name+' (Imported)';
+      while(existingNames.has(candidate)){candidate=name+' (Imported '+n+')';n++;}
+      name=candidate;
+    }
+    existingNames.add(name);
+    const newExerciseIds=(rData.exerciseIds||[]).map(oldId=>idMap[oldId]).filter(Boolean);
+    const newRepRanges={};
+    Object.keys(rData.repRanges||{}).forEach(oldId=>{if(idMap[oldId])newRepRanges[idMap[oldId]]=rData.repRanges[oldId];});
+    const newRirModes={};
+    Object.keys(rData.rirModes||{}).forEach(oldId=>{if(idMap[oldId])newRirModes[idMap[oldId]]=rData.rirModes[oldId];});
+    const newRoutine={id:uid(),name,desc:rData.desc||'',exerciseIds:newExerciseIds,repRanges:newRepRanges,rirModes:newRirModes};
+    if(rData.supersetGroups)newRoutine.supersetGroups=[...rData.supersetGroups];
+    state.routines.push(newRoutine);
+    importedCount++;
+  });
+  return{routineCount:importedCount,newExerciseCount,matchedExerciseCount};
+}
+function importRoutinesFile(file){
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=(e)=>{
+    try{
+      const data=JSON.parse(e.target.result);
+      if(data.forgeExport!=='routines'||!Array.isArray(data.routines)||!Array.isArray(data.exercises)){
+        alert('This doesn\'t look like a valid FORGE routine export file.');
+        return;
+      }
+      const summary=importRoutinesFromData(data);
+      if(!summary.routineCount){alert('No routines found in that file.');return;}
+      save();
+      renderRoutinesList();
+      renderExerciseDB();
+      alert('Imported '+summary.routineCount+' routine'+(summary.routineCount!==1?'s':'')+' — '+summary.newExerciseCount+' new exercise'+(summary.newExerciseCount!==1?'s':'')+' added, '+summary.matchedExerciseCount+' matched to existing ones.');
+    }catch(err){
+      alert('Could not read routine file: '+err.message);
     }
   };
   reader.readAsText(file);
