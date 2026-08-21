@@ -212,6 +212,7 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .exercise-soreness-warn{margin:2px 16px 10px;padding:8px 12px;border-radius:10px;font-size:12.5px;line-height:1.5;}
 .exercise-soreness-warn.mod{background:rgba(255,140,0,0.14);border:1px solid #ff8c00;color:#ff8c00;}
 .exercise-soreness-warn.severe{background:rgba(255,71,87,0.14);border:1px solid var(--red);color:var(--red);}
+.exercise-soreness-warn.info{background:rgba(71,200,255,0.14);border:1px solid #47c8ff;color:#47c8ff;}
 .pef-panel{margin:2px 16px 12px;padding:12px;background:var(--bg2);border:1px solid var(--accent2);border-radius:var(--radius);}
 .pef-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);}
 .pef-row:last-child{border-bottom:none;}
@@ -631,7 +632,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-20.1</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-20.9</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1052,6 +1053,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <div id="meso-progress-summary"></div>
       <div id="meso-detail-body"></div>
       <button class="btn btn-ghost btn-full mt12" onclick="openAddRoutineToActiveMeso()">＋ Add Routine to This Mesocycle</button>
+      <button class="btn btn-ghost btn-full mt12" id="meso-priority-btn"></button>
       <button class="btn btn-ghost btn-full mt12" id="meso-review-btn">📈 Review Progress</button>
       <button class="btn btn-ghost btn-full mt12" id="meso-settings-btn">⚙ Cycle Settings</button>
     </div>
@@ -1073,6 +1075,17 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <div class="input-label mt12">Times to repeat this mesocycle</div>
       <input id="meso-set-repeats" type="number" inputmode="numeric" min="0"/>
       <div class="small text3 mt4" style="line-height:1.5">0 = repeat indefinitely.</div>
+
+      <div class="input-label mt12" style="display:flex;align-items:center;justify-content:space-between">
+        <span>Auto Volume Distribution</span>
+        <input id="meso-set-auto-volume" type="checkbox" style="width:auto"/>
+      </div>
+      <div class="small text3 mt4" style="line-height:1.5">Every routine starts each session at ZERO sets — the app fills in how many sets each exercise gets, purely from each muscle's rolling weekly target minus what's actually been logged in the last 7 days. Falls behind pace (fewer workouts one week, more the next, a late-week catch-up session) and it front-loads the remaining sets onto the soonest upcoming sessions rather than spreading evenly, capped at a max per muscle per workout. Can leave a given exercise at 0 sets for a session if its muscle's share went to a sibling exercise instead — add a set manually if you want it anyway. Applies during the training phase only; deload keeps its own existing cut logic.</div>
+      <div class="input-label mt8" style="display:flex;align-items:center;justify-content:space-between">
+        <span>Max total sets per session</span>
+        <input id="meso-set-auto-volume-cap" type="number" min="1" placeholder="No cap" style="width:70px"/>
+      </div>
+      <div class="small text3 mt4">Off by default — with the per-muscle cap already bounding any one muscle and catch-up already spread/front-loaded rather than dumped in one session, there's no total that's safe to assume for everyone. Set a number here only if you want a hard ceiling on total sets in a single session; if several muscles are behind at once their shares scale down proportionally to stay under it.</div>
 
       <div class="input-label mt12" style="display:flex;align-items:center;justify-content:space-between">
         <span>Deload after each mesocycle</span>
@@ -4164,6 +4177,228 @@ function grantMuscleVolumeProgress(m,routineId){
   });
   return grants;
 }
+// AUTO VOLUME DISTRIBUTION (2026-08-20, user's explicit request): a meso-level opt-in that treats
+// every routine as seeding ZERO sets by default and lets the app fill in exactly how many sets
+// each exercise gets THIS session, purely from the muscle's current weekly volume target
+// (getMesoMuscleVolumeTarget — already a per-week figure, same landmark math the priority/back-
+// burner ramp and MEV\u2192MAV ramp both already use).
+//
+// REAL-CADENCE + FRONT-LOADED REDESIGN (2026-08-20, user's explicit follow-up — the first version
+// below split each muscle's weekly target across "however many routine-sequence positions train
+// it," which silently assumed one rotation \u2248 one week; a week with 3 real workouts and the next
+// with 6 either over- or under-delivered against the actual weekly target because the split never
+// looked at what had really been logged). This version instead:
+//   1. Reads how much of the target has ALREADY been delivered via getMuscleVolume — the same
+//      real, rolling MUSCLE_VOLUME_WINDOW_DAYS-day window every other landmark comparison in the
+//      app already uses (getVolumeRecommendation, MRV checks, etc.) — so a heavier or lighter
+//      week is reflected immediately, not assumed away.
+//   2. Projects forward through the meso's routine sequence, starting at THIS session, for up to
+//      MUSCLE_VOLUME_WINDOW_DAYS steps (one step \u2248 one day, at the "one workout per day" ceiling
+//      the user described), to see how many of the NEXT few sessions would train this muscle at
+//      all under the existing rotation order.
+//   3. Splits the remaining (target \u2212 delivered) deficit across those upcoming sessions with a
+//      linearly-decreasing front-load weighting — the soonest upcoming session gets the largest
+//      share, tapering off — per the user's explicit "prioritise more volume early" ask, rather
+//      than an even split.
+//   4. Hard-caps THIS session's share at PRIORITY_VOLUME_SET_CAP (the same fixed sets-per-muscle-
+//      per-session ceiling used for priority volume planning elsewhere) — "redistribution should
+//      still consider max number of sets per muscle per workout," the user's words. Nothing here
+//      needs to persist or carry forward an unmet remainder: because delivered is re-read fresh
+//      from real history every time, any shortfall from the cap (or from training less often than
+//      planned — the "planned 6, only did 1 by Friday" case) simply shows up as a larger deficit
+//      the NEXT time this function runs, which the front-load weighting then piles onto the
+//      soonest sessions again — the same self-correcting-by-recompute pattern getEffectiveMRV and
+//      the rest of the ramp system already rely on, just applied to volume distribution.
+//
+// TWO LITERATURE-GAP FIXES (2026-08-20, user's explicit follow-up, after being asked whether the
+// approach had any issues per the literature):
+//   5. Per-muscle caps alone don't stop several behind-schedule muscles from independently
+//      topping up in the SAME session and stacking into an unrealistic total session load — each
+//      looked reasonable in isolation but nothing bounded the sum. m.autoVolumeSessionCap (default
+//      AUTO_VOLUME_SESSION_CAP_DEFAULT) now bounds the session's total allocated sets across every
+//      muscle trained; if the per-muscle-capped shares sum over it, every muscle's share is scaled
+//      down proportionally (so a muscle that needed more keeps needing more, just smaller, rather
+//      than an arbitrary muscle being zeroed out) with largest-remainder rounding so the scaled
+//      total still lands as close to the cap as an integer split allows.
+//   6. The round-robin that splits a muscle's session budget across its exercises always started
+//      at index 0 (the first exercise listed for that muscle in the routine), so over many
+//      sessions the first-listed exercise for a muscle would systematically accumulate more volume
+//      than later ones. The starting index now rotates by (m.rotationsDone+routinePos) each time,
+//      so which exercise gets first claim on the budget shifts rotation to rotation instead of
+//      being permanently biased toward however the routine happens to be ordered.
+//
+// SESSION CAP DEFAULTS TO OFF (2026-08-20, user's explicit follow-up): a blanket default number
+// (originally 25) punished exactly the sessions it shouldn't — a user with several exercises and
+// priority muscles pushing toward MRV legitimately needs more total sets than a generic default
+// assumes, and since scaling is proportional, an arbitrary cap throttles the priority muscles
+// hardest (they had the biggest raw share). Per the user's own reasoning: with per-muscle caps
+// already bounding any single muscle's session load, and the front-load/rolling-deficit design
+// already preventing a big layoff from demanding it ALL back in one sitting, there's no default
+// total that's safe to guess for everyone — so m.autoVolumeSessionCap is null (uncapped) unless
+// the user sets one themselves in Cycle Settings.
+//
+// LOOKAHEAD SPAN FIX (2026-08-20, user's follow-up): landmarks are inherently WEEKLY figures, but
+// a meso's routine sequence isn't always 7 days long — this originally scanned a flat
+// MUSCLE_VOLUME_WINDOW_DAYS (7) steps ahead regardless, which for any cycle shorter than 7 (e.g. a
+// 6-day rotation) wraps around and double-counts an extra occurrence of a muscle from the START of
+// the NEXT rotation, diluting the front-load split thinner than the muscle's real per-rotation
+// frequency (confirmed against the user's actual D1\u2013D6 routines: Quads/Hamstrings, each really
+// trained 3x per 6-day rotation, only delivered ~80% of MRV over a full week because the 7-step
+// lookahead counted a phantom 4th hit). The real, still-weekly deficit check above
+// (getMuscleVolume's true rolling 7-day read) is untouched and stays the source of truth for "how
+// much is actually still owed" \u2014 only the SPREAD-ACROSS-HOW-MANY-UPCOMING-SESSIONS projection
+// changes, from a flat 7 to one full rotation (seq.length), so it always matches the muscle's real
+// per-rotation frequency for cycles of any length, without hardcoding an assumption of "weekly" onto
+// a sequence that may run faster or slower than 7 real days. If the rotation genuinely takes longer
+// than a week to complete in real life, that's exactly what the real-delivered recompute is already
+// built to absorb (a bigger observed deficit \u2192 more asked for next time) \u2014 this fix only removes
+// the extra, non-existent projected session, it doesn't change how forgiving/strict the pacing is.
+function getUpcomingMuscleSessionRanks(m,muscle,routinePos){
+  const seq=m.routineIds||[];
+  if(!seq.length)return[0];
+  const ranks=[];
+  for(let step=0;step<seq.length;step++){
+    const pos=(routinePos+step)%seq.length;
+    const r=getRoutine(seq[pos]);if(!r)continue;
+    const trains=(r.exerciseIds||[]).some(exId=>{const exData=getExercise(exId);return exData&&exData.muscle===muscle&&!isExerciseInjured(exId);});
+    if(trains)ranks.push(step);
+  }
+  // Current session always trains `muscle` here (we only enter this per muscle actually present
+  // in the routine being seeded), so step 0 always qualifies — this fallback only guards a
+  // routine-sequence edge case (e.g. m.routineIds not yet containing this routine) from returning
+  // an empty list and dividing by zero below.
+  return ranks.length?ranks:[0];
+}
+const AUTO_VOLUME_SESSION_CAP_DEFAULT=null; // null = uncapped by default — see "SESSION CAP DEFAULTS TO OFF" comment above
+// Scales an array of non-negative integer shares down so they sum to at most `cap`, preserving
+// relative proportions as closely as an integer split allows (largest-remainder method). Shares
+// already at/under the cap in total are returned untouched. Pure function, no side effects.
+function scaleSharesToCap(shares,cap){
+  const total=shares.reduce((a,b)=>a+b,0);
+  if(total<=cap||total<=0)return shares.slice();
+  const raw=shares.map(s=>s*cap/total);
+  const floored=raw.map(x=>Math.floor(x));
+  let used=floored.reduce((a,b)=>a+b,0);
+  let remainder=cap-used;
+  const order=raw.map((x,i)=>({i,frac:x-floored[i]})).sort((a,b)=>b.frac-a.frac);
+  for(let k=0;k<order.length&&remainder>0;k++){floored[order[k].i]++;remainder--;}
+  return floored;
+}
+// Returns {allocation:{exId:count}, muscleInfo:[{muscle,weeklyTarget,delivered,remainingTarget,allocated}]}
+// for the exercises in `routineId` as it sits at `routinePos` in the meso's sequence. See the
+// design comment above for the delivered/front-load/per-muscle-cap/session-cap/round-robin-
+// rotation logic. Once each muscle's THIS-session budget is set (after session-cap scaling), it's
+// round-robinned one set at a time, starting from a rotating index, across the exercises that
+// train it here — which is what lets some exercises land on 0 sets when the budget is smaller than
+// the exercise count, per the user's original explicit ask.
+function getMesoAutoVolumeAllocation(m,routineId,routinePos){
+  const r=getRoutine(routineId);if(!r)return null;
+  const exIds=(r.exerciseIds||[]).filter(id=>!isExerciseInjured(id));
+  const byMuscle={};
+  exIds.forEach(id=>{
+    const ex=getExercise(id);if(!ex||!ex.muscle)return;
+    (byMuscle[ex.muscle]=byMuscle[ex.muscle]||[]).push(id);
+  });
+  const allocation={};
+  (r.exerciseIds||[]).forEach(id=>{allocation[id]=0;});
+  const muscles=Object.keys(byMuscle);
+  const priorityActive=mesoHasActivePriority(m);
+  const priorityMuscles=muscles.filter(mu=>mesoIsPriorityMuscle(m,mu));
+  const otherMuscles=muscles.filter(mu=>!mesoIsPriorityMuscle(m,mu));
+  // Shared per-muscle budget math (front-load projection + per-muscle cap) — same for every
+  // muscle regardless of priority status; only WHICH "delivered" figure feeds it differs, and
+  // that's decided by each pass below, not in here.
+  function computeBudget(muscle,delivered){
+    const weeklyTarget=getMesoMuscleVolumeTarget(m,muscle);
+    const remainingTarget=Math.max(0,weeklyTarget-delivered);
+    const ranks=getUpcomingMuscleSessionRanks(m,muscle,routinePos); // ranks[0] is always THIS session
+    const H=ranks.length;
+    const weights=ranks.map((_,i)=>H-i); // linear front-load decay, e.g. H=3 -> [3,2,1]
+    const weightSum=weights.reduce((a,b)=>a+b,0)||1;
+    let shares=weights.map(w=>Math.floor(remainingTarget*w/weightSum));
+    let leftover=Math.round(remainingTarget-shares.reduce((a,b)=>a+b,0));
+    for(let i=0;i<shares.length&&leftover>0;i++){shares[i]++;leftover--;} // rounding remainder -> earliest (front) slots first, reinforcing the front-load bias
+    const budget=Math.min(shares[0]||0,PRIORITY_VOLUME_SET_CAP); // shares[0] is always THIS session's raw share
+    return{weeklyTarget,delivered,remainingTarget,budget};
+  }
+  function allocateRoundRobin(muscle,budget){
+    const ids=byMuscle[muscle];
+    // Rotating round-robin start (2026-08-20 fix) — shifts which exercise gets first claim on the
+    // budget rotation to rotation, instead of always favoring whichever exercise is listed first.
+    let i=((m.rotationsDone||0)+routinePos)%ids.length;
+    let steps=0;
+    while(budget>0&&steps<ids.length*100){
+      allocation[ids[i%ids.length]]=(allocation[ids[i%ids.length]]||0)+1;
+      budget--;i++;steps++;
+    }
+  }
+  // PASS A — PRIORITY MUSCLES FIRST (2026-08-20, user's explicit correction: priority volume
+  // "counts first and doesn't share" — it must be decided and allocated before anything else, not
+  // computed symmetrically alongside back-burner muscles). Delivered is DIRECT-ONLY (via
+  // getMuscleVolumeBreakdown) — indirect/secondary stimulus a priority muscle happens to receive
+  // from some other exercise doesn't let its own MEV\u2192MRV push look more satisfied than the real
+  // direct work delivered. Unaffected by anything below; genuinely goes first, not just computed
+  // first with the same result as before.
+  const info={};
+  priorityMuscles.forEach(muscle=>{
+    const delivered=getMuscleVolumeBreakdown(muscle).direct;
+    const b=computeBudget(muscle,delivered);
+    info[muscle]=b;
+    allocateRoundRobin(muscle,b.budget);
+  });
+  // Between A and B: project the secondary credit THIS session's now-decided priority allocations
+  // will generate toward other muscles trained in this same routine — using the exercise's own
+  // EXISTING per-exercise secondary fraction (getSecondaryMuscleFraction), the same system that
+  // already powers Review/MRV-check crediting everywhere else. No new discount factor invented —
+  // per the user's explicit correction, a second flat fraction would just conflict with the real
+  // per-exercise one that already exists. This is what lets priority's volume "reduce a secondary
+  // muscle's own direct need," per the user's words, within THIS session.
+  const projectedSecondaryCredit={};
+  priorityMuscles.forEach(muscle=>{
+    byMuscle[muscle].forEach(exId=>{
+      const setsThisSession=allocation[exId]||0;
+      if(!setsThisSession)return;
+      const exData=getExercise(exId);
+      if(!exData||!exData.secondary)return;
+      exData.secondary.split(',').forEach(sec=>{
+        const secMuscle=sec.trim();if(!secMuscle)return;
+        const frac=getSecondaryMuscleFraction(exData,secMuscle);
+        projectedSecondaryCredit[secMuscle]=(projectedSecondaryCredit[secMuscle]||0)+setsThisSession*frac;
+      });
+    });
+  });
+  // PASS B — everything else (back-burner muscles, or ALL muscles if no priority is active this
+  // pass). Delivered is the plain, UNCHANGED getMuscleVolume (real history's existing per-exercise
+  // secondary credit, exactly as it always worked — no extra flat discount layered on top, per the
+  // user's explicit correction) PLUS whatever THIS session's priority allocations are projected to
+  // contribute via the same real per-exercise fractions. That combination is what makes priority
+  // volume "go first" concretely: a muscle a priority exercise also feeds indirectly needs
+  // correspondingly less of its own direct volume this session, and — once these sets are actually
+  // logged as real history — the same reduction carries into next session's recompute too ("even
+  // the next workout may consider it," the user's words), with no special-casing needed since that
+  // part was already how getMuscleVolume/real history always worked.
+  otherMuscles.forEach(muscle=>{
+    const delivered=getMuscleVolume(muscle).sets+(projectedSecondaryCredit[muscle]||0);
+    const b=computeBudget(muscle,delivered);
+    info[muscle]=b;
+  });
+  // PASS C — session-total cap (2026-08-20): priority's allocation above is already final and
+  // untouched by this — "doesn't share" extends to the session cap too. Only back-burner/other
+  // muscles' shares get scaled down to fit whatever room is left, never priority's.
+  const sessionCap=m.autoVolumeSessionCap||AUTO_VOLUME_SESSION_CAP_DEFAULT;
+  if(sessionCap){
+    const priorityUsed=priorityMuscles.reduce((sum,mu)=>sum+info[mu].budget,0);
+    const headroom=Math.max(0,sessionCap-priorityUsed);
+    const scaled=scaleSharesToCap(otherMuscles.map(mu=>info[mu].budget),headroom);
+    otherMuscles.forEach((muscle,i)=>{info[muscle].budget=scaled[i];});
+  }
+  otherMuscles.forEach(muscle=>allocateRoundRobin(muscle,info[muscle].budget));
+  const muscleInfo=muscles.map(muscle=>({
+    muscle,weeklyTarget:info[muscle].weeklyTarget,delivered:info[muscle].delivered,remainingTarget:info[muscle].remainingTarget,
+    allocated:byMuscle[muscle].reduce((sum,id)=>sum+(allocation[id]||0),0)
+  }));
+  return{allocation,muscleInfo};
+}
 // liveMode (2026-08-15, session-overlap fix): when true, reads getMuscleVolumeLive instead of
 // pure history for each muscle's current volume — used only by reconcileRampExtraSets to re-check
 // still-unstarted exercises mid-session against what's actually been logged so far THIS session,
@@ -4407,7 +4642,7 @@ function openNewMesocycleModal(){
 function saveNewMesocycle(){
   const name=document.getElementById('new-meso-name').value.trim();if(!name)return;
   state.mesocycles.push({id:uid(),name,routineIds:[],currentPos:0,startedAt:null,completedWorkouts:0,
-    rotationsPerMeso:4,mesoRepeats:1,deloadEnabled:true,deloadPercent:40,deloadSetsDrop:0,resetMode:'preDeload',resetRotationNumber:1,resetFallbackNote:null,
+    rotationsPerMeso:4,mesoRepeats:1,autoVolumeDistribution:false,autoVolumeSessionCap:null,deloadEnabled:true,deloadPercent:40,deloadSetsDrop:0,resetMode:'preDeload',resetRotationNumber:1,resetFallbackNote:null,
     rirRampEnabled:true,rirEnd:0,rirStartCap:4,earlyDeloadDetection:'suggest',earlyDeloadDeclineCount:2,
     deloadMethod:'weight',deloadTargetRIR:4,slotRepRanges:{},
     rirRepTargetEnabled:true,trueFailureAnchor:{},
@@ -4437,6 +4672,8 @@ function openMesoSettingsModal(){
   const m=state.mesocycles[viewingMesoIdx];
   document.getElementById('meso-set-rotations').value=m.rotationsPerMeso||4;
   document.getElementById('meso-set-repeats').value=m.mesoRepeats||0;
+  document.getElementById('meso-set-auto-volume').checked=!!m.autoVolumeDistribution;
+  document.getElementById('meso-set-auto-volume-cap').value=m.autoVolumeSessionCap||'';
   document.getElementById('meso-set-deload-enabled').checked=!!m.deloadEnabled;
   document.getElementById('meso-set-deload-method').value=m.deloadMethod||'weight';
   document.getElementById('meso-set-deload-pct').value=m.deloadPercent||40;
@@ -4488,6 +4725,9 @@ function saveMesoSettings(){
   const repeats=parseInt(document.getElementById('meso-set-repeats').value);
   m.rotationsPerMeso=(!isNaN(rotations)&&rotations>0)?rotations:(m.rotationsPerMeso||4);
   m.mesoRepeats=(!isNaN(repeats)&&repeats>=0)?repeats:(m.mesoRepeats||0);
+  m.autoVolumeDistribution=document.getElementById('meso-set-auto-volume').checked;
+  const capVal=parseInt(document.getElementById('meso-set-auto-volume-cap').value,10);
+  m.autoVolumeSessionCap=(!isNaN(capVal)&&capVal>0)?capVal:null;
   m.deloadEnabled=document.getElementById('meso-set-deload-enabled').checked;
   m.deloadMethod=document.getElementById('meso-set-deload-method').value||'weight';
   const pct=parseFloat(document.getElementById('meso-set-deload-pct').value);
@@ -4691,7 +4931,11 @@ let priorityDraftMuscles=[];
 function openPrioritySelectionModal(mesoIdx){
   const m=state.mesocycles[mesoIdx];if(!m)return;
   priorityDraftMesoIdx=mesoIdx;
-  priorityDraftMuscles=suggestPriorityMuscles(2);
+  // Manual open (fresh meso via the detail screen, or editing an already-active pass) pre-fills
+  // the CURRENT selection if one exists, so reopening doesn't silently reset it to a fresh
+  // suggestion; only a genuinely unset pass (priorityMuscles null — including a brand-new meso
+  // before its first pass) falls back to suggestPriorityMuscles.
+  priorityDraftMuscles=(m.priorityMuscles&&m.priorityMuscles.length)?[...m.priorityMuscles]:suggestPriorityMuscles(2);
   document.getElementById('priority-select-meso-name').textContent=m.name||'Mesocycle';
   renderPrioritySelectionList();
   openModal('modal-priority-select');
@@ -5035,6 +5279,19 @@ function openMesocycleDetail(mi){
   renderMesoProgressSummary(m);
   document.getElementById('meso-settings-btn').onclick=openMesoSettingsModal;
   document.getElementById('meso-review-btn').onclick=openMesoReview;
+  // PRIORITY MUSCLES FROM THE START (2026-08-20, user's explicit request): previously the
+  // selection modal only ever opened automatically after a meso's first deload
+  // (m.priorityPromptPending, set in advanceMesoProgress) — a brand-new meso just fell back to
+  // the original MEV\u2192MAV ramp for its entire first pass. This button opens the SAME modal
+  // manually, any time, so priority can be set before the meso's first workout ever happens (or
+  // changed later, mid-pass, if wanted) rather than only being reachable post-deload.
+  const priorityBtn=document.getElementById('meso-priority-btn');
+  if(mesoHasActivePriority(m)){
+    priorityBtn.textContent='\ud83c\udfaf Priority: '+m.priorityMuscles.join(', ');
+  }else{
+    priorityBtn.textContent='\ud83c\udfaf Set Priority Muscles';
+  }
+  priorityBtn.onclick=()=>openPrioritySelectionModal(mi);
   const nextIdx=getNextMesoRoutineIndex(m);
   const rirBadge=formatMesoRIRBadge(m);
   const body=document.getElementById('meso-detail-body');
@@ -5851,6 +6108,10 @@ function buildRoutineSeedPlan(routineIdx,commit){
     try{grantedVolumeProgress=grantMuscleVolumeProgress(activeMeso,r.id)||[];}catch(e){console.error('grantMuscleVolumeProgress failed, continuing without it:',e);grantedVolumeProgress=[];}
   }
   if(grantedVolumeProgress.length)save();
+  // AUTO VOLUME DISTRIBUTION (2026-08-20): computed once per routine, read-only (no side effects,
+  // safe under commit:false preview calls too) — see getMesoAutoVolumeAllocation above.
+  const autoVol=(activeMeso&&activeMeso.autoVolumeDistribution&&activeMeso.phase==='training'&&activeMesoContext)
+    ?getMesoAutoVolumeAllocation(activeMeso,r.id,activeMesoContext.routinePos):null;
   let mesoNote=null;
   const exercises=(r.exerciseIds||[]).map((id,idx)=>{
     const ex=getExercise(id);if(!ex)return null;
@@ -5862,6 +6123,31 @@ function buildRoutineSeedPlan(routineIdx,commit){
     // exercise's own advance logic isn't affected; finishSetSlot just finds nothing to complete
     // here and moves on.
     if(isExerciseInjured(id))return{exId:id,sets:[],supersetGroup:sg,repRange:resolveRepRangeForRoutine(r,id),useRIR:!!(r.rirModes&&r.rirModes[id]),injured:true};
+    const slotOverrideForAuto=(activeMesoContext&&activeMeso&&activeMeso.slotRepRanges&&activeMesoContext.routinePos!=null&&activeMeso.slotRepRanges[activeMesoContext.routinePos])
+      ?activeMeso.slotRepRanges[activeMesoContext.routinePos][id]:null;
+    const repRangeForAuto=slotOverrideForAuto||resolveRepRangeForRoutine(r,id);
+    const useRIRForAuto=!!(r.rirModes&&r.rirModes[id]);
+    if(autoVol){
+      // Zero-baseline seeding: bypasses history/prior-session carryover entirely — the exercise's
+      // set COUNT this session comes purely from getMesoAutoVolumeAllocation's target-driven
+      // split, not from what was logged last time. Per-set weight/rep TARGETS still reuse the
+      // existing double-progression getSetTarget (same fn the normal path's target-fill branch
+      // uses below) so the actual numbers are still soreness/history-aware, just not the count.
+      const targetCount=autoVol.allocation[id]||0;
+      let sets=[];
+      for(let si=0;si<targetCount;si++){
+        let s=newSet();
+        const tgt=getSetTarget(id,{repRange:repRangeForAuto},si,ex,r.id);
+        if(tgt)s={...s,weight:tgt.weight,reps:tgt.reps,repsL:tgt.repsL,repsR:tgt.repsR};
+        s.autoWeight=true;s.autoReps=true;s.autoRepsL=true;s.autoRepsR=true;
+        sets.push(s);
+      }
+      if(mesoRIRInfo&&mesoRIRInfo.rir!=null){
+        const aimRIR=mesoRIRInfo.rir;
+        sets=sets.map(s=>({...s,rpe:useRIRForAuto?aimRIR:(10-aimRIR)}));
+      }
+      return{exId:id,sets,supersetGroup:sg,repRange:repRangeForAuto,useRIR:useRIRForAuto,autoVolumeSkipped:targetCount===0};
+    }
     const prevRaw=getLastSets(id,r.id);
     // Sets logged as "This Workout Only" (routineSet===false, see addSet's split pill) never
     // seed forward into a future workout — that's the entire point of the distinction. Every
@@ -5871,10 +6157,9 @@ function buildRoutineSeedPlan(routineIdx,commit){
     // every routine-seeded set) defaults true, so nothing about current behavior changes for
     // sets that already exist.
     const prev=prevRaw.filter(s=>s.routineSet!==false);
-    const slotOverride=(activeMesoContext&&activeMeso&&activeMeso.slotRepRanges&&activeMesoContext.routinePos!=null&&activeMeso.slotRepRanges[activeMesoContext.routinePos])
-      ?activeMeso.slotRepRanges[activeMesoContext.routinePos][id]:null;
-    const repRange=slotOverride||resolveRepRangeForRoutine(r,id);
-    const useRIR=!!(r.rirModes&&r.rirModes[id]);
+    const slotOverride=slotOverrideForAuto;
+    const repRange=repRangeForAuto;
+    const useRIR=useRIRForAuto;
     // Strip any Partials set that replayed in from the last logged session for this exercise —
     // it must never leak into a rotation other than the one it was actually added for.
     let sets=(prev.length?prev.map(s=>({...s,done:false})):[newSet()]).filter(s=>s.type!=='partials');
@@ -5948,6 +6233,13 @@ function buildRoutineSeedPlan(routineIdx,commit){
     }
     return{exId:id,sets,supersetGroup:sg,repRange,useRIR};
   }).filter(Boolean);
+  // Auto Volume Distribution summary line (2026-08-20) — same visibility spirit as the priority
+  // ramp progress note below: explain the numbers rather than leaving them unexplained.
+  if(autoVol&&autoVol.muscleInfo.length){
+    const parts=autoVol.muscleInfo.map(mi=>mi.muscle+' +'+mi.allocated+' ('+Math.round((mi.delivered+mi.allocated)*10)/10+'/'+mi.weeklyTarget+' rolling-week)');
+    const autoMsg='Auto-distributed this session: '+parts.join(', ')+'.';
+    mesoNote=mesoNote?mesoNote+' '+autoMsg:autoMsg;
+  }
   // PRIORITY/BACK-BURNER note (2026-08-09): shown every session while the system is active for
   // this meso, not just on a deload/reset transition — this is ongoing context for the whole
   // pass, not a one-off event like the deload/reset messages above.
@@ -6973,6 +7265,14 @@ function getExerciseInjuredWarningHtml(exId){
   if(!isExerciseInjured(exId))return'';
   return'<div class="exercise-soreness-warn severe">\ud83e\uddbd Marked injured/resting \u2014 no sets seeded this session. Add one manually below if you want to test it, or clear the flag in Exercises \u2192 Injured/Resting.</div>';
 }
+// Auto Volume Distribution (2026-08-20): a zero-allocation exercise isn't injured/flagged, it's
+// just that this session's split of the muscle's weekly target landed entirely on its siblings —
+// ex.autoVolumeSkipped is set per-workout-instance in buildRoutineSeedPlan, not stored state, so
+// this only ever reflects THIS session's actual seed, same read-once spirit as the injured banner.
+function getAutoVolumeSkipWarningHtml(ex){
+  if(!ex||!ex.autoVolumeSkipped)return'';
+  return'<div class="exercise-soreness-warn info">\u2696\ufe0f Auto Volume Distribution gave the muscle\'s sets to another exercise this session \u2014 add one manually below if you want it anyway.</div>';
+}
 function buildExerciseCard(exIdx){
   const ex=activeWorkout.exercises[exIdx];
   const exData=getExercise(ex.exId)||{name:'Unknown',muscle:'',machine:'',secondary:'',note:'',bw:'no'};
@@ -6981,6 +7281,7 @@ function buildExerciseCard(exIdx){
   if(ex.repRange&&ex.repRange.max)metaParts.push('Target '+ex.repRange.min+'\u2013'+ex.repRange.max+' reps');
   const noteHtml=exData.note?'<div class="note-row"><span class="note-icon">📌</span><span class="note-text">'+escHtml(exData.note)+'</span></div>':'';
   const injuredExHtml=getExerciseInjuredWarningHtml(ex.exId);
+  const autoSkipHtml=getAutoVolumeSkipWarningHtml(ex);
   const sorenessHtml=getMuscleSorenessWarningHtml(exData.muscle);
   const exFeedbackHtml=getExerciseFeedbackWarningHtml(ex.exId);
   const sugg=suggestNextLoad(ex.exId,ex,activeWorkout.sourceRoutineId);
@@ -6998,6 +7299,7 @@ function buildExerciseCard(exIdx){
     +'<button class="btn btn-danger btn-sm" onclick="removeExercise('+exIdx+')">✕</button></div></div>'
     +noteHtml
     +injuredExHtml
+    +autoSkipHtml
     +sorenessHtml
     +exFeedbackHtml
     +suggHtml
@@ -9840,6 +10142,32 @@ function getMuscleVolume(muscle){
     else if(exData.secondary&&exData.secondary.split(',').some(s=>s.trim()===muscle))sets+=credit*getSecondaryMuscleFraction(exData,muscle);
   }));
   return{sets:Math.round(sets*10)/10,windowDays};
+}
+// PRIORITY DIRECT-ONLY VOLUME CREDIT (2026-08-20, user's explicit request, refined same session
+// after an initial version also added a flat back-burner discount that the user correctly pushed
+// back on — see "PRIORITY-FIRST SEQUENCING" comment on getMesoAutoVolumeAllocation for the final
+// design): a priority muscle's remaining need is judged on DIRECT volume alone — indirect/
+// secondary credit from some other exercise in the split shouldn't let its MEV\u2192MRV push look more
+// "done" than the real direct work actually delivered. Back-burner muscles do NOT get any special
+// treatment here — they use the plain, existing getMuscleVolume (real per-exercise secondary
+// fraction credit, unchanged) exactly as they always did; a second, flatter discount on top of
+// that would just conflict with the real per-exercise system, per the user's correction.
+// Same rolling window and per-set credit function as getMuscleVolume above, split into its direct
+// and indirect components instead of summed — deliberately a separate function (not a refactor of
+// getMuscleVolume itself) so every EXISTING caller of getMuscleVolume (Review tab, deload-signal
+// checks, getVolumeRecommendation, etc.) is completely unaffected by this change.
+function getMuscleVolumeBreakdown(muscle){
+  const windowDays=MUSCLE_VOLUME_WINDOW_DAYS;
+  const cutoff=new Date(Date.now()-windowDays*864e5);
+  let direct=0,indirect=0;
+  (state.history||[]).filter(w=>w&&new Date(w.date)>=cutoff).forEach(w=>(w.exercises||[]).forEach(ex=>{
+    if(!ex)return;
+    const exData=getExercise(ex.exId);if(!exData)return;
+    const credit=getExerciseVolumeCredit(ex);
+    if(exData.muscle===muscle)direct+=credit;
+    else if(exData.secondary&&exData.secondary.split(',').some(s=>s.trim()===muscle))indirect+=credit*getSecondaryMuscleFraction(exData,muscle);
+  }));
+  return{direct:Math.round(direct*10)/10,indirect:Math.round(indirect*10)/10,windowDays};
 }
 // SESSION-OVERLAP FIX (2026-08-15): getMuscleVolume only ever reads state.history, which the
 // CURRENT in-progress workout isn't part of until it's finished — so a ramp-due "add a set"
