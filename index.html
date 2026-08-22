@@ -632,7 +632,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-21.1</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-21.3</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -4132,6 +4132,39 @@ function getMuscleVolumeProgressPhaseBWeeks(m,muscle){
   const days=Math.round((Date.now()-new Date(p.phaseBSince))/864e5);
   return Math.max(1,Math.floor(days/7)+1);
 }
+// PER-MUSCLE STRUGGLE SIGNAL (2026-08-21, user's explicit request — the first piece of the
+// broader "per-muscle deload instead of full-body" idea, design settled over several turns): a
+// muscle counts as "struggling" if EITHER of two independent things is true — a recent joint-pain
+// flag or high confirmed fatigue (already existed for back-burner muscles only, via
+// getVolumeRecommendation's pain-flag/high-fatigue statuses), OR this new decline signal: at
+// least one of the muscle's own DIRECT exercises shows a genuine e1RM decline (via the same
+// comparePerf/up-down walk checkEarlyDeloadSignals already uses for the full-meso trigger, just
+// scoped to one muscle's own exercises and computed live from history rather than only right
+// after a just-logged workout). A single exercise is enough here — unlike the full-meso trigger's
+// higher bar, since this is meant to react locally and quickly, not gate a body-wide decision.
+function getMuscleDeclineSignal(muscle){
+  const exIds=new Set();
+  (state.routines||[]).forEach(r=>(r.exerciseIds||[]).forEach(id=>{
+    const exData=getExercise(id);
+    if(exData&&exData.muscle===muscle&&!isExerciseInjured(id))exIds.add(id);
+  }));
+  for(const exId of exIds){
+    const recent=getRecentNormalTopSets(exId,3); // index 0 = most recent
+    if(recent.length<2)continue;
+    const points=[...recent].reverse(); // oldest -> newest
+    let up=false,down=false;
+    for(let i=1;i<points.length;i++){
+      const c=comparePerf(points[i-1],points[i]);
+      if(c>0)up=true;if(c<0)down=true;
+    }
+    if(down&&!up)return true;
+  }
+  return false;
+}
+function isMuscleStruggling(muscle){
+  const rec=getVolumeRecommendation(muscle);
+  return rec.status==='pain-flag'||rec.status==='high-fatigue'||getMuscleDeclineSignal(muscle);
+}
 function getMesoMuscleVolumeTarget(m,muscle){
   const lm=getMuscleLandmarks(muscle);
   if(!mesoHasActivePriority(m)){
@@ -4139,16 +4172,26 @@ function getMesoMuscleVolumeTarget(m,muscle){
     return Math.round(lm.mev+(lm.mav-lm.mev)*frac);
   }
   if(mesoIsPriorityMuscle(m,muscle)){
+    // Priority floor-return (2026-08-21, extends the back-burner-only version below to priority
+    // muscles too — per-muscle backoff working for the muscle you're actually trying to push is
+    // the entire point of "not dropping everything to MV" for one muscle's problem): a struggling
+    // priority muscle drops to MV and holds, same as back-burner, WITHOUT giving up its stored
+    // ramp progress — grantMuscleVolumeProgress (below) simply stops ADDING to that progress while
+    // flagged, so it resumes exactly where it left off once the signal clears, rather than
+    // restarting the climb from scratch.
+    if(isMuscleStruggling(muscle))return Math.round(lm.mv);
     const stored=(m.muscleVolumeProgress&&m.muscleVolumeProgress[muscle]&&m.muscleVolumeProgress[muscle].current!=null)?m.muscleVolumeProgress[muscle].current:lm.mev;
     return Math.round(Math.max(lm.mev,Math.min(stored,lm.mrv)));
   }
-  // Back-burner floor-return (2026-08-11, unchanged): a back-burner muscle showing its own pain or
-  // high-fatigue signal drops straight back to MV and holds there — independent of the priority
-  // muscles and without forcing the real full-body deload (that stays priority-only). Purely
+  // Back-burner floor-return (2026-08-11, trigger widened 2026-08-21 to also include the new
+  // decline signal, not just pain/high-fatigue): a back-burner muscle showing ANY struggle signal
+  // drops straight back to MV and holds there — independent of the priority muscles and without
+  // forcing the real full-body deload (that stays a separate, genuinely-systemic signal — see
+  // checkEarlyDeloadSignals, which now excludes an already-locally-floored muscle from its own
+  // tally so an isolated single-muscle issue no longer drags the whole meso into deload). Purely
   // reactive per-call; grantMuscleVolumeProgress also skips accumulating progress while flagged,
   // so stored progress doesn't quietly keep climbing during a floor-return either.
-  const rec=getVolumeRecommendation(muscle);
-  if(rec.status==='pain-flag'||rec.status==='high-fatigue')return Math.round(lm.mv);
+  if(isMuscleStruggling(muscle))return Math.round(lm.mv);
   const stored=(m.muscleVolumeProgress&&m.muscleVolumeProgress[muscle]&&m.muscleVolumeProgress[muscle].current!=null)?m.muscleVolumeProgress[muscle].current:lm.mv;
   return Math.round(Math.max(lm.mv,Math.min(stored,lm.mev)));
 }
@@ -4172,10 +4215,11 @@ function grantMuscleVolumeProgress(m,routineId){
   const grants=[];
   muscles.forEach(muscle=>{
     const isPriority=mesoIsPriorityMuscle(m,muscle);
-    if(!isPriority){
-      const rec=getVolumeRecommendation(muscle);
-      if(rec.status==='pain-flag'||rec.status==='high-fatigue')return; // floored — matches getMesoMuscleVolumeTarget's own floor-return, don't accumulate while flagged
-    }
+    // 2026-08-21: this skip now applies to PRIORITY muscles too (previously back-burner only) —
+    // matches the widened floor-return above. A struggling priority muscle keeps its stored
+    // progress frozen right where it is rather than losing ground, resuming the climb once the
+    // signal clears.
+    if(isMuscleStruggling(muscle))return;
     const lm=getMuscleLandmarks(muscle);
     const ceiling=isPriority?lm.mrv:lm.mev;
     const floor=isPriority?lm.mev:lm.mv;
@@ -4617,7 +4661,15 @@ function checkEarlyDeloadSignals(m,workoutExercises){
         const c=comparePerf(points[i-1],points[i],isUni);
         if(c>0)up=true;if(c<0)down=true;
       }
-      if(down&&!up){declineHits++;declineNames.push(exData.name||'an exercise');}
+      // 2026-08-21: a muscle already being handled by its own per-muscle floor-return
+      // (isMuscleStruggling) doesn't count toward the FULL-MESO tally here — that muscle's
+      // struggle is already quietly resolving on its own (floored to MV), so it shouldn't also
+      // help drag the whole meso into deload. Only genuinely NEW/different muscles' declines
+      // still accumulate toward this systemic signal — an isolated single-muscle issue no longer
+      // triggers a full-body deload by itself; a WIDESPREAD pattern across several muscles still
+      // does, since that's real evidence of something the per-muscle patches can't fix alone
+      // (accumulated RIR/intensity load, general fatigue, etc).
+      if(down&&!up&&!isMuscleStruggling(exData.muscle)){declineHits++;declineNames.push(exData.name||'an exercise');}
     }
   });
   const reasons=[];
@@ -4941,6 +4993,31 @@ function toggleReviewPRMuscle(muscle){
 }
 // Priority/back-burner selection modal (2026-08-09) — draft state for the multi-select pills,
 // separate from m.priorityMuscles itself so nothing gets written to the meso until Confirm.
+//
+// PRIORITY ROTATION SIGNAL (2026-08-21, user's explicit request — settling when priority muscles
+// should get re-picked now that full-body deloads may happen less often thanks to the per-muscle
+// floor-return above). Two independent reasons, either enough on its own: (1) a current priority
+// muscle has been sitting in Phase B — at/above its own MRV — for a couple of real weeks, the
+// user's "reaches Phase B / sits at effective MRV for a while" answer; or (2) a current priority
+// muscle is showing ITS OWN struggle signal (pain/high-fatigue/decline — same isMuscleStruggling
+// check the floor-return uses) — the user's explicit follow-up ("if it starts to need to give
+// signals to need to rest"). Deliberately doesn't touch m.priorityMuscles itself — just flags the
+// SAME priorityPromptPending the post-deload flow already uses, so the existing modal reopens with
+// the current picks still shown (openPrioritySelectionModal already pre-fills from the active
+// selection) and the struggling/long-Phase-B muscle shows its usual caution flag — reusing
+// everything that already exists rather than building a parallel prompt UI.
+function checkPriorityRotationSignal(m){
+  if(!mesoHasActivePriority(m))return null;
+  const reasons=[];
+  (m.priorityMuscles||[]).forEach(muscle=>{
+    if(isMuscleStruggling(muscle)){reasons.push(muscle+' is showing a pain/fatigue/decline signal');return;}
+    const p=m.muscleVolumeProgress&&m.muscleVolumeProgress[muscle];
+    if(p&&p.phaseBSince&&getMuscleVolumeProgressPhaseBWeeks(m,muscle)>=2){
+      reasons.push(muscle+' has been sitting at/above MRV (Phase B) for a couple of weeks');
+    }
+  });
+  return reasons.length?reasons:null;
+}
 let priorityDraftMesoIdx=null;
 let priorityDraftMuscles=[];
 function openPrioritySelectionModal(mesoIdx){
@@ -4965,11 +5042,14 @@ function renderPrioritySelectionList(){
   // muscle is currently marked injured/resting (isMuscleFullyResting) — not blocked (the
   // exercise-level system never hard-blocks), but picking it as priority would just make the
   // volume-ceiling check report a misleading "structural limit" every pass, so flag it here first.
+  // Extended 2026-08-21 with 'decline' — same reasoning as pain/high-fatigue: a muscle already
+  // showing the new decline signal isn't a great pick to start deliberately pushing right now.
   const flagged={};
   Object.keys(state.volumeLandmarks||{}).forEach(muscle=>{
     const rec=getVolumeRecommendation(muscle);
     if(rec.status==='pain-flag'||rec.status==='high-fatigue')flagged[muscle]=rec.status;
     else if(isMuscleFullyResting(muscle))flagged[muscle]='resting';
+    else if(getMuscleDeclineSignal(muscle))flagged[muscle]='decline';
   });
   el.innerHTML=Object.keys(state.volumeLandmarks||{}).map(muscle=>{
     const active=priorityDraftMuscles.includes(muscle);
@@ -4980,7 +5060,7 @@ function renderPrioritySelectionList(){
   const capEl=document.getElementById('priority-select-caution');
   if(capEl){
     const names=Object.keys(flagged);
-    const reasonText=m=>flagged[m]==='pain-flag'?'joint pain':flagged[m]==='high-fatigue'?'high fatigue':'all its exercises are resting';
+    const reasonText=m=>flagged[m]==='pain-flag'?'joint pain':flagged[m]==='high-fatigue'?'high fatigue':flagged[m]==='decline'?'recent decline':'all its exercises are resting';
     capEl.innerHTML=names.length
       ?'<div class="small" style="color:var(--red);margin-top:10px;line-height:1.5">\u26a0\ufe0f '+names.map(m=>escHtml(m)+' ('+reasonText(m)+')').join(', ')+' \u2014 flagged recently. Still fine to prioritize if that\'s intentional, just going in with eyes open.</div>'
       :'';
@@ -6273,14 +6353,15 @@ function buildRoutineSeedPlan(routineIdx,commit){
       return muscle+' ramp: '+Math.round(stored)+'/'+lm.mrv+' sets'+(inPhaseB?' (Phase B)':'')+'.';
     });
     if(priorityProgress.length)mesoNote=mesoNote+' '+priorityProgress.join(' ');
-    // Back-burner floor-return transparency (2026-08-11, follow-up to the floor-return feature in
-    // getMesoMuscleVolumeTarget) — that function silently drops a flagged back-burner muscle's
-    // target to MV; without this, the number changes with no visible explanation of why.
+    // Per-muscle floor-return transparency (2026-08-11, widened 2026-08-21 to cover priority
+    // muscles and the new decline signal too) — getMesoMuscleVolumeTarget silently drops a
+    // struggling muscle's target to MV; without this, the number changes with no visible
+    // explanation of why. No longer says "until next deload" — this now clears on its own once
+    // the muscle's own signal does, independent of the full-body deload cycle.
     const flooredMuscles=[...new Set(exercises.map(e=>{const ex=getExercise(e.exId);return ex&&ex.muscle;}).filter(Boolean))]
-      .filter(muscle=>!mesoIsPriorityMuscle(activeMeso,muscle))
-      .filter(muscle=>{const rec=getVolumeRecommendation(muscle);return rec.status==='pain-flag'||rec.status==='high-fatigue';});
+      .filter(muscle=>isMuscleStruggling(muscle));
     if(flooredMuscles.length){
-      mesoNote=mesoNote+' '+flooredMuscles.join(', ')+(flooredMuscles.length>1?' are':' is')+' back to MV this session — a recent pain/fatigue signal, holding until next deload.';
+      mesoNote=mesoNote+' '+flooredMuscles.join(', ')+(flooredMuscles.length>1?' are':' is')+' back to MV this session — a recent pain/fatigue or decline signal, holding until it clears.';
     }
   }
   return{r,activeMeso,mesoRIRInfo,volSuggestions,addSetExIds,exercises,mesoNote,grantedPhaseBCredits,grantedVolumeProgress,activeMesoId:activeMeso?activeMeso.id:null};
@@ -9346,6 +9427,14 @@ function confirmFinishWorkout(){
             },{okLabel:'Deload Now',cancelLabel:'Keep Training',danger:false});
           }
         }
+      }
+      // PRIORITY ROTATION SIGNAL (2026-08-21): mid-pass check, independent of the deload-transition
+      // one below — flags the SAME priorityPromptPending if a current priority muscle has been in
+      // Phase B a couple of weeks, or is now struggling. Guarded on wasTrainingBefore&&still
+      // training (not the deload-transition case, which sets this flag its own way below) and on
+      // not already pending, so it never overwrites/duplicates that path's reasoning.
+      if(wasTrainingBefore&&m.phase==='training'&&!m.priorityPromptPending){
+        if(checkPriorityRotationSignal(m))m.priorityPromptPending=true;
       }
       // PRIORITY/BACK-BURNER (2026-08-09): the deload rotation just logged above completed a
       // pass and advanceMesoProgress flagged a fresh one starting — prompt for this pass's
