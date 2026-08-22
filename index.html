@@ -632,7 +632,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-20.9</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-21.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -796,6 +796,21 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div class="modal-actions">
       <button class="btn btn-ghost flex-1" onclick="closeModal('modal-exercise-note')">Cancel</button>
       <button class="btn btn-primary flex-1" onclick="saveExerciseNote()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Switch Exercise (2026-08-21) -->
+<div class="modal-overlay" id="modal-switch-exercise">
+  <div class="modal"><div class="modal-handle"></div>
+    <div class="modal-title">Switch Exercise</div>
+    <div class="modal-body">
+      <div class="small text2 mb8" id="switch-ex-current-name" style="color:var(--accent);font-size:13px;font-weight:600"></div>
+      <div class="small text3 mb8">Same muscle, pulled from across your routines. Sets/reps for today are auto-estimated from that exercise's own history (or start blank if you've never logged it).</div>
+      <div id="switch-ex-candidate-list"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost flex-1" onclick="closeModal('modal-switch-exercise')">Cancel</button>
     </div>
   </div>
 </div>
@@ -6926,11 +6941,29 @@ function getLastWorkloadTooMuch(exId){
 // reps are compared per-side; each point (a,b) carries its own .useRIR reflecting whichever mode
 // was actually active when IT was logged — not a single shared mode — so a comparison stays
 // correct even if the exercise's RIR/RPE setting was changed in between.
+// E1RM-BASED FIX (2026-08-20, user's explicit request — same gap the Meso Review trend fix
+// already closed once, 2026-08-08, just not here): this used to treat weight as strictly dominant
+// and only fell back to reps as a tiebreaker on an EXACT weight match — so e.g. 102.5kg\u00d76 would
+// always read as an "improvement" over 100kg\u00d78 purely from the weight bump, even though real
+// capacity (calcORM: 123 vs ~127) actually went slightly DOWN. This feeds BOTH per-set trend
+// arrows (getSetTrend) and stall/deload detection (checkEarlyDeloadSignals) — meaning the OLD
+// logic could miss a real decline (or flag a false one) in exactly the scenario a double-
+// progression lifter hits constantly: trading a small rep drop for a weight jump, or vice versa.
+// Now compares estimated-1RM first (properly trading weight off against reps, same Epley math as
+// the PR/Records/Progress-Chart 1RM feature), falling back to the OLD weight+reps ordering only
+// for bodyweight exercises (calcORM returns 0 whenever weight is falsy, so it can't discriminate
+// there — same isBWExercise carve-out as the Meso Review fix). Effort (RPE/RIR) remains the final
+// tiebreaker exactly as before, for a genuine like-for-like performance tie.
 function comparePerf(a,b){
   const aW=a.weight||0,bW=b.weight||0;
-  if(bW!==aW)return bW>aW?1:-1;
   const aR=repsMetricOf(a),bR=repsMetricOf(b);
-  if(bR!==aR)return bR>aR?1:-1;
+  const isBW=!aW&&!bW;
+  if(isBW){
+    if(bR!==aR)return bR>aR?1:-1;
+  }else{
+    const aORM=calcORM(aW,aR),bORM=calcORM(bW,bR);
+    if(bORM!==aORM)return bORM>aORM?1:-1;
+  }
   if(a.rpe==null||b.rpe==null)return 0; // no effort data to compare — call it flat rather than guess
   const aEff=a.useRIR?(10-a.rpe):a.rpe; // normalize to RPE-equivalent (higher = harder)
   const bEff=b.useRIR?(10-b.rpe):b.rpe;
@@ -7256,6 +7289,104 @@ function getExerciseFeedbackWarningHtml(exId){
     return'<div class="exercise-soreness-warn mod">\ud83d\udd0d Rated Easy with flat pump the last two sessions \u2014 worth checking your setup/technique, or considering a swap.</div>';
   return'';
 }
+// SWITCH EXERCISE (2026-08-21, user's explicit request — first piece of the broader "auto-
+// adjusted routine" idea; scoped down to just this recommender for now per the agreed build
+// order). Candidate pool is every exercise referenced by ANY of the user's routines (not the
+// whole exercise DB — matches "recommend other exercises IN MY ROUTINES" verbatim) that shares
+// the same primary muscle, excluding the exercise itself and anything flagged injured/resting.
+// Ranked so the pick is explainable, not a black box: longest-untouched (or never-logged) first,
+// for variety — but anything with joint pain flagged on ITS OWN last session gets pushed to the
+// bottom regardless of how fresh it'd otherwise look, since a poor joint history is a worse
+// candidate to switch INTO even if it hasn't been done in a while.
+function getDaysSinceExerciseTrained(exId){
+  for(let i=0;i<state.history.length;i++){
+    const w=state.history[i];if(!w)continue;
+    const ex=(w.exercises||[]).find(e=>e&&e.exId===exId);
+    if(ex&&(ex.sets||[]).some(s=>s&&s.done))return Math.round((Date.now()-new Date(w.date))/864e5);
+  }
+  return null; // never logged
+}
+function getSwitchExerciseCandidates(exId){
+  const original=getExercise(exId);if(!original||!original.muscle)return[];
+  const candidateIds=new Set();
+  (state.routines||[]).forEach(r=>(r.exerciseIds||[]).forEach(id=>{
+    if(id===exId)return;
+    const exData=getExercise(id);
+    if(exData&&exData.muscle===original.muscle)candidateIds.add(id);
+  }));
+  const list=[...candidateIds].filter(id=>!isExerciseInjured(id)).map(id=>{
+    const exData=getExercise(id);
+    const daysSinceTrained=getDaysSinceExerciseTrained(id);
+    const lastFeedback=getLastNExerciseFeedback(id,1)[0];
+    const recentPain=!!(lastFeedback&&lastFeedback.jointPain>=2);
+    return{exId:id,name:exData.name,muscle:exData.muscle,daysSinceTrained,recentPain};
+  });
+  list.sort((a,b)=>{
+    if(a.recentPain!==b.recentPain)return a.recentPain?1:-1;
+    const aDays=a.daysSinceTrained==null?Infinity:a.daysSinceTrained;
+    const bDays=b.daysSinceTrained==null?Infinity:b.daysSinceTrained;
+    return bDays-aDays;
+  });
+  return list;
+}
+let switchExerciseExIdx=null;
+function openSwitchExerciseModal(exIdx){
+  const ex=activeWorkout.exercises[exIdx];if(!ex)return;
+  switchExerciseExIdx=exIdx;
+  const exData=getExercise(ex.exId)||{name:'this exercise'};
+  document.getElementById('switch-ex-current-name').textContent='Replacing: '+exData.name;
+  const candidates=getSwitchExerciseCandidates(ex.exId);
+  const list=document.getElementById('switch-ex-candidate-list');
+  if(!candidates.length){
+    list.innerHTML='<div class="small text3" style="padding:10px 0">No other exercises for '+escHtml(exData.muscle||'this muscle')+' found across your routines.</div>';
+  }else{
+    list.innerHTML=candidates.map(c=>{
+      const reason=c.daysSinceTrained==null?'Never logged':('Not trained in '+c.daysSinceTrained+'d');
+      const painNote=c.recentPain?' \u2014 \u26a0\ufe0f joint pain flagged last time':'';
+      return'<div class="r-dropdown-item" style="display:block;padding:10px 4px" onclick="confirmExerciseSwitch(\''+c.exId+'\')">'
+        +'<div class="bold">'+escHtml(c.name)+'</div>'
+        +'<div class="small text3">'+escHtml(reason+painNote)+'</div></div>';
+    }).join('');
+  }
+  openModal('modal-switch-exercise');
+}
+function confirmExerciseSwitch(newExId){
+  const exIdx=switchExerciseExIdx;
+  closeModal('modal-switch-exercise');
+  if(exIdx==null)return;
+  performExerciseSwitch(exIdx,newExId);
+}
+// Replaces the LIVE exercise for THIS session only — never touches the routine template. Carries
+// over the same set COUNT, rep range, and effort mode (useRIR) the original slot had today, so the
+// swap changes WHAT you're doing, not how much. Per-set weight/rep targets reuse the normal
+// getSetTarget double-progression math with routineId=null — deliberately GLOBAL, not scoped to
+// this routine, so a substitute already logged somewhere else picks up its own real history; one
+// that's never been logged cold-starts to a blank set, same as any brand-new exercise does today.
+function performExerciseSwitch(exIdx,newExId){
+  const ex=activeWorkout.exercises[exIdx];if(!ex)return;
+  const newExData=getExercise(newExId);if(!newExData)return;
+  const setCount=(ex.sets||[]).length||1;
+  const repRange=ex.repRange;
+  const useRIR=ex.useRIR;
+  const sets=[];
+  for(let si=0;si<setCount;si++){
+    let s=newSet();
+    const target=getSetTarget(newExId,{repRange},si,newExData,null);
+    if(target){
+      s={...s,weight:target.weight,reps:target.reps,repsL:target.repsL,repsR:target.repsR};
+      s.autoWeight=true;s.autoReps=true;s.autoRepsL=true;s.autoRepsR=true;
+    }
+    sets.push(s);
+  }
+  const oldExData=getExercise(ex.exId);
+  activeWorkout.exercises[exIdx]={exId:newExId,sets,supersetGroup:ex.supersetGroup,repRange,useRIR};
+  pefPanelOpenIdxs.delete(exIdx);delete pefDraft[exIdx]; // stale feedback state belonged to the old exercise
+  renderActiveWorkout();updateWorkoutEstimate();
+  showUndoToast('Switched to '+newExData.name,()=>{
+    activeWorkout.exercises[exIdx]={...ex};
+    renderActiveWorkout();updateWorkoutEstimate();
+  });
+}
 // Injured/Resting banner (2026-08-13) — exercise-level now, not muscle-level (see
 // isExerciseInjured). Zero sets get seeded for a flagged exercise (buildRoutineSeedPlan), so the
 // table below naturally renders empty; this banner explains why and offers the shortcut back to
@@ -7296,6 +7427,7 @@ function buildExerciseCard(exIdx){
     +'<div><div class="exercise-name" style="cursor:pointer;color:var(--accent)" onclick="openProgressModal(\''+ex.exId+'\')">'+escHtml(exData.name)+' \u203a</div><div class="exercise-meta">'+escHtml(metaParts.join(' · '))+'</div></div>'
     +'<div style="display:flex;gap:4px">'
     +'<button class="btn btn-ghost btn-sm" onclick="openNoteModal(\''+ex.exId+'\')">📌</button>'
+    +'<button class="btn btn-ghost btn-sm" onclick="openSwitchExerciseModal('+exIdx+')" title="Switch Exercise">🔁</button>'
     +'<button class="btn btn-danger btn-sm" onclick="removeExercise('+exIdx+')">✕</button></div></div>'
     +noteHtml
     +injuredExHtml
