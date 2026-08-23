@@ -632,7 +632,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-21.3</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-21.9</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -796,6 +796,22 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div class="modal-actions">
       <button class="btn btn-ghost flex-1" onclick="closeModal('modal-exercise-note')">Cancel</button>
       <button class="btn btn-primary flex-1" onclick="saveExerciseNote()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Auto Session (2026-08-21) -->
+<div class="modal-overlay" id="modal-auto-session">
+  <div class="modal"><div class="modal-handle"></div>
+    <div class="modal-title">Auto Session</div>
+    <div class="modal-body">
+      <div class="small text3 mb8">Builds today's exercises from across your whole routine pool based on what each muscle still needs this week. Priority muscles always get their full share first; anything else gets trimmed if time's tight.</div>
+      <div class="input-label">Minutes available (optional)</div>
+      <input id="auto-session-minutes" type="number" min="1" inputmode="numeric" placeholder="Leave blank for a full session"/>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost flex-1" onclick="closeModal('modal-auto-session')">Cancel</button>
+      <button class="btn btn-primary flex-1" onclick="confirmAutoSession()">Build & Start</button>
     </div>
   </div>
 </div>
@@ -1066,9 +1082,11 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div class="modal-title" id="meso-detail-title">Mesocycle</div>
     <div class="modal-body">
       <div id="meso-progress-summary"></div>
+      <div id="meso-continuous-status"></div>
       <div id="meso-detail-body"></div>
       <button class="btn btn-ghost btn-full mt12" onclick="openAddRoutineToActiveMeso()">＋ Add Routine to This Mesocycle</button>
       <button class="btn btn-ghost btn-full mt12" id="meso-priority-btn"></button>
+      <button class="btn btn-ghost btn-full mt12" id="meso-auto-session-btn">⚡ Auto Session</button>
       <button class="btn btn-ghost btn-full mt12" id="meso-review-btn">📈 Review Progress</button>
       <button class="btn btn-ghost btn-full mt12" id="meso-settings-btn">⚙ Cycle Settings</button>
     </div>
@@ -1101,6 +1119,22 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
         <input id="meso-set-auto-volume-cap" type="number" min="1" placeholder="No cap" style="width:70px"/>
       </div>
       <div class="small text3 mt4">Off by default — with the per-muscle cap already bounding any one muscle and catch-up already spread/front-loaded rather than dumped in one session, there's no total that's safe to assume for everyone. Set a number here only if you want a hard ceiling on total sets in a single session; if several muscles are behind at once their shares scale down proportionally to stay under it.</div>
+
+      <div class="input-label mt12" style="display:flex;align-items:center;justify-content:space-between">
+        <span>Continuous Volume Mode</span>
+        <input id="meso-set-continuous-volume" type="checkbox" style="width:auto"/>
+      </div>
+      <div class="small text3 mt4" style="line-height:1.5">An alternative to the 2-muscle Priority/Back-Burner cap (kept separately below) — every muscle CAN run its own MEV→MRV progression and its own RIR trajectory, but only a limited number are ever actively pushing at once (below) — everyone else holds at MEV maintenance. Which muscles are active auto-rotates based on readiness (headroom left before their own MRV, plus freshness), not a fixed pick. For a set trained by more than one muscle, the exercise's primary muscle's RIR governs the whole set. Used by Auto Session; doesn't change fixed-routine sessions.</div>
+      <div class="input-label mt8" style="display:flex;align-items:center;justify-content:space-between">
+        <span>Max muscles actively pushing at once</span>
+        <input id="meso-set-continuous-max-active" type="number" min="1" style="width:70px"/>
+      </div>
+      <div class="small text3 mt4">Defaults to 3 — trying to push every muscle toward MRV simultaneously just means each one hits its per-session cap and gets diluted, never really achieving concentrated overload. Auto-rotates which muscles hold this slot as readiness shifts session to session.</div>
+      <div class="input-label mt8" style="display:flex;align-items:center;justify-content:space-between">
+        <span>Weekly set budget (Auto Session)</span>
+        <input id="meso-set-continuous-budget" type="number" min="1" placeholder="No cap" style="width:70px"/>
+      </div>
+      <div class="small text3 mt4">Off by default. If several actively-pushing muscles could all use more at once, set a total weekly sets figure here and Auto Session splits it by readiness instead of letting every active muscle's raw target stack unchecked.</div>
 
       <div class="input-label mt12" style="display:flex;align-items:center;justify-content:space-between">
         <span>Deload after each mesocycle</span>
@@ -1307,6 +1341,7 @@ const MUSCLE_COLORS={Chest:'#e8ff47',Back:'#47c8ff',Shoulders:'#ff8c00',Biceps:'
 // getMuscleVolume itself) because the Home screen's boot-time render chain can reach it well
 // before the script's own top-to-bottom pass would otherwise get there.
 const MUSCLE_VOLUME_WINDOW_DAYS=7;
+const CONTINUOUS_MAX_ACTIVE_MUSCLES_DEFAULT=3; // Continuous Volume Mode's real concurrency cap — deliberately DOES default (unlike the session/weekly caps elsewhere, which are safe left off) since leaving this open-ended was the actual bug: every muscle pushing toward MRV at once just dilutes each one down to whatever the per-muscle cap allows, never achieving real focused overload for any of them.
 // PRIORITY RAMP REDESIGN (2026-08-15) — see getMesoMuscleVolumeTarget/getRealWeeklyTrainingFrequency.
 // Declared up here, not near their own functions, for the same boot-chain-hoisting reason as
 // MUSCLE_VOLUME_WINDOW_DAYS above: getMesoMuscleVolumeTarget sits on the same
@@ -4165,13 +4200,195 @@ function isMuscleStruggling(muscle){
   const rec=getVolumeRecommendation(muscle);
   return rec.status==='pain-flag'||rec.status==='high-fatigue'||getMuscleDeclineSignal(muscle);
 }
+// CONTINUOUS VOLUME MODE (2026-08-21, user's explicit request — settled over a 3-question design
+// round, THEN CORRECTED same day after the user rightly pushed back): an alternative to the
+// 2-muscle priority/back-burner cap, kept as a SEPARATE meso toggle rather than replacing it
+// (user's explicit choice). The first version of this made EVERY muscle behave as priority
+// simultaneously whenever the mode was on — the user correctly called this out as asking for the
+// impossible: pushing every muscle toward MRV at once just means every one of them hits the
+// per-muscle cap and gets diluted, never actually achieving real concentrated overload for
+// anything. "Priority" is inherently a scarce resource (session time, recovery capacity, per-
+// session set caps are all finite) — the old system enforced that scarcity with a hard manual
+// pick of 2; this needs to enforce the SAME scarcity, just via auto logic instead of a manual pick.
+// getActiveGrowthMuscles below is the fix: at most m.continuousMaxActiveMuscles muscles are ever
+// "actively pushing" (MEV\u2192MRV) at once — whichever currently have the best readiness (headroom +
+// freshness, same signal that already drives the weekly budget). Everyone else falls back to the
+// SAME MEV-anchored maintenance treatment back-burner muscles already get. Nothing is stored or
+// pre-committed — this is recomputed fresh every call from current readiness, so the active set
+// naturally ROTATES over time as a pushed muscle's headroom shrinks (lower readiness) and a fresher
+// one earns its turn — the auto-rotating structure the user asked for, happening continuously
+// rather than at fixed block boundaries.
+const CONTINUOUS_MIN_ACTIVE_TENURE_SESSIONS=4; // user's explicit choice — "4 sessions minimum (roughly a week at typical frequency)"
+// Active-set stability (2026-08-21, section 3 of the user's requested improvement batch): without
+// this, two muscles with nearly identical readiness could swap in and out of the active set every
+// other session — which defeats the entire point of concentrating focus, since a muscle bumped out
+// after one session never really got a sustained push. A muscle already mid-streak (tracked via
+// m.muscleVolumeProgress[muscle].activeStreak, incremented by grantMuscleVolumeProgress at real
+// commit time — see there) keeps its slot until it's served CONTINUOUS_MIN_ACTIVE_TENURE_SESSIONS,
+// even if a fresher muscle would now outrank it on pure readiness. Struggling/resting muscles are
+// NEVER protected — isMuscleStruggling already filtered them out of `eligible` before tenure is
+// even considered, so tenure can extend a push but never override a safety signal.
+function getActiveGrowthMuscles(m){
+  const maxActive=m.continuousMaxActiveMuscles||CONTINUOUS_MAX_ACTIVE_MUSCLES_DEFAULT;
+  const muscles=Object.keys(state.volumeLandmarks||{});
+  const eligible=muscles.filter(mu=>!isMuscleStruggling(mu)&&!isMuscleFullyResting(mu));
+  const protectedMuscles=eligible.filter(mu=>{
+    const streak=m.muscleVolumeProgress&&m.muscleVolumeProgress[mu]&&m.muscleVolumeProgress[mu].activeStreak;
+    return streak>0&&streak<CONTINUOUS_MIN_ACTIVE_TENURE_SESSIONS;
+  });
+  const rest=eligible.filter(mu=>!protectedMuscles.includes(mu));
+  rest.sort((a,b)=>getMuscleReadinessScore(m,b)-getMuscleReadinessScore(m,a));
+  const remainingSlots=Math.max(0,maxActive-protectedMuscles.length);
+  const filled=protectedMuscles.concat(rest.slice(0,remainingSlots));
+  return new Set(filled.slice(0,maxActive)); // safety net if the cap was lowered mid-tenure
+}
+function mesoTreatsAsPriority(m,muscle){
+  if(mesoIsPriorityMuscle(m,muscle))return true;
+  if(!m.continuousVolumeMode)return false;
+  return getActiveGrowthMuscles(m).has(muscle);
+}
+// Per-muscle RIR progression (2026-08-21, user's explicit request — "RIR doesn't have to be per
+// session anymore if each muscle has its own progression"): same ramp SHAPE as the meso-wide
+// getMesoTargetRIR (interpolate from rirStartCap down to rirEnd), but driven by THIS MUSCLE's own
+// position between its MEV and MRV (0 = just starting, at MEV; 1 = at its own MRV) instead of the
+// meso's rotation/time fraction. Only meaningful under continuousVolumeMode — a muscle that isn't
+// running its own continuous progression doesn't have a well-defined "how far along" to ramp from.
+// For a compound exercise trained by several muscles at once, the exercise's PRIMARY muscle's RIR
+// governs the whole set (the user's explicit resolution — a set has one real failure point, it
+// can't be at two different efforts for two different muscles simultaneously); secondary muscles
+// just inherit whatever that turns out to be, same asymmetry already used for volume credit.
+const CONTINUOUS_DECAY_GRACE_DAYS=14; // no decay for the first 2 real weeks at maintenance — a normal rest stretch, not a reason to start unwinding progress
+const CONTINUOUS_DECAY_WINDOW_DAYS=21; // after the grace period, decays back to MEV over ~3 more weeks of continued inactivity
+// Inactive-muscle progress decay (2026-08-21, user's explicit follow-up after asking whether the
+// same few muscles could monopolize priority forever): without this, a muscle pushed once to its
+// own MRV then rotated out would sit with near-zero headroom INDEFINITELY — nothing ever brought
+// its stored progress back down, so it could never again compete for a push once every other
+// muscle had also had its one turn. This computes what a muscle's progress WOULD read as right
+// now, decaying it back toward MEV once it's been genuinely inactive (not just rotated out this
+// session) for a real stretch — mirroring real detraining during a lighter period, and practically
+// restoring its competitiveness for a future push. Computed fresh every read, never mutates
+// storage — the decay only becomes permanent (committed into muscleVolumeProgress.current) at the
+// exact moment a muscle re-enters the active set, in grantMuscleVolumeProgress below.
+function getEffectiveMuscleProgress(m,muscle,fallback){
+  const lm=getMuscleLandmarks(muscle);
+  const p=m.muscleVolumeProgress&&m.muscleVolumeProgress[muscle];
+  if(!p||p.current==null)return fallback!=null?fallback:lm.mev;
+  if(!m.continuousVolumeMode||!p.inactiveSince)return p.current;
+  const daysInactive=Math.round((Date.now()-new Date(p.inactiveSince))/864e5);
+  if(daysInactive<=CONTINUOUS_DECAY_GRACE_DAYS)return p.current;
+  const decayFraction=Math.min(1,(daysInactive-CONTINUOUS_DECAY_GRACE_DAYS)/CONTINUOUS_DECAY_WINDOW_DAYS);
+  const start=p.progressAtInactiveStart!=null?p.progressAtInactiveStart:p.current;
+  return start-(start-lm.mev)*decayFraction;
+}
+function getMesoMuscleTargetRIR(m,muscle){
+  if(!m||m.phase==='finished')return null;
+  if(m.phase==='deload')return{deload:true,rir:m.deloadTargetRIR!=null?m.deloadTargetRIR:4};
+  if(!m.rirRampEnabled)return null;
+  const lm=getMuscleLandmarks(muscle);
+  const progress=getEffectiveMuscleProgress(m,muscle);
+  const span=lm.mrv-lm.mev;
+  const muscleFraction=span>0?Math.max(0,Math.min(1,(progress-lm.mev)/span)):0;
+  const end=m.rirEnd!=null?m.rirEnd:0;
+  const cap=m.rirStartCap!=null?m.rirStartCap:4;
+  const rir=Math.round(cap+(end-cap)*muscleFraction);
+  return{rir,muscleFraction};
+}
+// Fixed-routine RIR consistency fix (2026-08-21, section 1 of the user's requested improvement
+// batch — a real inconsistency, not a design choice): Auto Session already used per-muscle RIR
+// under Continuous Volume Mode, but a FIXED routine run under the same meso was still silently
+// getting the old flat meso-wide RIR for every exercise, even though its volume targets were
+// already per-muscle. This is the one shared resolution point both buildRoutineSeedPlan call
+// sites now go through, so behavior is consistent regardless of which flow started the session.
+function resolveTargetRIR(activeMeso,mesoRIRInfo,muscle){
+  if(activeMeso&&activeMeso.continuousVolumeMode){
+    try{
+      const perMuscle=getMesoMuscleTargetRIR(activeMeso,muscle);
+      if(perMuscle)return perMuscle;
+    }catch(e){console.error('getMesoMuscleTargetRIR failed, falling back to meso-wide RIR:',e);}
+  }
+  return mesoRIRInfo;
+}
+// e1RM trend nudge (2026-08-21, section 2 of the user's requested improvement batch): readiness
+// previously only looked at headroom and freshness — it had no idea whether a muscle was actually
+// RESPONDING. A muscle with lots of headroom but a flat/declining trend for weeks isn't necessarily
+// a better investment than one with less headroom but genuinely climbing numbers. Reuses the same
+// comparePerf/getRecentNormalTopSets up-down walk as getMuscleDeclineSignal, generalized to also
+// detect a genuine UP trend, then applied as a gentle MULTIPLIER on the existing headroom/freshness
+// score rather than a third additive factor — a multiplier defaults to neutral (1.0) when there's
+// no clear trend either way (including simply not enough data yet), so a fresh or rarely-logged
+// muscle isn't penalized for missing history; only a REAL, detected trend nudges the score.
+function getMuscleTrendMultiplier(muscle){
+  const exIds=new Set();
+  (state.routines||[]).forEach(r=>(r.exerciseIds||[]).forEach(id=>{
+    const exData=getExercise(id);
+    if(exData&&exData.muscle===muscle&&!isExerciseInjured(id))exIds.add(id);
+  }));
+  let up=0,down=0;
+  exIds.forEach(exId=>{
+    const recent=getRecentNormalTopSets(exId,3);
+    if(recent.length<2)return;
+    const points=[...recent].reverse();
+    let sawUp=false,sawDown=false;
+    for(let i=1;i<points.length;i++){
+      const c=comparePerf(points[i-1],points[i]);
+      if(c>0)sawUp=true;if(c<0)sawDown=true;
+    }
+    if(sawUp&&!sawDown)up++;else if(sawDown&&!sawUp)down++;
+  });
+  if(up===0&&down===0)return 1;
+  if(up>down)return 1.15;
+  if(down>up)return 0.85;
+  return 1;
+}
+// Readiness score (2026-08-21) — used ONLY to allocate a real weekly set budget across muscles
+// when one is actually set (m.continuousWeeklySetBudget), per the user's explicit choice of a
+// data-driven governor over a hard-coded "only 2 muscles" rule. A struggling or fully-resting
+// muscle scores 0 (excluded entirely, matching the floor-return precedent elsewhere). Otherwise:
+// mostly how much HEADROOM is left before this muscle's own MRV (more room = more worth investing
+// in — RP's own logic for why you'd rather add volume to an undertrained muscle than pile more
+// onto one already near its ceiling), plus a smaller freshness term (longer since last directly
+// trained = a bit more claim on this week's budget), then nudged by real e1RM trend.
+function getMuscleReadinessScore(m,muscle){
+  if(isMuscleStruggling(muscle)||isMuscleFullyResting(muscle))return 0;
+  const lm=getMuscleLandmarks(muscle);
+  const progress=getEffectiveMuscleProgress(m,muscle);
+  const span=lm.mrv-lm.mev;
+  const headroom=span>0?Math.max(0,Math.min(1,(lm.mrv-progress)/span)):0;
+  const daysSince=getDaysSinceMuscleDirectlyTrained(muscle);
+  const freshness=Math.min(1,(daysSince==null?7:daysSince)/7);
+  return(headroom*0.6+freshness*0.4)*getMuscleTrendMultiplier(muscle);
+}
+// Scales each muscle's desired target down to fit a real weekly budget, weighted by readiness —
+// same largest-remainder integer-rounding approach as scaleSharesToCap, just weighted by an extra
+// factor instead of being flatly proportional to the raw values. A muscle with 0 readiness (struggling/
+// resting) gets 0 regardless of how large its raw target was. Returns unchanged targets if total
+// already fits, or if no budget is set at all (continuousWeeklySetBudget null = uncapped, matching
+// the same "don't guess a default" precedent as Auto Volume Distribution's own session cap).
+function allocateWeeklyBudget(muscles,targets,readinessScores,budget){
+  if(!budget)return targets.slice();
+  const total=targets.reduce((a,b)=>a+b,0);
+  if(total<=budget)return targets.slice();
+  const weights=muscles.map((mu,i)=>targets[i]*readinessScores[i]);
+  const weightSum=weights.reduce((a,b)=>a+b,0);
+  if(weightSum<=0)return muscles.map(()=>0);
+  const raw=weights.map(w=>budget*w/weightSum);
+  const floored=raw.map(x=>Math.floor(x));
+  let used=floored.reduce((a,b)=>a+b,0);
+  let remainder=budget-used;
+  const order=raw.map((x,i)=>({i,frac:x-floored[i]})).sort((a,b)=>b.frac-a.frac);
+  for(let k=0;k<order.length&&remainder>0;k++){floored[order[k].i]++;remainder--;}
+  return floored;
+}
 function getMesoMuscleVolumeTarget(m,muscle){
   const lm=getMuscleLandmarks(muscle);
-  if(!mesoHasActivePriority(m)){
+  // continuousVolumeMode bypasses the "no active priority selection" fallback too — every muscle
+  // runs its own continuous progression regardless of whether the (separate, still-optional)
+  // priority array has anything in it.
+  if(!mesoHasActivePriority(m)&&!m.continuousVolumeMode){
     const frac=getMesoRampFraction(m);
     return Math.round(lm.mev+(lm.mav-lm.mev)*frac);
   }
-  if(mesoIsPriorityMuscle(m,muscle)){
+  if(mesoTreatsAsPriority(m,muscle)){
     // Priority floor-return (2026-08-21, extends the back-burner-only version below to priority
     // muscles too — per-muscle backoff working for the muscle you're actually trying to push is
     // the entire point of "not dropping everything to MV" for one muscle's problem): a struggling
@@ -4180,7 +4397,7 @@ function getMesoMuscleVolumeTarget(m,muscle){
     // flagged, so it resumes exactly where it left off once the signal clears, rather than
     // restarting the climb from scratch.
     if(isMuscleStruggling(muscle))return Math.round(lm.mv);
-    const stored=(m.muscleVolumeProgress&&m.muscleVolumeProgress[muscle]&&m.muscleVolumeProgress[muscle].current!=null)?m.muscleVolumeProgress[muscle].current:lm.mev;
+    const stored=getEffectiveMuscleProgress(m,muscle);
     return Math.round(Math.max(lm.mev,Math.min(stored,lm.mrv)));
   }
   // Back-burner floor-return (2026-08-11, trigger widened 2026-08-21 to also include the new
@@ -4192,7 +4409,7 @@ function getMesoMuscleVolumeTarget(m,muscle){
   // reactive per-call; grantMuscleVolumeProgress also skips accumulating progress while flagged,
   // so stored progress doesn't quietly keep climbing during a floor-return either.
   if(isMuscleStruggling(muscle))return Math.round(lm.mv);
-  const stored=(m.muscleVolumeProgress&&m.muscleVolumeProgress[muscle]&&m.muscleVolumeProgress[muscle].current!=null)?m.muscleVolumeProgress[muscle].current:lm.mv;
+  const stored=getEffectiveMuscleProgress(m,muscle,lm.mv);
   return Math.round(Math.max(lm.mv,Math.min(stored,lm.mev)));
 }
 // Commit-time grant (called from buildRoutineSeedPlan's commit block, same pattern as the
@@ -4202,19 +4419,47 @@ function getMesoMuscleVolumeTarget(m,muscle){
 // session, not per exercise — the number being grown is a single per-muscle total, same as the
 // target this feeds. Returns {muscle,delta} entries so a discarded/empty session can revert
 // exactly what it granted (see revertGrantedPhaseBCredits).
-function grantMuscleVolumeProgress(m,routineId){
-  if(!mesoHasActivePriority(m))return[];
-  const r=getRoutine(routineId);if(!r)return[];
+function grantMuscleVolumeProgress(m,routineIdOrExIds){
+  if(!mesoHasActivePriority(m)&&!m.continuousVolumeMode)return[];
+  // 2026-08-21 (Auto Session): accepts an array of exercise IDs directly, not just a routineId —
+  // Auto Session has no backing routine object to read exerciseIds from, since it assembles its
+  // exercise list itself from across the whole pool. Existing routine-based callers are unaffected.
+  let exIds;
+  if(Array.isArray(routineIdOrExIds)){
+    exIds=routineIdOrExIds;
+  }else{
+    const r=getRoutine(routineIdOrExIds);if(!r)return[];
+    exIds=r.exerciseIds||[];
+  }
   const muscles=new Set();
-  (r.exerciseIds||[]).forEach(exId=>{
+  exIds.forEach(exId=>{
     if(isExerciseInjured(exId))return;
     const exData=getExercise(exId);
     if(exData&&exData.muscle)muscles.add(exData.muscle);
   });
   if(!m.muscleVolumeProgress)m.muscleVolumeProgress={};
+  // Freeze the active set ONCE for this whole call (2026-08-21) — both the grant logic below and
+  // the tenure update at the end use this same snapshot, so a streak change made while processing
+  // one muscle can't shift the active-set answer used for a different muscle later in this call.
+  const activeSet=m.continuousVolumeMode?getActiveGrowthMuscles(m):null;
+  // Decay commit (2026-08-21, section: inactive-muscle progress decay): for any muscle entering or
+  // continuing in the active set this session, commit whatever decayed value it currently reads as
+  // (getEffectiveMuscleProgress) into real storage BEFORE the increment logic below reads `cur` —
+  // otherwise a rested muscle's climb would start from its old, undecayed high value the moment it
+  // became active again, instantly hitting its ceiling and granting nothing. Clearing the decay
+  // anchors here is what makes the rest genuinely "count" — from this point it climbs fresh.
+  if(activeSet){
+    activeSet.forEach(muscle=>{
+      const p=m.muscleVolumeProgress[muscle];
+      if(!p)return;
+      const effective=getEffectiveMuscleProgress(m,muscle);
+      if(effective!=null&&Math.round(effective)!==Math.round(p.current))p.current=effective;
+      p.inactiveSince=null;p.progressAtInactiveStart=null;
+    });
+  }
   const grants=[];
   muscles.forEach(muscle=>{
-    const isPriority=mesoIsPriorityMuscle(m,muscle);
+    const isPriority=activeSet?activeSet.has(muscle):mesoIsPriorityMuscle(m,muscle);
     // 2026-08-21: this skip now applies to PRIORITY muscles too (previously back-burner only) —
     // matches the widened floor-return above. A struggling priority muscle keeps its stored
     // progress frozen right where it is rather than losing ground, resuming the climb once the
@@ -4234,6 +4479,30 @@ function grantMuscleVolumeProgress(m,routineId){
     if(next>=ceiling&&!m.muscleVolumeProgress[muscle].phaseBSince)m.muscleVolumeProgress[muscle].phaseBSince=new Date().toISOString();
     grants.push({muscle,delta:next-cur});
   });
+  // Active-set tenure tracking (2026-08-21, section 3 — see getActiveGrowthMuscles' comment): only
+  // meaningful under Continuous Volume Mode, since the plain priority/back-burner system has no
+  // rotating active set to track tenure for. A muscle in the active set AND actually trained this
+  // session earns +1 toward its minimum tenure; one in the active set but not trained (e.g. a fixed
+  // routine that structurally doesn't include it) is left untouched rather than unfairly reset; any
+  // muscle NOT in the active set resets to 0, so it starts a fresh streak next time it earns a slot.
+  if(activeSet){
+    Object.keys(state.volumeLandmarks||{}).forEach(muscle=>{
+      if(!m.muscleVolumeProgress[muscle])m.muscleVolumeProgress[muscle]={current:getMuscleLandmarks(muscle).mev};
+      if(activeSet.has(muscle)){
+        if(muscles.has(muscle))m.muscleVolumeProgress[muscle].activeStreak=(m.muscleVolumeProgress[muscle].activeStreak||0)+1;
+      }else{
+        const wasActive=(m.muscleVolumeProgress[muscle].activeStreak||0)>0;
+        m.muscleVolumeProgress[muscle].activeStreak=0;
+        // Stamp decay anchors ONLY on the real active->inactive transition (wasActive), and only
+        // once (!inactiveSince) — re-stamping every subsequent inactive session would perpetually
+        // reset the decay clock and it would never actually decay.
+        if(wasActive&&!m.muscleVolumeProgress[muscle].inactiveSince){
+          m.muscleVolumeProgress[muscle].inactiveSince=new Date().toISOString();
+          m.muscleVolumeProgress[muscle].progressAtInactiveStart=m.muscleVolumeProgress[muscle].current;
+        }
+      }
+    });
+  }
   return grants;
 }
 // AUTO VOLUME DISTRIBUTION (2026-08-20, user's explicit request): a meso-level opt-in that treats
@@ -4709,7 +4978,7 @@ function openNewMesocycleModal(){
 function saveNewMesocycle(){
   const name=document.getElementById('new-meso-name').value.trim();if(!name)return;
   state.mesocycles.push({id:uid(),name,routineIds:[],currentPos:0,startedAt:null,completedWorkouts:0,
-    rotationsPerMeso:4,mesoRepeats:1,autoVolumeDistribution:false,autoVolumeSessionCap:null,deloadEnabled:true,deloadPercent:40,deloadSetsDrop:0,resetMode:'preDeload',resetRotationNumber:1,resetFallbackNote:null,
+    rotationsPerMeso:4,mesoRepeats:1,autoVolumeDistribution:false,autoVolumeSessionCap:null,continuousVolumeMode:false,continuousMaxActiveMuscles:CONTINUOUS_MAX_ACTIVE_MUSCLES_DEFAULT,continuousWeeklySetBudget:null,deloadEnabled:true,deloadPercent:40,deloadSetsDrop:0,resetMode:'preDeload',resetRotationNumber:1,resetFallbackNote:null,
     rirRampEnabled:true,rirEnd:0,rirStartCap:4,earlyDeloadDetection:'suggest',earlyDeloadDeclineCount:2,
     deloadMethod:'weight',deloadTargetRIR:4,slotRepRanges:{},
     rirRepTargetEnabled:true,trueFailureAnchor:{},
@@ -4734,6 +5003,42 @@ function renderMesoProgressSummary(m){
     +rirLine
     +'</div>';
 }
+// Continuous Volume Mode visibility panel (2026-08-21, section 4 of the user's requested
+// improvement batch): before this, there was no way to see which muscles were actually active vs
+// holding at maintenance, or why — you could only infer it from what Auto Session handed you each
+// day. Renders nothing at all when the mode is off, so a plain priority/back-burner meso is
+// unaffected.
+function renderContinuousVolumeStatus(m){
+  const el=document.getElementById('meso-continuous-status');
+  if(!el)return;
+  if(!m.continuousVolumeMode){el.innerHTML='';return;}
+  const activeSet=getActiveGrowthMuscles(m);
+  const muscles=Object.keys(state.volumeLandmarks||{});
+  const rows=muscles.map(muscle=>{
+    const p=m.muscleVolumeProgress&&m.muscleVolumeProgress[muscle];
+    const recovering=!!(p&&p.inactiveSince&&!activeSet.has(muscle));
+    return{muscle,readiness:getMuscleReadinessScore(m,muscle),active:activeSet.has(muscle),
+    streak:(p&&p.activeStreak)||0,recovering,
+    struggling:isMuscleStruggling(muscle),resting:isMuscleFullyResting(muscle)};
+  });
+  rows.sort((a,b)=>b.readiness-a.readiness);
+  const rowsHtml=rows.map(r=>{
+    let statusHtml,statusColor;
+    if(r.struggling){statusHtml='Struggling — floored to MV';statusColor='var(--red)';}
+    else if(r.resting){statusHtml='Resting';statusColor='var(--text3)';}
+    else if(r.active){statusHtml='Active ('+Math.min(r.streak,CONTINUOUS_MIN_ACTIVE_TENURE_SESSIONS)+'/'+CONTINUOUS_MIN_ACTIVE_TENURE_SESSIONS+' sessions)';statusColor='var(--accent)';}
+    else if(r.recovering){statusHtml='Maintenance — recovering toward a future push';statusColor='var(--text3)';}
+    else{statusHtml='Maintenance';statusColor='var(--text3)';}
+    const pct=Math.round(Math.min(1,r.readiness)*100);
+    return'<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">'
+      +'<div><div class="bold small">'+escHtml(r.muscle)+'</div><div class="small" style="color:'+statusColor+'">'+statusHtml+'</div></div>'
+      +'<div class="small text3" style="text-align:right">readiness '+pct+'%</div></div>';
+  }).join('');
+  el.innerHTML='<div style="background:var(--bg3);border-radius:12px;padding:12px 14px;margin-bottom:12px">'
+    +'<div style="font-size:11px;font-weight:800;letter-spacing:0.6px;color:var(--accent);text-transform:uppercase">Continuous Volume Status</div>'
+    +'<div class="small text3" style="margin-top:2px">Up to '+(m.continuousMaxActiveMuscles||CONTINUOUS_MAX_ACTIVE_MUSCLES_DEFAULT)+' muscles actively pushing at once — auto-rotates by readiness.</div>'
+    +'<div style="margin-top:8px">'+rowsHtml+'</div></div>';
+}
 function openMesoSettingsModal(){
   if(viewingMesoIdx===null)return;
   const m=state.mesocycles[viewingMesoIdx];
@@ -4741,6 +5046,9 @@ function openMesoSettingsModal(){
   document.getElementById('meso-set-repeats').value=m.mesoRepeats||0;
   document.getElementById('meso-set-auto-volume').checked=!!m.autoVolumeDistribution;
   document.getElementById('meso-set-auto-volume-cap').value=m.autoVolumeSessionCap||'';
+  document.getElementById('meso-set-continuous-volume').checked=!!m.continuousVolumeMode;
+  document.getElementById('meso-set-continuous-max-active').value=m.continuousMaxActiveMuscles||CONTINUOUS_MAX_ACTIVE_MUSCLES_DEFAULT;
+  document.getElementById('meso-set-continuous-budget').value=m.continuousWeeklySetBudget||'';
   document.getElementById('meso-set-deload-enabled').checked=!!m.deloadEnabled;
   document.getElementById('meso-set-deload-method').value=m.deloadMethod||'weight';
   document.getElementById('meso-set-deload-pct').value=m.deloadPercent||40;
@@ -4795,6 +5103,11 @@ function saveMesoSettings(){
   m.autoVolumeDistribution=document.getElementById('meso-set-auto-volume').checked;
   const capVal=parseInt(document.getElementById('meso-set-auto-volume-cap').value,10);
   m.autoVolumeSessionCap=(!isNaN(capVal)&&capVal>0)?capVal:null;
+  m.continuousVolumeMode=document.getElementById('meso-set-continuous-volume').checked;
+  const maxActiveVal=parseInt(document.getElementById('meso-set-continuous-max-active').value,10);
+  m.continuousMaxActiveMuscles=(!isNaN(maxActiveVal)&&maxActiveVal>0)?maxActiveVal:CONTINUOUS_MAX_ACTIVE_MUSCLES_DEFAULT;
+  const budgetVal=parseInt(document.getElementById('meso-set-continuous-budget').value,10);
+  m.continuousWeeklySetBudget=(!isNaN(budgetVal)&&budgetVal>0)?budgetVal:null;
   m.deloadEnabled=document.getElementById('meso-set-deload-enabled').checked;
   m.deloadMethod=document.getElementById('meso-set-deload-method').value||'weight';
   const pct=parseFloat(document.getElementById('meso-set-deload-pct').value);
@@ -5387,6 +5700,8 @@ function openMesocycleDetail(mi){
     priorityBtn.textContent='\ud83c\udfaf Set Priority Muscles';
   }
   priorityBtn.onclick=()=>openPrioritySelectionModal(mi);
+  document.getElementById('meso-auto-session-btn').onclick=()=>openAutoSessionModal(mi);
+  renderContinuousVolumeStatus(m);
   const nextIdx=getNextMesoRoutineIndex(m);
   const rirBadge=formatMesoRIRBadge(m);
   const body=document.getElementById('meso-detail-body');
@@ -6238,8 +6553,11 @@ function buildRoutineSeedPlan(routineIdx,commit){
         sets.push(s);
       }
       if(mesoRIRInfo&&mesoRIRInfo.rir!=null){
-        const aimRIR=mesoRIRInfo.rir;
-        sets=sets.map(s=>({...s,rpe:useRIRForAuto?aimRIR:(10-aimRIR)}));
+        const rirInfo=resolveTargetRIR(activeMeso,mesoRIRInfo,ex.muscle);
+        if(rirInfo&&rirInfo.rir!=null){
+          const aimRIR=rirInfo.rir;
+          sets=sets.map(s=>({...s,rpe:useRIRForAuto?aimRIR:(10-aimRIR)}));
+        }
       }
       return{exId:id,sets,supersetGroup:sg,repRange:repRangeForAuto,useRIR:useRIRForAuto,autoVolumeSkipped:targetCount===0};
     }
@@ -6323,8 +6641,11 @@ function buildRoutineSeedPlan(routineIdx,commit){
     // moment the user actually edits a field for real.
     sets=sets.map(s=>({...s,autoWeight:true,autoReps:true,autoRepsL:true,autoRepsR:true}));
     if(mesoRIRInfo&&mesoRIRInfo.rir!=null){
-      const aimRIR=mesoRIRInfo.rir;
-      sets=sets.map(s=>(!s.type||s.type==='normal')?{...s,rpe:useRIR?aimRIR:(10-aimRIR)}:s);
+      const rirInfo=resolveTargetRIR(activeMeso,mesoRIRInfo,ex.muscle);
+      if(rirInfo&&rirInfo.rir!=null){
+        const aimRIR=rirInfo.rir;
+        sets=sets.map(s=>(!s.type||s.type==='normal')?{...s,rpe:useRIR?aimRIR:(10-aimRIR)}:s);
+      }
     }
     return{exId:id,sets,supersetGroup:sg,repRange,useRIR};
   }).filter(Boolean);
@@ -7387,13 +7708,12 @@ function getDaysSinceExerciseTrained(exId){
   }
   return null; // never logged
 }
-function getSwitchExerciseCandidates(exId){
-  const original=getExercise(exId);if(!original||!original.muscle)return[];
+function rankCandidatesForMuscle(muscle,excludeExId){
   const candidateIds=new Set();
   (state.routines||[]).forEach(r=>(r.exerciseIds||[]).forEach(id=>{
-    if(id===exId)return;
+    if(id===excludeExId)return;
     const exData=getExercise(id);
-    if(exData&&exData.muscle===original.muscle)candidateIds.add(id);
+    if(exData&&exData.muscle===muscle)candidateIds.add(id);
   }));
   const list=[...candidateIds].filter(id=>!isExerciseInjured(id)).map(id=>{
     const exData=getExercise(id);
@@ -7409,6 +7729,10 @@ function getSwitchExerciseCandidates(exId){
     return bDays-aDays;
   });
   return list;
+}
+function getSwitchExerciseCandidates(exId){
+  const original=getExercise(exId);if(!original||!original.muscle)return[];
+  return rankCandidatesForMuscle(original.muscle,exId);
 }
 let switchExerciseExIdx=null;
 function openSwitchExerciseModal(exIdx){
@@ -7467,6 +7791,176 @@ function performExerciseSwitch(exIdx,newExId){
     activeWorkout.exercises[exIdx]={...ex};
     renderActiveWorkout();updateWorkoutEstimate();
   });
+}
+
+// ============================================================
+// AUTO SESSION (2026-08-21, user's explicit request — the fuller version of the idea Switch
+// Exercise was originally scoped down from: instead of a fixed routine, assemble TODAY'S actual
+// exercises from across the whole routine pool based on what each muscle still needs). Settled as
+// an ALTERNATIVE to fixed routines, not a replacement — started from the Mesocycle Detail screen,
+// alongside (not instead of) the normal "Up Next" routine flow.
+//
+// Deliberately reuses existing machinery rather than building a parallel system:
+//  - Per-muscle need: same getMesoMuscleVolumeTarget/getMuscleVolume deficit math Auto Volume
+//    Distribution already uses (no front-load/lookahead projection here, though — there's no fixed
+//    future session sequence to project across, so this only ever looks at TODAY'S deficit).
+//  - Exercise choice per muscle: the SAME rankCandidatesForMuscle ranking Switch Exercise uses
+//    (freshest/least-recently-trained first, joint-pain-flagged pushed to the bottom) — just
+//    picking the top candidate instead of presenting a list to choose from.
+//  - Priority ALWAYS goes first and is never cut for time (matches the user's explicit rule from
+//    the per-muscle deload discussion) — back-burner exercises get cut first, smallest need first,
+//    and only once every back-burner exercise is gone does a tight time budget start trimming
+//    priority SET COUNTS (never removing a priority exercise entirely).
+//  - Modeled as a catch-up-style session (activeMesoContext.catchUp=true) — feeds real progression
+//    and volume tracking exactly like a normal session, but never advances the meso's rotation
+//    pointer, since it doesn't correspond to any single slot in the routine sequence. Known
+//    consequence of reusing that path: checkEarlyDeloadSignals/checkPriorityRotationSignal don't
+//    run for an Auto Session finish (same as any other catch-up session today) — an accepted gap,
+//    not something this build attempts to also solve.
+function getGlobalAvgSecondsPerSet(){
+  const sessions=(state.history||[]).filter(w=>w&&w.duration>0).slice(0,20);
+  if(sessions.length>=3){
+    let totalSec=0,totalDoneSets=0;
+    sessions.forEach(w=>{
+      const doneSets=(w.exercises||[]).reduce((a,ex)=>a+(ex.sets||[]).filter(s=>s&&s.done).length,0);
+      if(doneSets>0){totalSec+=w.duration;totalDoneSets+=doneSets;}
+    });
+    if(totalDoneSets>0)return totalSec/totalDoneSets;
+  }
+  return 90; // sane fallback, matches getAvgSecondsPerSet's own
+}
+function buildAutoSession(mesoIdx,minutesAvailable){
+  const m=state.mesocycles[mesoIdx];if(!m)return null;
+  const allMuscles=Object.keys(state.volumeLandmarks||{});
+  const priorityMuscles=allMuscles.filter(mu=>mesoTreatsAsPriority(m,mu));
+  const otherMuscles=allMuscles.filter(mu=>!mesoTreatsAsPriority(m,mu));
+  function getMuscleNeed(muscle){
+    const weeklyTarget=getMesoMuscleVolumeTarget(m,muscle);
+    const delivered=getMuscleVolume(muscle).sets;
+    return Math.max(0,weeklyTarget-delivered);
+  }
+  const orderedMuscles=priorityMuscles.concat(otherMuscles);
+  let needByMuscle={};
+  orderedMuscles.forEach(muscle=>{needByMuscle[muscle]=isMuscleFullyResting(muscle)?0:getMuscleNeed(muscle);});
+  // CONTINUOUS VOLUME MODE weekly budget (2026-08-21): with no 2-muscle cap, several muscles'
+  // raw needs could all be substantial at once — if the user has actually set a real weekly
+  // budget, scale every muscle's need down to fit it, weighted by readiness (headroom + freshness)
+  // rather than an arbitrary "only 2 get to push" rule. Left alone (uncapped) if no budget is set,
+  // same "don't guess a default" precedent as Auto Volume Distribution's own session cap.
+  if(m.continuousVolumeMode&&m.continuousWeeklySetBudget){
+    const needMuscles=orderedMuscles.filter(mu=>needByMuscle[mu]>0);
+    const targets=needMuscles.map(mu=>needByMuscle[mu]);
+    const readiness=needMuscles.map(mu=>getMuscleReadinessScore(m,mu));
+    const allocated=allocateWeeklyBudget(needMuscles,targets,readiness,m.continuousWeeklySetBudget);
+    needMuscles.forEach((mu,i)=>{needByMuscle[mu]=allocated[i];});
+  }
+  let picks=[];
+  orderedMuscles.forEach(muscle=>{
+    const need=needByMuscle[muscle];
+    if(!need||need<=0)return; // already met this rolling week (or budget allocated it 0) — nothing to add today
+    const candidates=rankCandidatesForMuscle(muscle,null);
+    if(!candidates.length)return; // no exercise anywhere in the routine pool trains this muscle
+    const top=candidates[0];
+    const sets=Math.max(1,Math.min(Math.round(need),PRIORITY_VOLUME_SET_CAP));
+    // "protectRank" (2026-08-21) is what decides cut order under a tight time budget below — under
+    // the plain priority/back-burner meso it's the existing binary flag (priority never cut,
+    // matching all along); under Continuous Volume Mode there IS no fixed priority list to check,
+    // so it falls back to the muscle's readiness score instead — the continuous-mode analog of
+    // "priority," extending the same "protect what matters most" idea to the time dimension too.
+    const protectRank=m.continuousVolumeMode?getMuscleReadinessScore(m,muscle):(mesoIsPriorityMuscle(m,muscle)?1:0);
+    picks.push({muscle,exId:top.exId,sets,isPriority:mesoTreatsAsPriority(m,muscle),protectRank});
+  });
+  if(minutesAvailable){
+    const perSetSeconds=getGlobalAvgSecondsPerSet();
+    const budgetSec=minutesAvailable*60;
+    const estimateTotalSeconds=()=>picks.reduce((a,p)=>a+p.sets,0)*perSetSeconds+picks.length*30;
+    if(m.continuousVolumeMode){
+      // Continuous mode: no fixed protected class — cut whole exercises lowest-readiness-first
+      // until it fits or only one remains, then trim remaining set counts toward a 1-set floor,
+      // still lowest-readiness-among-what's-left first.
+      while(estimateTotalSeconds()>budgetSec&&picks.length>1){
+        picks.sort((a,b)=>a.protectRank-b.protectRank);
+        picks=picks.slice(1);
+      }
+      while(estimateTotalSeconds()>budgetSec&&picks.some(p=>p.sets>1)){
+        const trimmable=picks.filter(p=>p.sets>1).sort((a,b)=>a.protectRank-b.protectRank);
+        trimmable[0].sets--;
+      }
+    }else{
+      // Legacy priority/back-burner: cut whole back-burner exercises first, smallest need first —
+      // priority is never removed here.
+      while(estimateTotalSeconds()>budgetSec){
+        const backBurnerPicks=picks.filter(p=>!p.isPriority);
+        if(!backBurnerPicks.length)break;
+        backBurnerPicks.sort((a,b)=>a.sets-b.sets);
+        const cut=backBurnerPicks[0];
+        picks=picks.filter(p=>p!==cut);
+      }
+      // Still over budget with only priority left — trim priority SET COUNTS toward a 1-set floor,
+      // never removing the exercise entirely (priority still gets done, just smaller).
+      while(estimateTotalSeconds()>budgetSec&&picks.some(p=>p.sets>1)){
+        let biggest=picks[0];
+        picks.forEach(p=>{if(p.sets>biggest.sets)biggest=p;});
+        biggest.sets--;
+      }
+    }
+  }
+  return picks;
+}
+function launchAutoSession(mesoIdx,minutesAvailable){
+  const m=state.mesocycles[mesoIdx];if(!m)return;
+  const picks=buildAutoSession(mesoIdx,minutesAvailable);
+  if(!picks||!picks.length){
+    alert('Nothing left to train right now \u2014 every muscle looks covered for this rolling week.');
+    return;
+  }
+  const exercises=picks.map(p=>{
+    const exData=getExercise(p.exId);
+    // No routine of its own to resolve a rep range from — borrow whatever any routine containing
+    // this exercise already has (same fallback chain resolveRepRangeForRoutine itself uses), or a
+    // sane universal default if truly nowhere. useRIR defaults true, matching the app's own stated
+    // RIR-over-RPE preference — rirModes never stores an explicit "false" anyway, only presence.
+    const repRange=findFallbackRepRange(p.exId,null)||{min:8,max:12};
+    const sets=[];
+    for(let si=0;si<p.sets;si++){
+      let s=newSet();
+      const target=getSetTarget(p.exId,{repRange},si,exData,null);
+      if(target){
+        s={...s,weight:target.weight,reps:target.reps,repsL:target.repsL,repsR:target.repsR};
+        s.autoWeight=true;s.autoReps=true;s.autoRepsL=true;s.autoRepsR=true;
+      }
+      sets.push(s);
+    }
+    // Per-muscle RIR when Continuous Volume Mode is on (the exercise's PRIMARY muscle, p.muscle,
+    // governs the whole set — the user's resolution for compound exercises trained by muscles at
+    // different points in their own individual progressions). Falls back to the plain meso-wide
+    // RIR ramp otherwise (2026-08-21 fix — previously Auto Session set no effort target at all in
+    // this case, an oversight; now consistent with what a fixed routine would give you).
+    const mesoRIRInfo=(function(){try{return getMesoTargetRIR(m,null,false);}catch(e){return null;}})();
+    const rirInfo=resolveTargetRIR(m,mesoRIRInfo,p.muscle);
+    if(rirInfo&&rirInfo.rir!=null){
+      const aimRIR=rirInfo.rir;
+      for(let i=0;i<sets.length;i++)sets[i]={...sets[i],rpe:aimRIR};
+    }
+    return{exId:p.exId,sets,supersetGroup:null,repRange,useRIR:true};
+  });
+  activeMesoContext={mesoIdx,catchUp:true,isAutoSession:true,routinePos:null};
+  const grants=grantMuscleVolumeProgress(m,exercises.map(e=>e.exId))||[];
+  if(grants.length)save();
+  closeModal('modal-auto-session');
+  beginWorkout('Auto Session',exercises,null,exercises.map(e=>e.exId));
+}
+function openAutoSessionModal(mesoIdx){
+  autoSessionMesoIdx=mesoIdx;
+  const input=document.getElementById('auto-session-minutes');if(input)input.value='';
+  openModal('modal-auto-session');
+}
+let autoSessionMesoIdx=null;
+function confirmAutoSession(){
+  const input=document.getElementById('auto-session-minutes');
+  const val=input?parseInt(input.value,10):NaN;
+  const minutes=(!isNaN(val)&&val>0)?val:null;
+  launchAutoSession(autoSessionMesoIdx,minutes);
 }
 // Injured/Resting banner (2026-08-13) — exercise-level now, not muscle-level (see
 // isExerciseInjured). Zero sets get seeded for a flagged exercise (buildRoutineSeedPlan), so the
@@ -9385,6 +9879,34 @@ function confirmFinishWorkout(){
       const m=state.mesocycles[activeMesoContext.mesoIdx];
       if(m&&m.skipLog)m.skipLog=m.skipLog.filter(s=>s.id!==activeMesoContext.skipId);
       if(m&&m.undoSkip&&m.undoSkip.skipEntryId===activeMesoContext.skipId)m.undoSkip=null;
+      // AUTO SESSION FINISH CHECKS (2026-08-21, section 5 of the user's requested improvement
+      // batch — a known, previously-disclosed gap): Auto Session reuses this catchUp branch
+      // specifically so it never advances the meso's rotation pointer (it doesn't map to a single
+      // sequence slot) — but that also meant it silently skipped the stall-decline check and the
+      // priority-rotation-signal check entirely, since both live in the OTHER branch below. Run
+      // them explicitly here instead, only for Auto Session (not ordinary catch-up/revisit
+      // sessions, which still intentionally skip them) — advanceMesoProgress is still never
+      // called, since rotation position genuinely doesn't apply here.
+      if(m&&activeMesoContext.isAutoSession&&m.phase==='training'){
+        if(m.deloadEnabled){
+          const signal=checkEarlyDeloadSignals(m,activeWorkout.exercises);
+          if(signal){
+            const forceSuggest=signal.rirSignal&&!signal.declineSignal;
+            const mode=forceSuggest?'suggest':m.earlyDeloadDetection;
+            if(mode==='auto'||mode==='off'){
+              enterDeloadPhase(m);
+              save();renderMesocycles();
+            }else{
+              forgeConfirm('Deload Suggested',signal.reasons.join(' ')+' Start the deload rotation now instead of continuing training?',()=>{
+                enterDeloadPhase(m);
+                save();renderMesocycles();
+              },{okLabel:'Deload Now',cancelLabel:'Keep Training',danger:false});
+            }
+          }
+        }
+        if(!m.priorityPromptPending&&checkPriorityRotationSignal(m))m.priorityPromptPending=true;
+        if(m.priorityPromptPending)openPrioritySelectionModal(state.mesocycles.indexOf(m));
+      }
     }
     activeMesoContext=null;
     save();
