@@ -378,6 +378,9 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div class="home-sec" id="home-sec-startEmpty" data-home-key="startEmpty" style="padding:12px 16px 8px;">
       <button class="btn btn-ghost btn-full" onclick="startEmptyWorkout()" style="border-style:dashed;font-size:13px;border-radius:var(--radius);">⚡ Start Empty Workout</button>
     </div>
+    <div class="home-sec" id="home-sec-autoRoutine" style="padding:0 16px 12px;">
+      <button class="btn btn-primary btn-full" onclick="openAutoRoutineFromHome()" style="font-size:13px;border-radius:var(--radius);">🎯 Auto Routine</button>
+    </div>
     <div class="home-sec" id="home-sec-chart" data-home-key="chart">
       <div class="sec-hdr"><span class="sec-hdr-title">Weekly Consistency</span></div>
       <div id="weekly-consistency-chart" style="margin:0 16px 16px;padding:14px;background:var(--bg2);border-radius:var(--radius);"></div>
@@ -632,7 +635,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-21.9</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-21.12</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -800,12 +803,30 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
   </div>
 </div>
 
+<!-- Auto Routine Pool (2026-08-21) -->
+<div class="modal-overlay" id="modal-auto-routine-pool">
+  <div class="modal"><div class="modal-handle"></div>
+    <div class="modal-title">Auto Routine Exercise Pool</div>
+    <div class="modal-body">
+      <div class="small text3 mb8">Only exercises checked here are ever candidates for Auto Routine — separate from what's in your fixed routines, so you control exactly what it's allowed to pick.</div>
+      <div id="auto-routine-pool-tabs" style="display:flex;gap:6px;margin-bottom:8px"></div>
+      <div id="auto-routine-pool-list" style="max-height:52vh;overflow-y:auto"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary flex-1" onclick="closeModal('modal-auto-routine-pool')">Done</button>
+    </div>
+  </div>
+</div>
+
 <!-- Auto Session (2026-08-21) -->
 <div class="modal-overlay" id="modal-auto-session">
   <div class="modal"><div class="modal-handle"></div>
-    <div class="modal-title">Auto Session</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px 0">
+      <div class="modal-title" style="padding:0">Auto Routine</div>
+      <button class="btn btn-ghost btn-sm" onclick="openAutoRoutinePoolModal()">Edit Pool</button>
+    </div>
     <div class="modal-body">
-      <div class="small text3 mb8">Builds today's exercises from across your whole routine pool based on what each muscle still needs this week. Priority muscles always get their full share first; anything else gets trimmed if time's tight.</div>
+      <div class="small text3 mb8">Builds today's session from your Auto Routine exercise pool, based on what's needed AND how much time you give it — tell it 30 minutes and it tries to fill 30 minutes; tell it 3 hours and it tries to fill 3 hours. You'll always get a warning (not a hard block) if the result looks unusually long.</div>
       <div class="input-label">Minutes available (optional)</div>
       <input id="auto-session-minutes" type="number" min="1" inputmode="numeric" placeholder="Leave blank for a full session"/>
     </div>
@@ -1086,7 +1107,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <div id="meso-detail-body"></div>
       <button class="btn btn-ghost btn-full mt12" onclick="openAddRoutineToActiveMeso()">＋ Add Routine to This Mesocycle</button>
       <button class="btn btn-ghost btn-full mt12" id="meso-priority-btn"></button>
-      <button class="btn btn-ghost btn-full mt12" id="meso-auto-session-btn">⚡ Auto Session</button>
+      <button class="btn btn-ghost btn-full mt12" id="meso-auto-session-btn">⚡ Auto Routine</button>
       <button class="btn btn-ghost btn-full mt12" id="meso-review-btn">📈 Review Progress</button>
       <button class="btn btn-ghost btn-full mt12" id="meso-settings-btn">⚙ Cycle Settings</button>
     </div>
@@ -3421,6 +3442,45 @@ function loggedOrHistoryFallback(loggedExercises,routine){
 // landmark with no complaints just means the floor is already sufficient, not that it needs to
 // rise. MAV is recomputed as the midpoint, matching how it's generally treated as "the zone"
 // rather than an independently-tracked landmark.
+// Per-muscle landmark reassessment (2026-08-21, user's explicit choice for Continuous Volume Mode
+// — "when a muscle's own active push ends, not the whole meso"): same adjustment logic as
+// reassessVolumeLandmarks below (joint pain -> MRV-2, held-back-and-never-reached-old-MRV ->
+// MRV-1, peak reached/exceeded old MRV cleanly -> MRV+1, MAV recomputed as the new midpoint), but
+// scoped to the real session window between THIS muscle's own activeSince stamp and now, rather
+// than a whole mesocycle pass. Called from grantMuscleVolumeProgress at the exact real moment a
+// muscle's active streak ends (see there) — before activeSince gets cleared.
+function reassessMuscleLandmark(m,muscle){
+  const p=m.muscleVolumeProgress&&m.muscleVolumeProgress[muscle];
+  if(!p||!p.activeSince)return;
+  const since=new Date(p.activeSince);
+  const sessions=(state.history||[]).filter(w=>w&&w.mesoId===m.id&&new Date(w.date)>=since);
+  if(!sessions.length)return;
+  const lm=getMuscleLandmarks(muscle);
+  const oldMRV=lm.mrv;
+  let anyHold=false,anyJointPain=false;
+  const perWeek={};
+  sessions.forEach(w=>{
+    const wk=Math.floor(new Date(w.date).getTime()/(7*864e5));
+    (w.exercises||[]).forEach(ex=>{
+      const exData=getExercise(ex.exId);if(!exData||exData.muscle!==muscle)return;
+      perWeek[wk]=(perWeek[wk]||0)+ex.sets.filter(s=>s.done&&(!s.type||s.type==='normal')).length;
+      if(ex.feedback&&ex.feedback.jointPain>=2)anyJointPain=true;
+    });
+    if(w.sorenessImpact&&w.sorenessImpact[muscle]===2)anyHold=true;
+  });
+  const weeks=Object.values(perWeek);
+  if(!weeks.length)return;
+  const peakSets=Math.max(...weeks);
+  if(anyJointPain){
+    lm.mrv=Math.max(lm.mev+2,oldMRV-2);
+  }else if(anyHold&&peakSets<oldMRV){
+    lm.mrv=Math.max(lm.mev+2,oldMRV-1);
+  }else if(peakSets>=oldMRV&&!anyHold){
+    lm.mrv=oldMRV+1;
+  }
+  lm.mav=Math.round((lm.mev+lm.mrv)/2);
+  state.volumeLandmarks[muscle]=lm;
+}
 function reassessVolumeLandmarks(m){
   const justFinishedRepeat=m.repeatsDone; // already incremented by the caller — this IS the pass that just ended
   const passSessions=(state.history||[]).filter(w=>w&&w.mesoId===m.id&&w.mesoProgress&&w.mesoProgress.repeat===justFinishedRepeat);
@@ -4455,6 +4515,7 @@ function grantMuscleVolumeProgress(m,routineIdOrExIds){
       const effective=getEffectiveMuscleProgress(m,muscle);
       if(effective!=null&&Math.round(effective)!==Math.round(p.current))p.current=effective;
       p.inactiveSince=null;p.progressAtInactiveStart=null;
+      if(!p.activeSince)p.activeSince=new Date().toISOString(); // stamped once, on entry — see reassessMuscleLandmark
     });
   }
   const grants=[];
@@ -4499,7 +4560,15 @@ function grantMuscleVolumeProgress(m,routineIdOrExIds){
         if(wasActive&&!m.muscleVolumeProgress[muscle].inactiveSince){
           m.muscleVolumeProgress[muscle].inactiveSince=new Date().toISOString();
           m.muscleVolumeProgress[muscle].progressAtInactiveStart=m.muscleVolumeProgress[muscle].current;
+          // Per-muscle landmark reassessment (2026-08-21, user's explicit choice — "when a
+          // muscle's own active push ends, not the whole meso"): the pass-based reassessVolumeLandmarks
+          // above is gated behind a full mesocycle pass completing, which Continuous Volume Mode
+          // makes much rarer (per-muscle floor-return absorbs most of what used to force a full
+          // deload) — landmarks could go a long time without ever being reassessed. This fires
+          // right here instead, at the exact real moment THIS muscle's own push just ended.
+          reassessMuscleLandmark(m,muscle);
         }
+        m.muscleVolumeProgress[muscle].activeSince=null;
       }
     });
   }
@@ -7708,13 +7777,24 @@ function getDaysSinceExerciseTrained(exId){
   }
   return null; // never logged
 }
+// 2026-08-21: draws from state.autoRoutinePool (a user-curated list, managed via Edit Pool on the
+// Auto Routine modal) when the user has actually set one up — falls back to "anything in any
+// routine" (the original behavior) if the pool is empty, so nothing breaks before it's configured.
 function rankCandidatesForMuscle(muscle,excludeExId){
   const candidateIds=new Set();
-  (state.routines||[]).forEach(r=>(r.exerciseIds||[]).forEach(id=>{
-    if(id===excludeExId)return;
-    const exData=getExercise(id);
-    if(exData&&exData.muscle===muscle)candidateIds.add(id);
-  }));
+  if(state.autoRoutinePool&&state.autoRoutinePool.length){
+    state.autoRoutinePool.forEach(id=>{
+      if(id===excludeExId)return;
+      const exData=getExercise(id);
+      if(exData&&exData.muscle===muscle)candidateIds.add(id);
+    });
+  }else{
+    (state.routines||[]).forEach(r=>(r.exerciseIds||[]).forEach(id=>{
+      if(id===excludeExId)return;
+      const exData=getExercise(id);
+      if(exData&&exData.muscle===muscle)candidateIds.add(id);
+    }));
+  }
   const list=[...candidateIds].filter(id=>!isExerciseInjured(id)).map(id=>{
     const exData=getExercise(id);
     const daysSinceTrained=getDaysSinceExerciseTrained(id);
@@ -7874,46 +7954,116 @@ function buildAutoSession(mesoIdx,minutesAvailable){
     const perSetSeconds=getGlobalAvgSecondsPerSet();
     const budgetSec=minutesAvailable*60;
     const estimateTotalSeconds=()=>picks.reduce((a,p)=>a+p.sets,0)*perSetSeconds+picks.length*30;
-    if(m.continuousVolumeMode){
-      // Continuous mode: no fixed protected class — cut whole exercises lowest-readiness-first
-      // until it fits or only one remains, then trim remaining set counts toward a 1-set floor,
-      // still lowest-readiness-among-what's-left first.
-      while(estimateTotalSeconds()>budgetSec&&picks.length>1){
-        picks.sort((a,b)=>a.protectRank-b.protectRank);
-        picks=picks.slice(1);
-      }
-      while(estimateTotalSeconds()>budgetSec&&picks.some(p=>p.sets>1)){
-        const trimmable=picks.filter(p=>p.sets>1).sort((a,b)=>a.protectRank-b.protectRank);
-        trimmable[0].sets--;
+    if(estimateTotalSeconds()>budgetSec){
+      if(m.continuousVolumeMode){
+        // Continuous mode: no fixed protected class — cut whole exercises lowest-readiness-first
+        // until it fits or only one remains, then trim remaining set counts toward a 1-set floor,
+        // still lowest-readiness-among-what's-left first.
+        while(estimateTotalSeconds()>budgetSec&&picks.length>1){
+          picks.sort((a,b)=>a.protectRank-b.protectRank);
+          picks=picks.slice(1);
+        }
+        while(estimateTotalSeconds()>budgetSec&&picks.some(p=>p.sets>1)){
+          const trimmable=picks.filter(p=>p.sets>1).sort((a,b)=>a.protectRank-b.protectRank);
+          trimmable[0].sets--;
+        }
+      }else{
+        // Legacy priority/back-burner: cut whole back-burner exercises first, smallest need first —
+        // priority is never removed here.
+        while(estimateTotalSeconds()>budgetSec){
+          const backBurnerPicks=picks.filter(p=>!p.isPriority);
+          if(!backBurnerPicks.length)break;
+          backBurnerPicks.sort((a,b)=>a.sets-b.sets);
+          const cut=backBurnerPicks[0];
+          picks=picks.filter(p=>p!==cut);
+        }
+        // Still over budget with only priority left — trim priority SET COUNTS toward a 1-set floor,
+        // never removing the exercise entirely (priority still gets done, just smaller).
+        while(estimateTotalSeconds()>budgetSec&&picks.some(p=>p.sets>1)){
+          let biggest=picks[0];
+          picks.forEach(p=>{if(p.sets>biggest.sets)biggest=p;});
+          biggest.sets--;
+        }
       }
     }else{
-      // Legacy priority/back-burner: cut whole back-burner exercises first, smallest need first —
-      // priority is never removed here.
-      while(estimateTotalSeconds()>budgetSec){
-        const backBurnerPicks=picks.filter(p=>!p.isPriority);
-        if(!backBurnerPicks.length)break;
-        backBurnerPicks.sort((a,b)=>a.sets-b.sets);
-        const cut=backBurnerPicks[0];
-        picks=picks.filter(p=>p!==cut);
+      // TIME-FIRST FILL (2026-08-21, user's explicit correction — the whole point of giving a time
+      // budget is to fill it, not just to have a ceiling to trim against). Step 1: top up sets on
+      // already-included exercises, best-readiness/priority first, up to the per-muscle cap. Step
+      // 2: once everything included is capped but time remains, pull in NEW pool exercises for
+      // muscles not yet included at all — even ones with ~0 remaining deficit, since unused time is
+      // better spent training something than sitting idle — again ordered by readiness/priority,
+      // then topped up the same way. Stops once the budget's used, the whole pool is in, or every
+      // included muscle is at its per-session cap (a real ceiling, not just a deficit one).
+      let progressed=true;
+      while(estimateTotalSeconds()<budgetSec&&progressed){
+        progressed=false;
+        const order=[...picks].sort((a,b)=>(b.protectRank||0)-(a.protectRank||0));
+        for(const p of order){
+          if(estimateTotalSeconds()>=budgetSec)break;
+          if(p.sets<PRIORITY_VOLUME_SET_CAP){p.sets++;progressed=true;}
+        }
       }
-      // Still over budget with only priority left — trim priority SET COUNTS toward a 1-set floor,
-      // never removing the exercise entirely (priority still gets done, just smaller).
-      while(estimateTotalSeconds()>budgetSec&&picks.some(p=>p.sets>1)){
-        let biggest=picks[0];
-        picks.forEach(p=>{if(p.sets>biggest.sets)biggest=p;});
-        biggest.sets--;
+      if(estimateTotalSeconds()<budgetSec){
+        const includedMuscles=new Set(picks.map(p=>p.muscle));
+        const fillCandidates=orderedMuscles.filter(mu=>!includedMuscles.has(mu)&&!isMuscleFullyResting(mu));
+        fillCandidates.sort((a,b)=>getMuscleReadinessScore(m,b)-getMuscleReadinessScore(m,a));
+        for(const muscle of fillCandidates){
+          if(estimateTotalSeconds()>=budgetSec)break;
+          const candidates=rankCandidatesForMuscle(muscle,null);
+          if(!candidates.length)continue;
+          const top=candidates[0];
+          const protectRank=m.continuousVolumeMode?getMuscleReadinessScore(m,muscle):(mesoIsPriorityMuscle(m,muscle)?1:0);
+          const newPick={muscle,exId:top.exId,sets:1,isPriority:mesoTreatsAsPriority(m,muscle),protectRank};
+          picks.push(newPick);
+          while(estimateTotalSeconds()<budgetSec&&newPick.sets<PRIORITY_VOLUME_SET_CAP){
+            newPick.sets++;
+            if(estimateTotalSeconds()>=budgetSec)break;
+          }
+        }
       }
     }
   }
   return picks;
 }
-function launchAutoSession(mesoIdx,minutesAvailable){
-  const m=state.mesocycles[mesoIdx];if(!m)return;
-  const picks=buildAutoSession(mesoIdx,minutesAvailable);
-  if(!picks||!picks.length){
-    alert('Nothing left to train right now \u2014 every muscle looks covered for this rolling week.');
-    return;
+const WARN_SESSION_MINUTES_THRESHOLD=120; // 2026-08-21, user's explicit ask: warn (never hard-block) once a built session is unusually long, regardless of whether that length matches what was actually requested — a real 3-hour ask should still get the warning, per the user's own description; they just override it.
+// Known-superset auto-linking (2026-08-21, user's explicit request — "is there a way of it
+// knowing my superset links and it incorporating these where it's valid to do so? It saves
+// machine setup and time"): checks whether two exercises are EVER paired together in the same
+// superset group in ANY existing routine — if so, and both happen to land in the same Auto
+// Routine session, they're linked the same way here too. Never invents a new pairing the user
+// hasn't already validated by setting it up in a real routine; purely recognizes and reapplies
+// what's already known to work.
+function areExercisesSupersettedTogether(exIdA,exIdB){
+  return(state.routines||[]).some(r=>{
+    if(!r.supersetGroups)return false;
+    const idxA=(r.exerciseIds||[]).indexOf(exIdA);
+    const idxB=(r.exerciseIds||[]).indexOf(exIdB);
+    if(idxA<0||idxB<0)return false;
+    const groupA=r.supersetGroups[idxA],groupB=r.supersetGroups[idxB];
+    return groupA!=null&&groupA===groupB;
+  });
+}
+// Pairwise chaining (not just adjacent pairs) so a known 3+-exercise superset still links fully —
+// i is re-examined even once assigned, so a later exercise that's only linked to a middle member
+// of an existing group still correctly joins that same group instead of being missed.
+function autoLinkKnownSupersets(exercises){
+  let nextGroupId=1;
+  const assigned={};
+  for(let i=0;i<exercises.length;i++){
+    for(let j=i+1;j<exercises.length;j++){
+      if(assigned[j])continue;
+      if(areExercisesSupersettedTogether(exercises[i].exId,exercises[j].exId)){
+        const group=assigned[i]||(nextGroupId++);
+        exercises[i].supersetGroup=group;
+        exercises[j].supersetGroup=group;
+        assigned[i]=group;assigned[j]=group;
+      }
+    }
   }
+  return exercises;
+}
+function launchAutoSessionWithPicks(mesoIdx,picks){
+  const m=state.mesocycles[mesoIdx];if(!m)return;
   const exercises=picks.map(p=>{
     const exData=getExercise(p.exId);
     // No routine of its own to resolve a rep range from — borrow whatever any routine containing
@@ -7944,23 +8094,133 @@ function launchAutoSession(mesoIdx,minutesAvailable){
     }
     return{exId:p.exId,sets,supersetGroup:null,repRange,useRIR:true};
   });
+  autoLinkKnownSupersets(exercises);
   activeMesoContext={mesoIdx,catchUp:true,isAutoSession:true,routinePos:null};
   const grants=grantMuscleVolumeProgress(m,exercises.map(e=>e.exId))||[];
   if(grants.length)save();
   closeModal('modal-auto-session');
-  beginWorkout('Auto Session',exercises,null,exercises.map(e=>e.exId));
+  beginWorkout('Auto Routine',exercises,null,exercises.map(e=>e.exId));
+}
+// Auto Routine exercise pool (2026-08-21, user's explicit request — "an array of exercises... 
+// selected by me that it can choose from"): a curated list, separate from what's in any fixed
+// routine, so the user controls exactly what Auto Routine is allowed to pick. Falls back to the
+// old "anything in any routine" behavior (see rankCandidatesForMuscle) until populated.
+// Tabs (2026-08-21 follow-up, user's explicit request): "In Routines" and "Recently Used" let the
+// user bulk-pull from exercises they've already set up rather than hand-picking from the full
+// database — "instead of picking / making them all from scratch," the user's own words.
+let autoRoutinePoolTab='all';
+function openAutoRoutinePoolModal(){
+  if(!state.autoRoutinePool)state.autoRoutinePool=[];
+  autoRoutinePoolTab='all';
+  renderAutoRoutinePoolList();
+  openModal('modal-auto-routine-pool');
+}
+function toggleAutoRoutinePoolExercise(exId){
+  if(!state.autoRoutinePool)state.autoRoutinePool=[];
+  const idx=state.autoRoutinePool.indexOf(exId);
+  if(idx>=0)state.autoRoutinePool.splice(idx,1);else state.autoRoutinePool.push(exId);
+  save();
+  renderAutoRoutinePoolList();
+}
+function switchAutoRoutinePoolTab(tab){
+  autoRoutinePoolTab=tab;
+  renderAutoRoutinePoolList();
+}
+function getAutoRoutinePoolTabExercises(tab){
+  if(tab==='routines'){
+    const ids=new Set();
+    (state.routines||[]).forEach(r=>(r.exerciseIds||[]).forEach(id=>ids.add(id)));
+    return[...ids].map(id=>getExercise(id)).filter(Boolean);
+  }
+  if(tab==='recent'){
+    return(state.exercises||[]).map(ex=>({ex,days:getDaysSinceExerciseTrained(ex.id)}))
+      .filter(x=>x.days!=null).sort((a,b)=>a.days-b.days).slice(0,30).map(x=>x.ex);
+  }
+  return state.exercises||[];
+}
+// Bulk-add/remove everything currently shown on this tab — the direct answer to "instead of
+// picking them all from scratch": one tap to pull in every exercise already in your routines, or
+// everything trained recently, rather than checking each one individually.
+function bulkSetAutoRoutinePoolTab(add){
+  if(!state.autoRoutinePool)state.autoRoutinePool=[];
+  const shown=getAutoRoutinePoolTabExercises(autoRoutinePoolTab);
+  const pool=new Set(state.autoRoutinePool);
+  shown.forEach(ex=>{if(add)pool.add(ex.id);else pool.delete(ex.id);});
+  state.autoRoutinePool=[...pool];
+  save();
+  renderAutoRoutinePoolList();
+}
+function renderAutoRoutinePoolList(){
+  const el=document.getElementById('auto-routine-pool-list');if(!el)return;
+  const tabsEl=document.getElementById('auto-routine-pool-tabs');
+  if(tabsEl){
+    const tabs=[['all','All'],['routines','In Routines'],['recent','Recently Used']];
+    tabsEl.innerHTML=tabs.map(([key,label])=>
+      '<button class="btn '+(autoRoutinePoolTab===key?'btn-primary':'btn-ghost')+' btn-sm" onclick="switchAutoRoutinePoolTab(\''+key+'\')" style="flex:1">'+label+'</button>'
+    ).join('');
+  }
+  const pool=new Set(state.autoRoutinePool||[]);
+  const shown=getAutoRoutinePoolTabExercises(autoRoutinePoolTab);
+  const byMuscle={};
+  shown.forEach(ex=>{
+    if(!ex.muscle)return;
+    (byMuscle[ex.muscle]=byMuscle[ex.muscle]||[]).push(ex);
+  });
+  const bulkBar='<div style="display:flex;gap:8px;margin:8px 0">'
+    +'<button class="btn btn-ghost btn-sm" style="flex:1" onclick="bulkSetAutoRoutinePoolTab(true)">＋ Add All Shown</button>'
+    +'<button class="btn btn-ghost btn-sm" style="flex:1" onclick="bulkSetAutoRoutinePoolTab(false)">－ Remove All Shown</button></div>';
+  const listHtml=MUSCLE_GROUPS.filter(mu=>byMuscle[mu]&&byMuscle[mu].length).map(muscle=>{
+    const items=byMuscle[muscle].map(ex=>{
+      const checked=pool.has(ex.id);
+      return'<div style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid var(--border)" onclick="toggleAutoRoutinePoolExercise(\''+ex.id+'\')">'
+        +'<input type="checkbox" '+(checked?'checked':'')+' style="width:auto;pointer-events:none;flex-shrink:0"/>'
+        +'<div class="small">'+escHtml(ex.name)+'</div></div>';
+    }).join('');
+    return'<div style="margin-top:12px"><div class="small text3" style="font-weight:700;text-transform:uppercase;letter-spacing:0.5px">'+escHtml(muscle)+'</div>'+items+'</div>';
+  }).join('');
+  el.innerHTML=bulkBar+(listHtml||'<div class="small text3" style="padding:10px 0">Nothing here yet.</div>');
 }
 function openAutoSessionModal(mesoIdx){
   autoSessionMesoIdx=mesoIdx;
   const input=document.getElementById('auto-session-minutes');if(input)input.value='';
   openModal('modal-auto-session');
 }
+// Home screen entry point (2026-08-21, user's explicit request for a dedicated home-screen
+// button) — reuses the exact same "find the active meso" logic renderActiveMesoHero already uses,
+// so Auto Routine always targets whichever mesocycle the rest of Home is showing.
+function openAutoRoutineFromHome(){
+  if(!state.mesocycles||!state.mesocycles.length){alert('Start a mesocycle first \u2014 Auto Routine needs an active meso for its volume targets and priority/continuous settings.');return;}
+  const withRoutines=state.mesocycles.filter(m=>m.routineIds&&m.routineIds.length);
+  if(!withRoutines.length){alert('Start a mesocycle first \u2014 Auto Routine needs an active meso for its volume targets and priority/continuous settings.');return;}
+  let meso=null;
+  if(state.activeMesoId){meso=withRoutines.find(m=>m.id===state.activeMesoId)||null;}
+  if(!meso){const started=withRoutines.filter(m=>m.currentPos!=null);meso=started.length?started[started.length-1]:withRoutines[0];}
+  openAutoSessionModal(state.mesocycles.indexOf(meso));
+}
 let autoSessionMesoIdx=null;
+// 2026-08-21: builds picks ONCE, checks the estimated length, and only THEN launches — warns (via
+// forgeConfirm, with an explicit override) rather than silently blocking, per the user's explicit
+// "I am allowed to override this." Never builds twice, so the estimate shown always matches
+// exactly what actually gets started.
 function confirmAutoSession(){
   const input=document.getElementById('auto-session-minutes');
   const val=input?parseInt(input.value,10):NaN;
   const minutes=(!isNaN(val)&&val>0)?val:null;
-  launchAutoSession(autoSessionMesoIdx,minutes);
+  const picks=buildAutoSession(autoSessionMesoIdx,minutes);
+  if(!picks||!picks.length){
+    alert('Nothing left to train right now \u2014 every muscle looks covered for this rolling week, or your Auto Routine pool has no exercises for what\'s needed.');
+    return;
+  }
+  const perSetSeconds=getGlobalAvgSecondsPerSet();
+  const estMinutes=Math.round((picks.reduce((a,p)=>a+p.sets,0)*perSetSeconds+picks.length*30)/60);
+  if(estMinutes>WARN_SESSION_MINUTES_THRESHOLD){
+    forgeConfirm('Long Session',
+      'This session is estimated at about '+estMinutes+' minutes across '+picks.length+' exercises. Start anyway?',
+      ()=>{launchAutoSessionWithPicks(autoSessionMesoIdx,picks);},
+      {okLabel:'Start Anyway',cancelLabel:'Cancel'});
+  }else{
+    launchAutoSessionWithPicks(autoSessionMesoIdx,picks);
+  }
 }
 // Injured/Resting banner (2026-08-13) — exercise-level now, not muscle-level (see
 // isExerciseInjured). Zero sets get seeded for a flagged exercise (buildRoutineSeedPlan), so the
