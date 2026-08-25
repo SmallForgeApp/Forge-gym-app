@@ -635,7 +635,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-21.13</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-21.14</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -7912,17 +7912,29 @@ function performExerciseSwitch(exIdx,newExId){
 //    consequence of reusing that path: checkEarlyDeloadSignals/checkPriorityRotationSignal don't
 //    run for an Auto Session finish (same as any other catch-up session today) — an accepted gap,
 //    not something this build attempts to also solve.
-function getGlobalAvgSecondsPerSet(){
-  const sessions=(state.history||[]).filter(w=>w&&w.duration>0).slice(0,20);
-  if(sessions.length>=3){
-    let totalSec=0,totalDoneSets=0;
-    sessions.forEach(w=>{
-      const doneSets=(w.exercises||[]).reduce((a,ex)=>a+(ex.sets||[]).filter(s=>s&&s.done).length,0);
-      if(doneSets>0){totalSec+=w.duration;totalDoneSets+=doneSets;}
-    });
-    if(totalDoneSets>0)return totalSec/totalDoneSets;
-  }
-  return 90; // sane fallback, matches getAvgSecondsPerSet's own
+// PER-EXERCISE TIME ESTIMATE (2026-08-21, user's explicit correction — a single flat average
+// seconds-per-set, derived from whatever mix of exercises happens to dominate real history, badly
+// misestimates any individual exercise: if that history is compound-heavy, the same inflated
+// number gets applied even to a fast isolation move, and vice versa). Replaced with the user's own
+// flat rule: 3.5 min/set for a compound, 2.5 min/set for an isolation. No exercise field explicitly
+// marks compound vs isolation, so this classifies by whether the exercise has a SECONDARY muscle
+// defined — a compound/multi-joint movement trains more than one muscle (hence has secondary
+// credit configured), an isolation typically doesn't. An inferred heuristic, not a stated fact —
+// worth knowing if an exercise's secondary field is empty simply because it was never filled in.
+const COMPOUND_SET_SECONDS=210; // 3.5 min
+const ISOLATION_SET_SECONDS=150; // 2.5 min
+function isCompoundExercise(exData){
+  return!!(exData&&exData.secondary&&exData.secondary.trim());
+}
+function estimateSetSeconds(exId){
+  const exData=getExercise(exId);
+  return isCompoundExercise(exData)?COMPOUND_SET_SECONDS:ISOLATION_SET_SECONDS;
+}
+// Total estimated seconds for a set of picks — per-exercise now, not one blended average across
+// the whole session. Superset-adjusted overhead (see countSupersetAdjustedExerciseSlots) still
+// applies on top, unchanged.
+function estimatePicksSeconds(picks){
+  return picks.reduce((a,p)=>a+p.sets*estimateSetSeconds(p.exId),0)+countSupersetAdjustedExerciseSlots(picks)*30;
 }
 const AUTO_ROUTINE_EXERCISE_VARIETY_THRESHOLD=5; // 2026-08-21, user's explicit call: beyond ~5 sets of the SAME exercise for a muscle, split the rest onto a different one rather than keep stacking toward the 10-set muscle cap on one movement.
 // Adds ONE set toward `muscle`'s total for this session, respecting BOTH the muscle-level 10-set
@@ -7956,24 +7968,54 @@ function getMuscleProtectRank(picks,muscle){
   const p=picks.find(x=>x.muscle===muscle);
   return p?p.protectRank:0;
 }
+// WEEKLY SPREAD FOR AUTO ROUTINE (2026-08-21, user's explicit correction after a real-world
+// report: after 7 days off, Auto Routine tried to satisfy an entire week's backlog for a muscle in
+// ONE session, given enough time — that's not viable hypertrophy programming, it's cramming a
+// week of stimulus into one sitting. Auto Volume Distribution (the fixed-routine version) never
+// has this problem because it front-loads a deficit across several KNOWN upcoming sessions in the
+// routine sequence — Auto Routine has no fixed sequence to project across, so per the user's
+// explicit instruction it now assumes a flat ASSUMED_SESSIONS_PER_WEEK-session week instead, and
+// only ever tries to deliver each muscle's fair PER-SESSION share of its weekly target — front-
+// loaded toward today if behind, same shape as Auto Volume Distribution's own front-load math,
+// just without a real sequence to walk. getMesoMuscleVolumeTarget already encodes the two-tier
+// target the user described (MEV flat for back-burner/inactive muscles, MEV\u2192MRV progression for
+// active/priority ones) — this doesn't change that; it only changes how much of THAT target gets
+// asked for in a single sitting.
+const ASSUMED_SESSIONS_PER_WEEK=4;
+function getAutoRoutineSessionsSoFarThisWeek(){
+  const cutoff=new Date(Date.now()-MUSCLE_VOLUME_WINDOW_DAYS*864e5);
+  const days=new Set();
+  (state.history||[]).forEach(w=>{
+    if(w&&new Date(w.date)>=cutoff)days.add(localDateKey(new Date(w.date)));
+  });
+  return days.size;
+}
+function getMuscleSessionShare(m,muscle){
+  const weeklyTarget=getMesoMuscleVolumeTarget(m,muscle);
+  const delivered=getMuscleVolume(muscle).sets;
+  const remainingTarget=Math.max(0,weeklyTarget-delivered);
+  const sessionsSoFar=getAutoRoutineSessionsSoFarThisWeek();
+  const assumedRemaining=Math.max(1,ASSUMED_SESSIONS_PER_WEEK-sessionsSoFar);
+  const weights=[];
+  for(let i=0;i<assumedRemaining;i++)weights.push(assumedRemaining-i);
+  const weightSum=weights.reduce((a,b)=>a+b,0);
+  const todayShare=Math.round(remainingTarget*weights[0]/weightSum);
+  return{weeklyTarget,delivered,remainingTarget,todayShare,assumedRemaining};
+}
 function buildAutoSession(mesoIdx,minutesAvailable){
   const m=state.mesocycles[mesoIdx];if(!m)return null;
   const allMuscles=Object.keys(state.volumeLandmarks||{});
   const priorityMuscles=allMuscles.filter(mu=>mesoTreatsAsPriority(m,mu));
   const otherMuscles=allMuscles.filter(mu=>!mesoTreatsAsPriority(m,mu));
-  function getMuscleNeed(muscle){
-    const weeklyTarget=getMesoMuscleVolumeTarget(m,muscle);
-    const delivered=getMuscleVolume(muscle).sets;
-    return Math.max(0,weeklyTarget-delivered);
-  }
   const orderedMuscles=priorityMuscles.concat(otherMuscles);
   let needByMuscle={};
-  orderedMuscles.forEach(muscle=>{needByMuscle[muscle]=isMuscleFullyResting(muscle)?0:getMuscleNeed(muscle);});
+  orderedMuscles.forEach(muscle=>{needByMuscle[muscle]=isMuscleFullyResting(muscle)?0:getMuscleSessionShare(m,muscle).todayShare;});
   // CONTINUOUS VOLUME MODE weekly budget (2026-08-21): with no 2-muscle cap, several muscles'
   // raw needs could all be substantial at once — if the user has actually set a real weekly
-  // budget, scale every muscle's need down to fit it, weighted by readiness (headroom + freshness)
-  // rather than an arbitrary "only 2 get to push" rule. Left alone (uncapped) if no budget is set,
-  // same "don't guess a default" precedent as Auto Volume Distribution's own session cap.
+  // budget, scale every muscle's TODAY'S SHARE down to fit it, weighted by readiness (headroom +
+  // freshness) rather than an arbitrary "only 2 get to push" rule. Left alone (uncapped) if no
+  // budget is set, same "don't guess a default" precedent as Auto Volume Distribution's own
+  // session cap. Operates on the already-spread per-session share, not the raw weekly deficit.
   if(m.continuousVolumeMode&&m.continuousWeeklySetBudget){
     const needMuscles=orderedMuscles.filter(mu=>needByMuscle[mu]>0);
     const targets=needMuscles.map(mu=>needByMuscle[mu]);
@@ -7993,9 +8035,8 @@ function buildAutoSession(mesoIdx,minutesAvailable){
     for(let i=0;i<target;i++){if(!growMuscleOneSet(m,picks,muscle))break;}
   });
   if(minutesAvailable){
-    const perSetSeconds=getGlobalAvgSecondsPerSet();
     const budgetSec=minutesAvailable*60;
-    const estimateTotalSeconds=()=>picks.reduce((a,p)=>a+p.sets,0)*perSetSeconds+countSupersetAdjustedExerciseSlots(picks)*30;
+    const estimateTotalSeconds=()=>estimatePicksSeconds(picks);
     if(estimateTotalSeconds()>budgetSec){
       if(m.continuousVolumeMode){
         // Continuous mode: no fixed protected class — cut whole exercises lowest-readiness-first
@@ -8316,8 +8357,7 @@ function confirmAutoSession(){
     alert('Nothing left to train right now \u2014 every muscle looks covered for this rolling week, or your Auto Routine pool has no exercises for what\'s needed.');
     return;
   }
-  const perSetSeconds=getGlobalAvgSecondsPerSet();
-  const estMinutes=Math.round((picks.reduce((a,p)=>a+p.sets,0)*perSetSeconds+countSupersetAdjustedExerciseSlots(picks)*30)/60);
+  const estMinutes=Math.round(estimatePicksSeconds(picks)/60);
   showAutoRoutinePreview(autoSessionMesoIdx,picks,estMinutes);
 }
 // Injured/Resting banner (2026-08-13) — exercise-level now, not muscle-level (see
