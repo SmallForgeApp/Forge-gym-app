@@ -635,7 +635,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
       <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
     </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-21.12</div>
+    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-21.13</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -799,6 +799,21 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div class="modal-actions">
       <button class="btn btn-ghost flex-1" onclick="closeModal('modal-exercise-note')">Cancel</button>
       <button class="btn btn-primary flex-1" onclick="saveExerciseNote()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Auto Routine Preview (2026-08-21) -->
+<div class="modal-overlay" id="modal-auto-routine-preview">
+  <div class="modal"><div class="modal-handle"></div>
+    <div class="modal-title">Auto Routine Preview</div>
+    <div class="modal-body">
+      <div id="auto-routine-preview-summary" class="small mb8"></div>
+      <div id="auto-routine-preview-list"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost flex-1" onclick="closeModal('modal-auto-routine-preview')">Back</button>
+      <button class="btn btn-primary flex-1" onclick="startPreviewedAutoRoutine()">Start Workout</button>
     </div>
   </div>
 </div>
@@ -7909,6 +7924,38 @@ function getGlobalAvgSecondsPerSet(){
   }
   return 90; // sane fallback, matches getAvgSecondsPerSet's own
 }
+const AUTO_ROUTINE_EXERCISE_VARIETY_THRESHOLD=5; // 2026-08-21, user's explicit call: beyond ~5 sets of the SAME exercise for a muscle, split the rest onto a different one rather than keep stacking toward the 10-set muscle cap on one movement.
+// Adds ONE set toward `muscle`'s total for this session, respecting BOTH the muscle-level 10-set
+// cap (PRIORITY_VOLUME_SET_CAP — the real, literature-backed local-overreach limit, unchanged) and
+// the per-EXERCISE variety threshold above. Prefers an existing pick for this muscle that's still
+// under the threshold; once every existing pick is at/over it, introduces the next-best pool
+// exercise not already used for this muscle rather than continuing to stack the first one. If the
+// pool genuinely has nothing left to offer, falls back to the least-loaded existing pick so the
+// muscle's own cap can still be reached — variety is preferred, never enforced past the pool's
+// real limits. Returns false (nothing added) once the muscle's total cap is reached.
+function growMuscleOneSet(m,picks,muscle){
+  const total=picks.filter(p=>p.muscle===muscle).reduce((a,p)=>a+p.sets,0);
+  if(total>=PRIORITY_VOLUME_SET_CAP)return false;
+  let target=picks.find(p=>p.muscle===muscle&&p.sets<AUTO_ROUTINE_EXERCISE_VARIETY_THRESHOLD);
+  if(!target){
+    const usedIds=new Set(picks.filter(p=>p.muscle===muscle).map(p=>p.exId));
+    const candidates=rankCandidatesForMuscle(muscle,null).filter(c=>!usedIds.has(c.exId));
+    if(candidates.length){
+      const protectRank=m.continuousVolumeMode?getMuscleReadinessScore(m,muscle):(mesoIsPriorityMuscle(m,muscle)?1:0);
+      target={muscle,exId:candidates[0].exId,sets:0,isPriority:mesoTreatsAsPriority(m,muscle),protectRank};
+      picks.push(target);
+    }else{
+      target=picks.filter(p=>p.muscle===muscle).sort((a,b)=>a.sets-b.sets)[0];
+      if(!target)return false;
+    }
+  }
+  target.sets++;
+  return true;
+}
+function getMuscleProtectRank(picks,muscle){
+  const p=picks.find(x=>x.muscle===muscle);
+  return p?p.protectRank:0;
+}
 function buildAutoSession(mesoIdx,minutesAvailable){
   const m=state.mesocycles[mesoIdx];if(!m)return null;
   const allMuscles=Object.keys(state.volumeLandmarks||{});
@@ -7934,26 +7981,21 @@ function buildAutoSession(mesoIdx,minutesAvailable){
     const allocated=allocateWeeklyBudget(needMuscles,targets,readiness,m.continuousWeeklySetBudget);
     needMuscles.forEach((mu,i)=>{needByMuscle[mu]=allocated[i];});
   }
+  // Initial deficit-driven build (2026-08-21, now variety-aware throughout — not just during
+  // time-fill below): grows each muscle toward its raw need via growMuscleOneSet, so a large
+  // deficit naturally spreads across a second exercise past the threshold instead of stacking
+  // straight to 10 on one movement, exactly like the time-fill path does.
   let picks=[];
   orderedMuscles.forEach(muscle=>{
     const need=needByMuscle[muscle];
-    if(!need||need<=0)return; // already met this rolling week (or budget allocated it 0) — nothing to add today
-    const candidates=rankCandidatesForMuscle(muscle,null);
-    if(!candidates.length)return; // no exercise anywhere in the routine pool trains this muscle
-    const top=candidates[0];
-    const sets=Math.max(1,Math.min(Math.round(need),PRIORITY_VOLUME_SET_CAP));
-    // "protectRank" (2026-08-21) is what decides cut order under a tight time budget below — under
-    // the plain priority/back-burner meso it's the existing binary flag (priority never cut,
-    // matching all along); under Continuous Volume Mode there IS no fixed priority list to check,
-    // so it falls back to the muscle's readiness score instead — the continuous-mode analog of
-    // "priority," extending the same "protect what matters most" idea to the time dimension too.
-    const protectRank=m.continuousVolumeMode?getMuscleReadinessScore(m,muscle):(mesoIsPriorityMuscle(m,muscle)?1:0);
-    picks.push({muscle,exId:top.exId,sets,isPriority:mesoTreatsAsPriority(m,muscle),protectRank});
+    if(!need||need<=0)return;
+    const target=Math.min(Math.round(need),PRIORITY_VOLUME_SET_CAP);
+    for(let i=0;i<target;i++){if(!growMuscleOneSet(m,picks,muscle))break;}
   });
   if(minutesAvailable){
     const perSetSeconds=getGlobalAvgSecondsPerSet();
     const budgetSec=minutesAvailable*60;
-    const estimateTotalSeconds=()=>picks.reduce((a,p)=>a+p.sets,0)*perSetSeconds+picks.length*30;
+    const estimateTotalSeconds=()=>picks.reduce((a,p)=>a+p.sets,0)*perSetSeconds+countSupersetAdjustedExerciseSlots(picks)*30;
     if(estimateTotalSeconds()>budgetSec){
       if(m.continuousVolumeMode){
         // Continuous mode: no fixed protected class — cut whole exercises lowest-readiness-first
@@ -7986,21 +8028,22 @@ function buildAutoSession(mesoIdx,minutesAvailable){
         }
       }
     }else{
-      // TIME-FIRST FILL (2026-08-21, user's explicit correction — the whole point of giving a time
-      // budget is to fill it, not just to have a ceiling to trim against). Step 1: top up sets on
-      // already-included exercises, best-readiness/priority first, up to the per-muscle cap. Step
-      // 2: once everything included is capped but time remains, pull in NEW pool exercises for
-      // muscles not yet included at all — even ones with ~0 remaining deficit, since unused time is
-      // better spent training something than sitting idle — again ordered by readiness/priority,
-      // then topped up the same way. Stops once the budget's used, the whole pool is in, or every
-      // included muscle is at its per-session cap (a real ceiling, not just a deficit one).
+      // TIME-FIRST FILL (2026-08-21): the whole point of giving a time budget is to fill it, not
+      // just have a ceiling to trim against. Step 1: grow muscles already included, best-
+      // readiness/priority first, via growMuscleOneSet — which naturally introduces a second
+      // exercise past the variety threshold instead of stacking one exercise to its cap. Step 2:
+      // once everything included is fully capped (or pool-exhausted) but time remains, pull in
+      // entirely NEW muscles from the pool — even ones with ~0 remaining deficit, since unused
+      // time is better spent training something than sitting idle — ordered by readiness, grown
+      // the same variety-aware way. Stops once the budget's used, the pool's exhausted, or every
+      // muscle is at its own 10-set total cap.
       let progressed=true;
       while(estimateTotalSeconds()<budgetSec&&progressed){
         progressed=false;
-        const order=[...picks].sort((a,b)=>(b.protectRank||0)-(a.protectRank||0));
-        for(const p of order){
+        const musclesByRank=[...new Set(picks.map(p=>p.muscle))].sort((a,b)=>getMuscleProtectRank(picks,b)-getMuscleProtectRank(picks,a));
+        for(const muscle of musclesByRank){
           if(estimateTotalSeconds()>=budgetSec)break;
-          if(p.sets<PRIORITY_VOLUME_SET_CAP){p.sets++;progressed=true;}
+          if(growMuscleOneSet(m,picks,muscle))progressed=true;
         }
       }
       if(estimateTotalSeconds()<budgetSec){
@@ -8009,14 +8052,7 @@ function buildAutoSession(mesoIdx,minutesAvailable){
         fillCandidates.sort((a,b)=>getMuscleReadinessScore(m,b)-getMuscleReadinessScore(m,a));
         for(const muscle of fillCandidates){
           if(estimateTotalSeconds()>=budgetSec)break;
-          const candidates=rankCandidatesForMuscle(muscle,null);
-          if(!candidates.length)continue;
-          const top=candidates[0];
-          const protectRank=m.continuousVolumeMode?getMuscleReadinessScore(m,muscle):(mesoIsPriorityMuscle(m,muscle)?1:0);
-          const newPick={muscle,exId:top.exId,sets:1,isPriority:mesoTreatsAsPriority(m,muscle),protectRank};
-          picks.push(newPick);
-          while(estimateTotalSeconds()<budgetSec&&newPick.sets<PRIORITY_VOLUME_SET_CAP){
-            newPick.sets++;
+          while(estimateTotalSeconds()<budgetSec&&growMuscleOneSet(m,picks,muscle)){
             if(estimateTotalSeconds()>=budgetSec)break;
           }
         }
@@ -8043,6 +8079,28 @@ function areExercisesSupersettedTogether(exIdA,exIdB){
     return groupA!=null&&groupA===groupB;
   });
 }
+// Superset-aware time estimate (2026-08-21, fix for a gap surfaced while reviewing this system:
+// the fill algorithm's per-exercise overhead (30s/exercise, representing setup/transition time)
+// was counted once per exercise even when two of them were about to be auto-linked into a
+// superset — which shares rest between the pair and genuinely takes less combined time. Without
+// this, the estimate used to decide how much MORE to fill couldn't see the saving a superset was
+// about to create, so a session that could legitimately fit more volume would stop short. Counts
+// DISTINCT superset groups (a linked pair/trio counts as one slot, not one per exercise) using the
+// exact same detection buildAutoSession's later linking step uses, computed BEFORE any linking
+// actually happens so it's available while the fill decision is still being made.
+function countSupersetAdjustedExerciseSlots(picks){
+  const assigned=new Array(picks.length).fill(false);
+  let groups=0;
+  for(let i=0;i<picks.length;i++){
+    if(assigned[i])continue;
+    groups++;assigned[i]=true;
+    for(let j=i+1;j<picks.length;j++){
+      if(assigned[j])continue;
+      if(areExercisesSupersettedTogether(picks[i].exId,picks[j].exId))assigned[j]=true;
+    }
+  }
+  return groups;
+}
 // Pairwise chaining (not just adjacent pairs) so a known 3+-exercise superset still links fully —
 // i is re-examined even once assigned, so a later exercise that's only linked to a middle member
 // of an existing group still correctly joins that same group instead of being missed.
@@ -8062,9 +8120,30 @@ function autoLinkKnownSupersets(exercises){
   }
   return exercises;
 }
+// Adjacency reorder (2026-08-21, fix for a real UX gap): linking works regardless of array
+// position (finishSetSlot finds superset partners by matching supersetGroup, not by index), but
+// two linked exercises landing far apart in the list makes "jump to the next superset exercise"
+// scroll a long way instead of feeling like a natural pairing. Pulls each group's members to sit
+// consecutively at the position of the group's earliest member, preserving everyone else's
+// relative order otherwise.
+function reorderForSupersetAdjacency(exercises){
+  const seen=new Set();
+  const result=[];
+  for(let i=0;i<exercises.length;i++){
+    if(seen.has(i))continue;
+    result.push(exercises[i]);seen.add(i);
+    const group=exercises[i].supersetGroup;
+    if(group==null)continue;
+    for(let j=i+1;j<exercises.length;j++){
+      if(seen.has(j))continue;
+      if(exercises[j].supersetGroup===group){result.push(exercises[j]);seen.add(j);}
+    }
+  }
+  return result;
+}
 function launchAutoSessionWithPicks(mesoIdx,picks){
   const m=state.mesocycles[mesoIdx];if(!m)return;
-  const exercises=picks.map(p=>{
+  let exercises=picks.map(p=>{
     const exData=getExercise(p.exId);
     // No routine of its own to resolve a rep range from — borrow whatever any routine containing
     // this exercise already has (same fallback chain resolveRepRangeForRoutine itself uses), or a
@@ -8095,6 +8174,7 @@ function launchAutoSessionWithPicks(mesoIdx,picks){
     return{exId:p.exId,sets,supersetGroup:null,repRange,useRIR:true};
   });
   autoLinkKnownSupersets(exercises);
+  exercises=reorderForSupersetAdjacency(exercises);
   activeMesoContext={mesoIdx,catchUp:true,isAutoSession:true,routinePos:null};
   const grants=grantMuscleVolumeProgress(m,exercises.map(e=>e.exId))||[];
   if(grants.length)save();
@@ -8198,10 +8278,35 @@ function openAutoRoutineFromHome(){
   openAutoSessionModal(state.mesocycles.indexOf(meso));
 }
 let autoSessionMesoIdx=null;
-// 2026-08-21: builds picks ONCE, checks the estimated length, and only THEN launches — warns (via
-// forgeConfirm, with an explicit override) rather than silently blocking, per the user's explicit
-// "I am allowed to override this." Never builds twice, so the estimate shown always matches
-// exactly what actually gets started.
+let autoRoutinePreviewPicks=null;
+// Pre-start preview (2026-08-21, biggest gap identified in this system — the user previously had
+// no way to see what Auto Routine actually built before it was already running). Replaces the old
+// separate "long session, continue?" popup with a warning banner integrated directly into the
+// same screen — one look, not a confirm-then-preview double-step, and "Start Workout" itself is
+// the override for a long session, same override spirit as before just less friction.
+function showAutoRoutinePreview(mesoIdx,picks,estMinutes){
+  autoRoutinePreviewPicks={mesoIdx,picks};
+  const warnHtml=estMinutes>WARN_SESSION_MINUTES_THRESHOLD
+    ?'<div class="exercise-soreness-warn severe" style="margin:0 0 10px">\u26a0\ufe0f This is an unusually long session (~'+estMinutes+' min). You can still start it below.</div>'
+    :'';
+  document.getElementById('auto-routine-preview-summary').innerHTML=warnHtml
+    +'<div class="text3">About '+estMinutes+' min \u2014 '+picks.length+' exercise'+(picks.length!==1?'s':'')+', '+picks.reduce((a,p)=>a+p.sets,0)+' total sets.</div>';
+  const listEl=document.getElementById('auto-routine-preview-list');
+  listEl.innerHTML=picks.map(p=>{
+    const exData=getExercise(p.exId);
+    return'<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 4px;border-bottom:1px solid var(--border)">'
+      +'<div class="small">'+escHtml(exData?exData.name:p.exId)+' <span class="text3">('+escHtml(p.muscle)+')</span></div>'
+      +'<div class="small text3">'+p.sets+' sets</div></div>';
+  }).join('');
+  closeModal('modal-auto-session');
+  openModal('modal-auto-routine-preview');
+}
+function startPreviewedAutoRoutine(){
+  if(!autoRoutinePreviewPicks)return;
+  const{mesoIdx,picks}=autoRoutinePreviewPicks;
+  closeModal('modal-auto-routine-preview');
+  launchAutoSessionWithPicks(mesoIdx,picks);
+}
 function confirmAutoSession(){
   const input=document.getElementById('auto-session-minutes');
   const val=input?parseInt(input.value,10):NaN;
@@ -8212,15 +8317,8 @@ function confirmAutoSession(){
     return;
   }
   const perSetSeconds=getGlobalAvgSecondsPerSet();
-  const estMinutes=Math.round((picks.reduce((a,p)=>a+p.sets,0)*perSetSeconds+picks.length*30)/60);
-  if(estMinutes>WARN_SESSION_MINUTES_THRESHOLD){
-    forgeConfirm('Long Session',
-      'This session is estimated at about '+estMinutes+' minutes across '+picks.length+' exercises. Start anyway?',
-      ()=>{launchAutoSessionWithPicks(autoSessionMesoIdx,picks);},
-      {okLabel:'Start Anyway',cancelLabel:'Cancel'});
-  }else{
-    launchAutoSessionWithPicks(autoSessionMesoIdx,picks);
-  }
+  const estMinutes=Math.round((picks.reduce((a,p)=>a+p.sets,0)*perSetSeconds+countSupersetAdjustedExerciseSlots(picks)*30)/60);
+  showAutoRoutinePreview(autoSessionMesoIdx,picks,estMinutes);
 }
 // Injured/Resting banner (2026-08-13) — exercise-level now, not muscle-level (see
 // isExerciseInjured). Zero sets get seeded for a flagged exercise (buildRoutineSeedPlan), so the
