@@ -309,6 +309,11 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 @keyframes prPop{0%{transform:translate(-50%,-20px);opacity:0;}60%{transform:translate(-50%,4px);}100%{transform:translate(-50%,0);opacity:1;}}
 .pr-toast{position:fixed;top:80px;left:50%;transform:translateX(-50%);background:var(--accent);color:#0a0a0f;font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:2px;padding:10px 24px;border-radius:30px;z-index:300;animation:prPop 0.4s ease forwards;box-shadow:0 4px 20px rgba(var(--accent-rgb),0.4);white-space:nowrap;max-width:calc(100vw - 48px);overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;}
 .section-label{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:1.2px;padding:16px 20px 8px;font-weight:700;}
+.settings-group-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;margin:14px 16px 0;background:var(--bg2);border:1px solid var(--border);border-radius:12px;cursor:pointer;}
+.settings-group-title{display:flex;align-items:center;gap:10px;font-size:14.5px;font-weight:700;}
+.settings-group-chevron{font-size:12px;color:var(--text3);}
+.settings-group-body{padding-bottom:6px;}
+.settings-group-body .section-label:first-of-type{padding-top:14px;}
 .spinner{display:inline-block;width:13px;height:13px;border:2px solid rgba(var(--accent-rgb),0.25);border-top-color:var(--accent);border-radius:50%;animation:spin 0.7s linear infinite;vertical-align:-2px;margin-right:6px;}
 @keyframes spin{to{transform:rotate(360deg);}}
 .btn:disabled{opacity:0.55;cursor:default;}
@@ -514,128 +519,157 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
 <div class="screen" id="screen-settings">
   <div class="topbar"><div><div class="topbar-title">Settings</div><div class="topbar-sub">Preferences &amp; equipment</div></div><button class="icon-btn" onclick="switchTab('home')">✕</button></div>
   <div class="scroll pb">
-    <div class="section-label">My Equipment</div>
-    <div style="padding:0 16px 8px"><div id="settings-equip-summary" style="font-size:13px;color:var(--text2);line-height:1.9"></div></div>
-    <div class="section-label">Barbell Weight</div>
-    <div style="padding:0 16px 14px">
-      <div class="input-label">Your barbell weight (kg)</div>
-      <input type="number" id="barbell-weight-input" value="20" inputmode="numeric" onchange="saveBarbellWeight(this.value)"/>
+
+    <div class="settings-group-header" onclick="toggleSettingsGroup('equip')">
+      <span class="settings-group-title">🛠️ Equipment &amp; Progression</span>
+      <span class="settings-group-chevron" id="settings-group-chevron-equip">▸</span>
     </div>
-    <div class="section-label" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="togglePlateSection()">
-      <span>Available Plates</span>
-      <span id="plate-section-chevron" style="font-size:11px;color:var(--text3)">▸</span>
-    </div>
-    <div style="padding:0 16px 8px" id="plate-inventory-summary"></div>
-    <div style="padding:0 16px 14px;display:none" id="plate-inventory-section"></div>
-    <div class="section-label" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleProgIncSection()">
-      <span>Progression Increments</span>
-      <span id="prog-inc-chevron" style="font-size:11px;color:var(--text3)">▸</span>
-    </div>
-    <div style="padding:0 16px 8px" id="prog-inc-summary"></div>
-    <div style="padding:0 16px 14px;display:none" id="prog-inc-section">
-      <div class="small text2" style="margin-bottom:10px;line-height:1.6">The smallest realistic jump on each type of equipment — used to power weight suggestions. Barbell is calculated automatically from your plate inventory above.</div>
-      <div class="input-label">Dumbbell (kg per side/hand)</div>
-      <input type="number" step="0.5" id="prog-inc-dumbbell" inputmode="decimal" oninput="saveProgressionIncrement('Dumbbell',this.value)"/>
-      <div class="input-label mt12">Cable (kg, stack increment)</div>
-      <input type="number" step="0.5" id="prog-inc-cable" inputmode="decimal" oninput="saveProgressionIncrement('Cable',this.value)"/>
-      <div class="input-label mt12">Other / Machine (kg)</div>
-      <input type="number" step="0.5" id="prog-inc-other" inputmode="decimal" oninput="saveProgressionIncrement('Other',this.value)"/>
-      <button class="btn btn-ghost btn-full mt12" onclick="resetProgressionIncrementsToDefault()">↺ Reset to Defaults</button>
-    </div>
-    <div class="section-label" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleVolumeLandmarksSection()">
-      <span>Volume Landmarks</span>
-      <span id="vl-section-chevron" style="font-size:11px;color:var(--text3)">▸</span>
-    </div>
-    <div style="padding:0 16px 8px" id="vl-section-summary"></div>
-    <div style="padding:0 16px 14px;display:none" id="vl-section-body">
-      <div class="small text2" style="margin-bottom:10px;line-height:1.6">Weekly working-set landmarks per muscle — MV (maintenance), MEV (minimum effective), MAV (maximum adaptive), MRV (maximum recoverable). Used to judge whether a muscle's weekly volume (in Review) is too low, in the growth zone, or past what you can likely recover from. Defaults are a reasonable starting point, not a prescription — tune them to your own recovery over time.</div>
-      <div id="vl-table"></div>
-    </div>
-    <div class="section-label">Timer Alerts</div>
-    <div style="padding:0 16px 14px">
-      <div class="small text2" style="margin-bottom:10px;line-height:1.6">Lets the rest-timer alert use your phone's actual notification sound/vibration, the same channel a text message uses — this can duck/cut through music in another app, but mainly once FORGE is backgrounded or your screen is locked. While you're actively looking at the timer, most phones suppress that notification sound and you'll just hear the in-app chime at normal volume.</div>
-      <button class="btn btn-ghost btn-full" onclick="requestTimerNotifyPermission()">Enable Notification Alerts</button>
-      <div class="small text3" id="notify-permission-status" style="margin-top:8px"></div>
-    </div>
-    <div class="section-label">Display</div>
-    <div style="padding:0 16px 14px">
-      <button class="btn btn-ghost btn-full" onclick="toggleTheme()">🌙 Toggle Dark / Light Mode</button>
-      <div class="input-label mt12">Accent Color</div>
-      <div style="display:flex;align-items:center;gap:12px;margin-top:4px">
-        <input type="color" id="accent-color-input" value="#D97757" oninput="saveAccentColor(this.value)" style="width:52px;height:40px;padding:2px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);cursor:pointer"/>
-        <button class="btn btn-ghost flex-1" onclick="saveAccentColor('#D97757')">Reset to Claude Orange</button>
+    <div id="settings-group-body-equip" class="settings-group-body" style="display:none">
+      <div class="section-label">My Equipment</div>
+      <div style="padding:0 16px 8px"><div id="settings-equip-summary" style="font-size:13px;color:var(--text2);line-height:1.9"></div></div>
+      <div class="section-label">Barbell Weight</div>
+      <div style="padding:0 16px 14px">
+        <div class="input-label">Your barbell weight (kg)</div>
+        <input type="number" id="barbell-weight-input" value="20" inputmode="numeric" onchange="saveBarbellWeight(this.value)"/>
+      </div>
+      <div class="section-label" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="event.stopPropagation();togglePlateSection()">
+        <span>Available Plates</span>
+        <span id="plate-section-chevron" style="font-size:11px;color:var(--text3)">▸</span>
+      </div>
+      <div style="padding:0 16px 8px" id="plate-inventory-summary"></div>
+      <div style="padding:0 16px 14px;display:none" id="plate-inventory-section"></div>
+      <div class="section-label" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="event.stopPropagation();toggleProgIncSection()">
+        <span>Progression Increments</span>
+        <span id="prog-inc-chevron" style="font-size:11px;color:var(--text3)">▸</span>
+      </div>
+      <div style="padding:0 16px 8px" id="prog-inc-summary"></div>
+      <div style="padding:0 16px 14px;display:none" id="prog-inc-section">
+        <div class="small text2" style="margin-bottom:10px;line-height:1.6">The smallest realistic jump on each type of equipment — used to power weight suggestions. Barbell is calculated automatically from your plate inventory above.</div>
+        <div class="input-label">Dumbbell (kg per side/hand)</div>
+        <input type="number" step="0.5" id="prog-inc-dumbbell" inputmode="decimal" oninput="saveProgressionIncrement('Dumbbell',this.value)"/>
+        <div class="input-label mt12">Cable (kg, stack increment)</div>
+        <input type="number" step="0.5" id="prog-inc-cable" inputmode="decimal" oninput="saveProgressionIncrement('Cable',this.value)"/>
+        <div class="input-label mt12">Other / Machine (kg)</div>
+        <input type="number" step="0.5" id="prog-inc-other" inputmode="decimal" oninput="saveProgressionIncrement('Other',this.value)"/>
+        <button class="btn btn-ghost btn-full mt12" onclick="resetProgressionIncrementsToDefault()">↺ Reset to Defaults</button>
       </div>
     </div>
-    <div class="section-label">Reset</div>
-    <div style="padding:0 16px 14px">
-      <div class="small text2" style="margin-bottom:10px;line-height:1.6">Reverts Volume Landmarks, Progression Increments, and Plates/Barbell Weight back to FORGE's stock defaults in one tap. Routines, history, and mesocycles are untouched.</div>
-      <button class="btn btn-ghost btn-full" onclick="resetAllSettingsToDefault()">↺ Reset All Settings to Defaults</button>
+
+    <div class="settings-group-header" onclick="toggleSettingsGroup('training')">
+      <span class="settings-group-title">📈 Training</span>
+      <span class="settings-group-chevron" id="settings-group-chevron-training">▸</span>
     </div>
-    <div class="section-label">Backup &amp; Restore</div>
-    <div style="padding:0 16px 8px">
-      <div class="small text2" style="margin-bottom:10px;line-height:1.6">Save a copy of all your routines, history and settings as a file. Restore it anytime — on this phone or another.</div>
-      <div style="display:flex;gap:10px">
-        <button class="btn btn-ghost flex-1" onclick="exportBackup()">💾 Export Backup</button>
-        <button class="btn btn-ghost flex-1" onclick="document.getElementById('restore-file-input').click()">📂 Restore Backup</button>
+    <div id="settings-group-body-training" class="settings-group-body" style="display:none">
+      <div class="section-label" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="event.stopPropagation();toggleVolumeLandmarksSection()">
+        <span>Volume Landmarks</span>
+        <span id="vl-section-chevron" style="font-size:11px;color:var(--text3)">▸</span>
       </div>
-      <input type="file" id="restore-file-input" accept="application/json" style="display:none" onchange="importBackup(this.files[0])"/>
+      <div style="padding:0 16px 8px" id="vl-section-summary"></div>
+      <div style="padding:0 16px 14px;display:none" id="vl-section-body">
+        <div class="small text2" style="margin-bottom:10px;line-height:1.6">Weekly working-set landmarks per muscle — MV (maintenance), MEV (minimum effective), MAV (maximum adaptive), MRV (maximum recoverable). Used to judge whether a muscle's weekly volume (in Review) is too low, in the growth zone, or past what you can likely recover from. Defaults are a reasonable starting point, not a prescription — tune them to your own recovery over time.</div>
+        <div id="vl-table"></div>
+      </div>
     </div>
 
-    <div class="section-label">Cloud Sync (Google Drive)</div>
-    <div style="padding:0 16px 14px">
-      <div class="small text2" style="margin-bottom:10px;line-height:1.6" id="sync-status-text">Sign in to back up and sync your data across phones using your Google Drive. Your data is stored privately in your own Drive — FORGE never sees it.</div>
-
-      <div id="sync-setup-wrap">
-        <div class="input-label">Google OAuth Client ID</div>
-        <input id="google-client-id" placeholder="xxxxxxxx.apps.googleusercontent.com" style="font-size:12px"/>
-        <div class="small text3 mt8" style="line-height:1.6">
-          Need a Client ID? It's free and takes ~5 minutes.
-          <span style="color:var(--accent);cursor:pointer;text-decoration:underline" onclick="toggleSyncHelp()">Show me how</span>
+    <div class="settings-group-header" onclick="toggleSettingsGroup('app')">
+      <span class="settings-group-title">⚙️ App</span>
+      <span class="settings-group-chevron" id="settings-group-chevron-app">▸</span>
+    </div>
+    <div id="settings-group-body-app" class="settings-group-body" style="display:none">
+      <div class="section-label">Timer Alerts</div>
+      <div style="padding:0 16px 14px">
+        <div class="small text2" style="margin-bottom:10px;line-height:1.6">Lets the rest-timer alert use your phone's actual notification sound/vibration, the same channel a text message uses — this can duck/cut through music in another app, but mainly once FORGE is backgrounded or your screen is locked. While you're actively looking at the timer, most phones suppress that notification sound and you'll just hear the in-app chime at normal volume.</div>
+        <button class="btn btn-ghost btn-full" onclick="requestTimerNotifyPermission()">Enable Notification Alerts</button>
+        <div class="small text3" id="notify-permission-status" style="margin-top:8px"></div>
+      </div>
+      <div class="section-label">Display</div>
+      <div style="padding:0 16px 14px">
+        <button class="btn btn-ghost btn-full" onclick="toggleTheme()">🌙 Toggle Dark / Light Mode</button>
+        <div class="input-label mt12">Accent Color</div>
+        <div style="display:flex;align-items:center;gap:12px;margin-top:4px">
+          <input type="color" id="accent-color-input" value="#D97757" oninput="saveAccentColor(this.value)" style="width:52px;height:40px;padding:2px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);cursor:pointer"/>
+          <button class="btn btn-ghost flex-1" onclick="saveAccentColor('#D97757')">Reset to Claude Orange</button>
         </div>
-        <div id="sync-help" style="display:none;margin-top:10px;padding:12px;background:var(--bg3);border-radius:10px;font-size:12px;color:var(--text2);line-height:1.8">
-          1. Go to <b>console.cloud.google.com</b> and create a free project<br>
-          2. Go to <b>APIs &amp; Services → OAuth consent screen</b> — choose "External", add your email as a test user<br>
-          3. Go to <b>APIs &amp; Services → Credentials → Create Credentials → OAuth client ID</b><br>
-          4. Application type: <b>Web application</b><br>
-          5. Under "Authorized JavaScript origins" add: <code style="background:var(--bg4);padding:2px 5px;border-radius:4px">null</code> and the URL you host this file at (if any)<br>
-          6. Go to <b>APIs &amp; Services → Library</b>, search "Google Drive API" and enable it<br>
-          7. Copy the Client ID and paste it above
-        </div>
-        <button class="btn btn-ghost btn-full mt12" onclick="saveGoogleClientId()">Save Client ID</button>
       </div>
+    </div>
 
-      <div id="sync-signed-out-wrap" style="display:none">
-        <button class="btn btn-accent2 btn-full" onclick="googleSignIn()">🔐 Sign in with Google</button>
+    <div class="settings-group-header" onclick="toggleSettingsGroup('data')">
+      <span class="settings-group-title">💾 Data &amp; Backup</span>
+      <span class="settings-group-chevron" id="settings-group-chevron-data">▸</span>
+    </div>
+    <div id="settings-group-body-data" class="settings-group-body" style="display:none">
+      <div class="section-label">Reset</div>
+      <div style="padding:0 16px 14px">
+        <div class="small text2" style="margin-bottom:10px;line-height:1.6">Reverts Volume Landmarks, Progression Increments, and Plates/Barbell Weight back to FORGE's stock defaults in one tap. Routines, history, and mesocycles are untouched.</div>
+        <button class="btn btn-ghost btn-full" onclick="resetAllSettingsToDefault()">↺ Reset All Settings to Defaults</button>
       </div>
-
-      <div id="sync-signed-in-wrap" style="display:none">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0">
-          <div class="small" id="sync-account-email" style="color:var(--text2)"></div>
-          <button class="btn btn-ghost btn-sm" onclick="googleSignOut()">Sign Out</button>
-        </div>
-        <div class="small text3 mb8" id="sync-last-synced">Never synced</div>
+      <div class="section-label">Backup &amp; Restore</div>
+      <div style="padding:0 16px 8px">
+        <div class="small text2" style="margin-bottom:10px;line-height:1.6">Save a copy of all your routines, history and settings as a file. Restore it anytime — on this phone or another.</div>
         <div style="display:flex;gap:10px">
-          <button class="btn btn-primary flex-1" id="sync-backup-btn" onclick="syncToDrive()">⬆ Backup to Drive</button>
-          <button class="btn btn-ghost flex-1" id="sync-restore-btn" onclick="syncFromDrive()">⬇ Restore from Drive</button>
+          <button class="btn btn-ghost flex-1" onclick="exportBackup()">💾 Export Backup</button>
+          <button class="btn btn-ghost flex-1" onclick="document.getElementById('restore-file-input').click()">📂 Restore Backup</button>
         </div>
-        <label style="display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer">
-          <input type="checkbox" id="auto-sync-toggle" onchange="toggleAutoSync(this.checked)" style="width:16px;height:16px;accent-color:var(--accent)"/>
-          <span class="small text2">Auto-sync after each workout</span>
-        </label>
+        <input type="file" id="restore-file-input" accept="application/json" style="display:none" onchange="importBackup(this.files[0])"/>
+      </div>
+
+      <div class="section-label">Cloud Sync (Google Drive)</div>
+      <div style="padding:0 16px 14px">
+        <div class="small text2" style="margin-bottom:10px;line-height:1.6" id="sync-status-text">Sign in to back up and sync your data across phones using your Google Drive. Your data is stored privately in your own Drive — FORGE never sees it.</div>
+
+        <div id="sync-setup-wrap">
+          <div class="input-label">Google OAuth Client ID</div>
+          <input id="google-client-id" placeholder="xxxxxxxx.apps.googleusercontent.com" style="font-size:12px"/>
+          <div class="small text3 mt8" style="line-height:1.6">
+            Need a Client ID? It's free and takes ~5 minutes.
+            <span style="color:var(--accent);cursor:pointer;text-decoration:underline" onclick="toggleSyncHelp()">Show me how</span>
+          </div>
+          <div id="sync-help" style="display:none;margin-top:10px;padding:12px;background:var(--bg3);border-radius:10px;font-size:12px;color:var(--text2);line-height:1.8">
+            1. Go to <b>console.cloud.google.com</b> and create a free project<br>
+            2. Go to <b>APIs &amp; Services → OAuth consent screen</b> — choose "External", add your email as a test user<br>
+            3. Go to <b>APIs &amp; Services → Credentials → Create Credentials → OAuth client ID</b><br>
+            4. Application type: <b>Web application</b><br>
+            5. Under "Authorized JavaScript origins" add: <code style="background:var(--bg4);padding:2px 5px;border-radius:4px">null</code> and the URL you host this file at (if any)<br>
+            6. Go to <b>APIs &amp; Services → Library</b>, search "Google Drive API" and enable it<br>
+            7. Copy the Client ID and paste it above
+          </div>
+          <button class="btn btn-ghost btn-full mt12" onclick="saveGoogleClientId()">Save Client ID</button>
+        </div>
+
+        <div id="sync-signed-out-wrap" style="display:none">
+          <button class="btn btn-accent2 btn-full" onclick="googleSignIn()">🔐 Sign in with Google</button>
+        </div>
+
+        <div id="sync-signed-in-wrap" style="display:none">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0">
+            <div class="small" id="sync-account-email" style="color:var(--text2)"></div>
+            <button class="btn btn-ghost btn-sm" onclick="googleSignOut()">Sign Out</button>
+          </div>
+          <div class="small text3 mb8" id="sync-last-synced">Never synced</div>
+          <div style="display:flex;gap:10px">
+            <button class="btn btn-primary flex-1" id="sync-backup-btn" onclick="syncToDrive()">⬆ Backup to Drive</button>
+            <button class="btn btn-ghost flex-1" id="sync-restore-btn" onclick="syncFromDrive()">⬇ Restore from Drive</button>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer">
+            <input type="checkbox" id="auto-sync-toggle" onchange="toggleAutoSync(this.checked)" style="width:16px;height:16px;accent-color:var(--accent)"/>
+            <span class="small text2">Auto-sync after each workout</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="section-label">Data</div>
+      <div style="padding:0 16px 20px;display:flex;gap:10px">
+        <button class="btn btn-ghost flex-1" onclick="exportHistory()">📤 Export CSV</button>
+        <button class="btn btn-danger flex-1" onclick="resetAllData()">⚠️ Reset All</button>
+      </div>
+      <div class="section-label">About</div>
+      <div style="padding:0 16px 20px">
+        <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
+        <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
       </div>
     </div>
 
-    <div class="section-label">Data</div>
-    <div style="padding:0 16px 20px;display:flex;gap:10px">
-      <button class="btn btn-ghost flex-1" onclick="exportHistory()">📤 Export CSV</button>
-      <button class="btn btn-danger flex-1" onclick="resetAllData()">⚠️ Reset All</button>
-    </div>
-    <div class="section-label">About</div>
-    <div style="padding:0 16px 20px">
-      <button class="btn btn-ghost btn-full" id="check-update-btn" onclick="checkForUpdate()">🔄 Check for Latest Version</button>
-      <div class="small text3" id="check-update-status" style="text-align:center;margin-top:8px"></div>
-    </div>
-    <div style="padding:0 16px 20px;text-align:center" class="small text3" id="build-stamp">FORGE build 2026-08-21.14</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-08-26.2</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1137,116 +1171,142 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
 <div class="modal-overlay" id="modal-meso-settings">
   <div class="modal"><div class="modal-handle"></div><div class="modal-title">Cycle Settings</div>
     <div class="modal-body">
-      <div class="input-label">Rotations per mesocycle</div>
-      <input id="meso-set-rotations" type="number" inputmode="numeric" min="1"/>
-      <div class="small text3 mt4" style="line-height:1.5">A rotation = completing every routine in the sequence once. Paces the volume and RIR ramps (early rotations near MEV/higher RIR, this one at MAV/your final RIR target) — with deload enabled, it's not a hard cutoff: training keeps going past it until a real decline shows up, gaining a bit more volume each extra rotation, up to each muscle's own MRV.</div>
 
-      <div class="input-label mt12">Times to repeat this mesocycle</div>
-      <input id="meso-set-repeats" type="number" inputmode="numeric" min="0"/>
-      <div class="small text3 mt4" style="line-height:1.5">0 = repeat indefinitely.</div>
+      <div class="settings-group-header" onclick="toggleMesoSettingsGroup('rotation')">
+        <span class="settings-group-title">🔁 Rotation &amp; Repeats</span>
+        <span class="settings-group-chevron" id="meso-group-chevron-rotation">▸</span>
+      </div>
+      <div class="settings-group-body" id="meso-group-body-rotation" style="display:none">
+        <div class="input-label">Rotations per mesocycle</div>
+        <input id="meso-set-rotations" type="number" inputmode="numeric" min="1"/>
+        <div class="small text3 mt4" style="line-height:1.5">A rotation = completing every routine in the sequence once. Paces the volume and RIR ramps (early rotations near MEV/higher RIR, this one at MAV/your final RIR target) — with deload enabled, it's not a hard cutoff: training keeps going past it until a real decline shows up, gaining a bit more volume each extra rotation, up to each muscle's own MRV.</div>
 
-      <div class="input-label mt12" style="display:flex;align-items:center;justify-content:space-between">
-        <span>Auto Volume Distribution</span>
-        <input id="meso-set-auto-volume" type="checkbox" style="width:auto"/>
+        <div class="input-label mt12">Times to repeat this mesocycle</div>
+        <input id="meso-set-repeats" type="number" inputmode="numeric" min="0"/>
+        <div class="small text3 mt4" style="line-height:1.5">0 = repeat indefinitely.</div>
       </div>
-      <div class="small text3 mt4" style="line-height:1.5">Every routine starts each session at ZERO sets — the app fills in how many sets each exercise gets, purely from each muscle's rolling weekly target minus what's actually been logged in the last 7 days. Falls behind pace (fewer workouts one week, more the next, a late-week catch-up session) and it front-loads the remaining sets onto the soonest upcoming sessions rather than spreading evenly, capped at a max per muscle per workout. Can leave a given exercise at 0 sets for a session if its muscle's share went to a sibling exercise instead — add a set manually if you want it anyway. Applies during the training phase only; deload keeps its own existing cut logic.</div>
-      <div class="input-label mt8" style="display:flex;align-items:center;justify-content:space-between">
-        <span>Max total sets per session</span>
-        <input id="meso-set-auto-volume-cap" type="number" min="1" placeholder="No cap" style="width:70px"/>
-      </div>
-      <div class="small text3 mt4">Off by default — with the per-muscle cap already bounding any one muscle and catch-up already spread/front-loaded rather than dumped in one session, there's no total that's safe to assume for everyone. Set a number here only if you want a hard ceiling on total sets in a single session; if several muscles are behind at once their shares scale down proportionally to stay under it.</div>
 
-      <div class="input-label mt12" style="display:flex;align-items:center;justify-content:space-between">
-        <span>Continuous Volume Mode</span>
-        <input id="meso-set-continuous-volume" type="checkbox" style="width:auto"/>
+      <div class="settings-group-header" onclick="toggleMesoSettingsGroup('volume')">
+        <span class="settings-group-title">📊 Volume Automation</span>
+        <span class="settings-group-chevron" id="meso-group-chevron-volume">▸</span>
       </div>
-      <div class="small text3 mt4" style="line-height:1.5">An alternative to the 2-muscle Priority/Back-Burner cap (kept separately below) — every muscle CAN run its own MEV→MRV progression and its own RIR trajectory, but only a limited number are ever actively pushing at once (below) — everyone else holds at MEV maintenance. Which muscles are active auto-rotates based on readiness (headroom left before their own MRV, plus freshness), not a fixed pick. For a set trained by more than one muscle, the exercise's primary muscle's RIR governs the whole set. Used by Auto Session; doesn't change fixed-routine sessions.</div>
-      <div class="input-label mt8" style="display:flex;align-items:center;justify-content:space-between">
-        <span>Max muscles actively pushing at once</span>
-        <input id="meso-set-continuous-max-active" type="number" min="1" style="width:70px"/>
-      </div>
-      <div class="small text3 mt4">Defaults to 3 — trying to push every muscle toward MRV simultaneously just means each one hits its per-session cap and gets diluted, never really achieving concentrated overload. Auto-rotates which muscles hold this slot as readiness shifts session to session.</div>
-      <div class="input-label mt8" style="display:flex;align-items:center;justify-content:space-between">
-        <span>Weekly set budget (Auto Session)</span>
-        <input id="meso-set-continuous-budget" type="number" min="1" placeholder="No cap" style="width:70px"/>
-      </div>
-      <div class="small text3 mt4">Off by default. If several actively-pushing muscles could all use more at once, set a total weekly sets figure here and Auto Session splits it by readiness instead of letting every active muscle's raw target stack unchecked.</div>
-
-      <div class="input-label mt12" style="display:flex;align-items:center;justify-content:space-between">
-        <span>Deload after each mesocycle</span>
-        <input id="meso-set-deload-enabled" type="checkbox" style="width:auto"/>
-      </div>
-      <div id="meso-deload-fields">
-        <div class="input-label mt12">Deload method</div>
-        <select id="meso-set-deload-method">
-          <option value="weight">Cut weight (keep the same sets)</option>
-          <option value="sets">Cut sets (keep the same weight)</option>
-        </select>
-
-        <div id="meso-deload-weight-fields">
-          <div class="input-label mt12">Deload weight drop (%)</div>
-          <input id="meso-set-deload-pct" type="number" inputmode="numeric" min="1" max="90"/>
-          <div class="small text3 mt4" style="line-height:1.5">Cuts this % off the "starting point for the next mesocycle" weight below — not the heaviest cycle of this mesocycle — so the deload's own weight is based on the same reference point the next mesocycle will resume from.</div>
-
-          <div class="input-label mt12">Fewer sets during deload (optional)</div>
-          <input id="meso-set-deload-sets-drop" type="number" inputmode="numeric" min="0"/>
-          <div class="small text3 mt4" style="line-height:1.5">Drops this many sets off the end of each exercise, on top of the weight cut. 0 = same set count, lighter weight only.</div>
+      <div class="settings-group-body" id="meso-group-body-volume" style="display:none">
+        <div class="input-label mt12" style="display:flex;align-items:center;justify-content:space-between">
+          <span>Auto Volume Distribution</span>
+          <input id="meso-set-auto-volume" type="checkbox" style="width:auto"/>
         </div>
-
-        <div id="meso-deload-sets-fields">
-          <div class="input-label mt12">Target effort (RIR)</div>
-          <input id="meso-set-deload-rir" type="number" inputmode="numeric" min="0" max="10"/>
-          <div class="small text3 mt4" style="line-height:1.5">Set count is auto-derived from each exercise's muscle MV (maintenance volume), split across sibling exercises training that muscle in this routine — not a number you set. Weight and reps come from the "starting point for the next mesocycle" setting below — not the heaviest cycle of this mesocycle — so the deload is never accidentally programmed too heavy. This RIR is shown as guidance at the top of each deload workout; it isn't mechanically enforced, the same way your normal RIR target isn't.</div>
+        <div class="small text3 mt4" style="line-height:1.5">Every routine starts each session at ZERO sets — the app fills in how many sets each exercise gets, purely from each muscle's rolling weekly target minus what's actually been logged in the last 7 days. Falls behind pace (fewer workouts one week, more the next, a late-week catch-up session) and it front-loads the remaining sets onto the soonest upcoming sessions rather than spreading evenly, capped at a max per muscle per workout. Can leave a given exercise at 0 sets for a session if its muscle's share went to a sibling exercise instead — add a set manually if you want it anyway. Applies during the training phase only; deload keeps its own existing cut logic.</div>
+        <div class="input-label mt8" style="display:flex;align-items:center;justify-content:space-between">
+          <span>Max total sets per session</span>
+          <input id="meso-set-auto-volume-cap" type="number" min="1" placeholder="No cap" style="width:70px"/>
         </div>
+        <div class="small text3 mt4">Off by default — with the per-muscle cap already bounding any one muscle and catch-up already spread/front-loaded rather than dumped in one session, there's no total that's safe to assume for everyone. Set a number here only if you want a hard ceiling on total sets in a single session; if several muscles are behind at once their shares scale down proportionally to stay under it.</div>
 
-        <div id="meso-deload-reset-mode-wrap">
-          <div class="input-label mt12">Starting point for the next mesocycle</div>
-          <select id="meso-set-reset-mode">
-            <option value="deload">Continue from deload weights</option>
-            <option value="preDeload">Resume pre-deload weights</option>
-            <option value="mesoStart">Restart at this mesocycle's starting weights</option>
-            <option value="rotation">Resume weights from a specific rotation</option>
+        <div class="input-label mt12" style="display:flex;align-items:center;justify-content:space-between">
+          <span>Continuous Volume Mode</span>
+          <input id="meso-set-continuous-volume" type="checkbox" style="width:auto"/>
+        </div>
+        <div class="small text3 mt4" style="line-height:1.5">An alternative to the 2-muscle Priority/Back-Burner cap (kept separately below) — every muscle CAN run its own MEV→MRV progression and its own RIR trajectory, but only a limited number are ever actively pushing at once (below) — everyone else holds at MEV maintenance. Which muscles are active auto-rotates based on readiness (headroom left before their own MRV, plus freshness), not a fixed pick. For a set trained by more than one muscle, the exercise's primary muscle's RIR governs the whole set. Used by Auto Session; doesn't change fixed-routine sessions.</div>
+        <div class="input-label mt8" style="display:flex;align-items:center;justify-content:space-between">
+          <span>Max muscles actively pushing at once</span>
+          <input id="meso-set-continuous-max-active" type="number" min="1" style="width:70px"/>
+        </div>
+        <div class="small text3 mt4">Defaults to 3 — trying to push every muscle toward MRV simultaneously just means each one hits its per-session cap and gets diluted, never really achieving concentrated overload. Auto-rotates which muscles hold this slot as readiness shifts session to session.</div>
+        <div class="input-label mt8" style="display:flex;align-items:center;justify-content:space-between">
+          <span>Weekly set budget (Auto Session)</span>
+          <input id="meso-set-continuous-budget" type="number" min="1" placeholder="No cap" style="width:70px"/>
+        </div>
+        <div class="small text3 mt4">Off by default. If several actively-pushing muscles could all use more at once, set a total weekly sets figure here and Auto Session splits it by readiness instead of letting every active muscle's raw target stack unchecked.</div>
+      </div>
+
+      <div class="settings-group-header" onclick="toggleMesoSettingsGroup('deload')">
+        <span class="settings-group-title">🪫 Deload</span>
+        <span class="settings-group-chevron" id="meso-group-chevron-deload">▸</span>
+      </div>
+      <div class="settings-group-body" id="meso-group-body-deload" style="display:none">
+        <div class="input-label mt12" style="display:flex;align-items:center;justify-content:space-between">
+          <span>Deload after each mesocycle</span>
+          <input id="meso-set-deload-enabled" type="checkbox" style="width:auto"/>
+        </div>
+        <div id="meso-deload-fields">
+          <div class="input-label mt12">Deload method</div>
+          <select id="meso-set-deload-method">
+            <option value="weight">Cut weight (keep the same sets)</option>
+            <option value="sets">Cut sets (keep the same weight)</option>
           </select>
-          <div class="small text3 mt4" style="line-height:1.5">This also decides what weight/reps the deload itself is based on (the weight method cuts a % off it, the sets method uses it as-is). "Continue from deload weights" has nothing to resolve to yet at that point, so it falls back to your pre-deload weights automatically.</div>
-          <div id="meso-reset-rotation-field">
-            <div class="input-label mt12">Which rotation to resume from</div>
-            <input id="meso-set-reset-rotation" type="number" inputmode="numeric" min="1"/>
-            <div class="small text3 mt4" style="line-height:1.5">Uses the weights you started that rotation at, averaged with the rotations either side of it and sanity-checked against the whole mesocycle — e.g. rotation 4 of 6 gives you two rotations' worth of room to progress past your previous peak.</div>
+
+          <div id="meso-deload-weight-fields">
+            <div class="input-label mt12">Deload weight drop (%)</div>
+            <input id="meso-set-deload-pct" type="number" inputmode="numeric" min="1" max="90"/>
+            <div class="small text3 mt4" style="line-height:1.5">Cuts this % off the "starting point for the next mesocycle" weight below — not the heaviest cycle of this mesocycle — so the deload's own weight is based on the same reference point the next mesocycle will resume from.</div>
+
+            <div class="input-label mt12">Fewer sets during deload (optional)</div>
+            <input id="meso-set-deload-sets-drop" type="number" inputmode="numeric" min="0"/>
+            <div class="small text3 mt4" style="line-height:1.5">Drops this many sets off the end of each exercise, on top of the weight cut. 0 = same set count, lighter weight only.</div>
+          </div>
+
+          <div id="meso-deload-sets-fields">
+            <div class="input-label mt12">Target effort (RIR)</div>
+            <input id="meso-set-deload-rir" type="number" inputmode="numeric" min="0" max="10"/>
+            <div class="small text3 mt4" style="line-height:1.5">Set count is auto-derived from each exercise's muscle MV (maintenance volume), split across sibling exercises training that muscle in this routine — not a number you set. Weight and reps come from the "starting point for the next mesocycle" setting below — not the heaviest cycle of this mesocycle — so the deload is never accidentally programmed too heavy. This RIR is shown as guidance at the top of each deload workout; it isn't mechanically enforced, the same way your normal RIR target isn't.</div>
+          </div>
+
+          <div id="meso-deload-reset-mode-wrap">
+            <div class="input-label mt12">Starting point for the next mesocycle</div>
+            <select id="meso-set-reset-mode">
+              <option value="deload">Continue from deload weights</option>
+              <option value="preDeload">Resume pre-deload weights</option>
+              <option value="mesoStart">Restart at this mesocycle's starting weights</option>
+              <option value="rotation">Resume weights from a specific rotation</option>
+            </select>
+            <div class="small text3 mt4" style="line-height:1.5">This also decides what weight/reps the deload itself is based on (the weight method cuts a % off it, the sets method uses it as-is). "Continue from deload weights" has nothing to resolve to yet at that point, so it falls back to your pre-deload weights automatically.</div>
+            <div id="meso-reset-rotation-field">
+              <div class="input-label mt12">Which rotation to resume from</div>
+              <input id="meso-set-reset-rotation" type="number" inputmode="numeric" min="1"/>
+              <div class="small text3 mt4" style="line-height:1.5">Uses the weights you started that rotation at, averaged with the rotations either side of it and sanity-checked against the whole mesocycle — e.g. rotation 4 of 6 gives you two rotations' worth of room to progress past your previous peak.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="input-label mt12">Early deload detection</div>
+        <select id="meso-set-early-deload">
+          <option value="suggest">Suggest — ask before deloading early</option>
+          <option value="auto">Automatic — deload early with no prompt</option>
+        </select>
+        <div id="meso-early-deload-fields">
+          <div class="input-label mt12">Exercises declining (threshold)</div>
+          <input id="meso-set-decline-count" type="number" inputmode="numeric" min="1"/>
+          <div class="small text3 mt4" style="line-height:1.5">This is now the only thing that ends a deload-enabled mesocycle's training phase — there's no separate scheduled deload. Main driver: this many exercises' top sets declining against their last two sessions (checked every workout, including past the rotation count above). Effort hitting your final RIR target ahead of schedule (before the rotation count above) is a second, weaker signal — it always asks first regardless of the mode above, since training that hard early can just be your own choice rather than a sign the pass is done. Only when it lines up with an actual decline does the mode above decide whether to ask or deload automatically.</div>
+        </div>
+      </div>
+
+      <div class="settings-group-header" onclick="toggleMesoSettingsGroup('rir')">
+        <span class="settings-group-title">🎚️ RIR Ramp</span>
+        <span class="settings-group-chevron" id="meso-group-chevron-rir">▸</span>
+      </div>
+      <div class="settings-group-body" id="meso-group-body-rir" style="display:none">
+        <div class="input-label mt12" style="display:flex;align-items:center;justify-content:space-between">
+          <span>Ramp RIR across the mesocycle</span>
+          <input id="meso-set-rir-enabled" type="checkbox" style="width:auto"/>
+        </div>
+        <div id="meso-rir-fields">
+          <div class="input-label mt12">RIR target on the last rotation</div>
+          <input id="meso-set-rir-end" type="number" inputmode="numeric" min="0" max="5"/>
+
+          <div class="input-label mt12">Starting RIR cap</div>
+          <input id="meso-set-rir-cap" type="number" inputmode="numeric" min="0" max="8"/>
+          <div class="small text3 mt4" style="line-height:1.5">Rotation 1 starts at this RIR (or lower, if the mesocycle is short) and ramps down evenly each rotation to your last-rotation target. Shown at the top of each meso-linked workout.</div>
+
+          <div class="input-label mt12" style="display:flex;align-items:center;justify-content:space-between">
+            <span>Predict today's rep target from RIR</span>
+            <input id="meso-set-rir-rep-enabled" type="checkbox" style="width:auto"/>
+          </div>
+          <div id="meso-rir-rep-fields">
+            <div class="small text3 mt4" style="line-height:1.5">Weight is never touched by this — it stays exactly what normal progression has it at, so you're not re-loading plates or swapping dumbbells just to hit a target RIR. Instead, the pre-filled rep count adjusts: N reps short of the true failure count you hit at this weight last time, where N is today's target RIR (that's the literal definition of RIR). Weight still increases the normal way, whenever you push past your rep ceiling. Needs at least one completed mesocycle pass to have a true-failure reference to work from; until then it has no effect.</div>
           </div>
         </div>
       </div>
 
-      <div class="input-label mt12" style="display:flex;align-items:center;justify-content:space-between">
-        <span>Ramp RIR across the mesocycle</span>
-        <input id="meso-set-rir-enabled" type="checkbox" style="width:auto"/>
-      </div>
-      <div id="meso-rir-fields">
-        <div class="input-label mt12">RIR target on the last rotation</div>
-        <input id="meso-set-rir-end" type="number" inputmode="numeric" min="0" max="5"/>
-
-        <div class="input-label mt12">Starting RIR cap</div>
-        <input id="meso-set-rir-cap" type="number" inputmode="numeric" min="0" max="8"/>
-        <div class="small text3 mt4" style="line-height:1.5">Rotation 1 starts at this RIR (or lower, if the mesocycle is short) and ramps down evenly each rotation to your last-rotation target. Shown at the top of each meso-linked workout.</div>
-
-        <div class="input-label mt12" style="display:flex;align-items:center;justify-content:space-between">
-          <span>Predict today's rep target from RIR</span>
-          <input id="meso-set-rir-rep-enabled" type="checkbox" style="width:auto"/>
-        </div>
-        <div id="meso-rir-rep-fields">
-          <div class="small text3 mt4" style="line-height:1.5">Weight is never touched by this — it stays exactly what normal progression has it at, so you're not re-loading plates or swapping dumbbells just to hit a target RIR. Instead, the pre-filled rep count adjusts: N reps short of the true failure count you hit at this weight last time, where N is today's target RIR (that's the literal definition of RIR). Weight still increases the normal way, whenever you push past your rep ceiling. Needs at least one completed mesocycle pass to have a true-failure reference to work from; until then it has no effect.</div>
-        </div>
-      </div>
-
-      <div class="input-label mt12">Early deload detection</div>
-      <select id="meso-set-early-deload">
-        <option value="suggest">Suggest — ask before deloading early</option>
-        <option value="auto">Automatic — deload early with no prompt</option>
-      </select>
-      <div id="meso-early-deload-fields">
-        <div class="input-label mt12">Exercises declining (threshold)</div>
-        <input id="meso-set-decline-count" type="number" inputmode="numeric" min="1"/>
-        <div class="small text3 mt4" style="line-height:1.5">This is now the only thing that ends a deload-enabled mesocycle's training phase — there's no separate scheduled deload. Main driver: this many exercises' top sets declining against their last two sessions (checked every workout, including past the rotation count above). Effort hitting your final RIR target ahead of schedule (before the rotation count above) is a second, weaker signal — it always asks first regardless of the mode above, since training that hard early can just be your own choice rather than a sign the pass is done. Only when it lines up with an actual decline does the mode above decide whether to ask or deload automatically.</div>
-      </div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost flex-1" onclick="closeModal('modal-meso-settings')">Cancel</button>
@@ -1604,6 +1664,13 @@ function buildDefaultRoutineExercises(){
 // ── STATE ──
 // Bump this whenever a change to `state`'s shape needs a one-time migration in load() below.
 const CURRENT_SCHEMA_VERSION=2;
+// Declared here (not down by the settings-group functions that use it) per the app's known
+// top-level-const-hoisting gotcha: load() calls toggleSettingsGroup-adjacent code well before the
+// script's own top-to-bottom pass would otherwise reach a declaration placed near those functions.
+const SETTINGS_GROUPS=['equip','training','app','data'];
+// Same hoisting reasoning for the Meso (Cycle) Settings modal's own group collapse — load() also
+// normalizes state.mesoSettingsGroupCollapsed defaults, so this needs to exist before that runs.
+const MESO_SETTINGS_GROUPS=['rotation','volume','deload','rir'];
 let state={schemaVersion:CURRENT_SCHEMA_VERSION,exercises:[],routines:[],history:[],mesocycles:[],activeMesoId:null,equipment:null,barbellWeight:20,plates:{},warmupDone:{},bodyWeights:[],bodyMeasurements:[],exDbSort:'muscle',addExSort:'muscle',filterByEquip:true,addExFilterEquip:true,lightMode:false};
 let activeWorkout=null,workoutTimer=null,restTimer=null,restRemaining=0,restEndTime=null;
 let activeMesoContext=null;
@@ -1724,6 +1791,10 @@ function load(){
   if(state.plateSectionCollapsed===undefined)state.plateSectionCollapsed=true;
   if(state.progIncSectionCollapsed===undefined)state.progIncSectionCollapsed=true;
   if(state.vlSectionCollapsed===undefined)state.vlSectionCollapsed=true;
+  if(!state.settingsGroupCollapsed)state.settingsGroupCollapsed={};
+  SETTINGS_GROUPS.forEach(k=>{if(state.settingsGroupCollapsed[k]===undefined)state.settingsGroupCollapsed[k]=true;});
+  if(!state.mesoSettingsGroupCollapsed)state.mesoSettingsGroupCollapsed={};
+  MESO_SETTINGS_GROUPS.forEach(k=>{if(state.mesoSettingsGroupCollapsed[k]===undefined)state.mesoSettingsGroupCollapsed[k]=true;});
   if(!state.bodyWeights)state.bodyWeights=[];
   if(!state.bodyMeasurements)state.bodyMeasurements=[];
   // One-time migration: fold any legacy weight-only entries into the new measurements log
@@ -2223,7 +2294,7 @@ function switchTab(tab){
   if(tab==='review')renderReview();
   if(tab==='mesocycles')renderMesocycles();
   if(tab==='measurements')renderMeasurementsTab();
-  if(tab==='settings'){buildPlateInventoryUI();buildVolumeLandmarksUI();initGoogleSync();}
+  if(tab==='settings'){buildPlateInventoryUI();buildVolumeLandmarksUI();initGoogleSync();initSettingsGroups();}
 }
 function toggleTheme(){
   state.lightMode=!state.lightMode;save();
@@ -5155,6 +5226,7 @@ function openMesoSettingsModal(){
   document.getElementById('meso-set-early-deload').value=m.earlyDeloadDetection||'suggest';
   document.getElementById('meso-set-decline-count').value=m.earlyDeloadDeclineCount||2;
   document.getElementById('meso-early-deload-fields').style.display=''; // relevant for every mode now — 'off' drives detection the same as 'auto' (see checkEarlyDeloadSignals)
+  initMesoSettingsGroups();
   openModal('modal-meso-settings');
 }
 document.getElementById('meso-set-deload-enabled').onchange=function(){
@@ -7968,39 +8040,94 @@ function getMuscleProtectRank(picks,muscle){
   const p=picks.find(x=>x.muscle===muscle);
   return p?p.protectRank:0;
 }
-// WEEKLY SPREAD FOR AUTO ROUTINE (2026-08-21, user's explicit correction after a real-world
-// report: after 7 days off, Auto Routine tried to satisfy an entire week's backlog for a muscle in
-// ONE session, given enough time — that's not viable hypertrophy programming, it's cramming a
-// week of stimulus into one sitting. Auto Volume Distribution (the fixed-routine version) never
-// has this problem because it front-loads a deficit across several KNOWN upcoming sessions in the
-// routine sequence — Auto Routine has no fixed sequence to project across, so per the user's
-// explicit instruction it now assumes a flat ASSUMED_SESSIONS_PER_WEEK-session week instead, and
-// only ever tries to deliver each muscle's fair PER-SESSION share of its weekly target — front-
-// loaded toward today if behind, same shape as Auto Volume Distribution's own front-load math,
-// just without a real sequence to walk. getMesoMuscleVolumeTarget already encodes the two-tier
-// target the user described (MEV flat for back-burner/inactive muscles, MEV\u2192MRV progression for
-// active/priority ones) — this doesn't change that; it only changes how much of THAT target gets
-// asked for in a single sitting.
-const ASSUMED_SESSIONS_PER_WEEK=4;
-function getAutoRoutineSessionsSoFarThisWeek(){
-  const cutoff=new Date(Date.now()-MUSCLE_VOLUME_WINDOW_DAYS*864e5);
-  const days=new Set();
-  (state.history||[]).forEach(w=>{
-    if(w&&new Date(w.date)>=cutoff)days.add(localDateKey(new Date(w.date)));
+// WEEKLY SPREAD FOR AUTO ROUTINE (2026-08-21, per-muscle OBSERVED FREQUENCY rewrite same day —
+// the original ASSUMED_SESSIONS_PER_WEEK=4 flat guess was wrong for any muscle actually trained
+// more or less often than 4x/week, e.g. a 2x/week muscle got shortchanged (its true fair share
+// per session is bigger) and a 6x/week one got over-dosed per sitting. Fix: derive each muscle's
+// OWN cadence from real history (trailing AUTO_ROUTINE_FREQ_WINDOW_WEEKS weeks, active-weeks-only
+// denominator so an illness/travel week doesn't dilute the estimate) and pace this muscle's
+// weekly target out over that real cadence instead of a shared guess. Falls back to a literature
+// per-session-set-cap-derived cadence (tier 3) when there isn't enough real history yet (fresh
+// muscle, fresh meso, or a real layoff longer than the window) — same two-tier shape
+// getMesoMuscleVolumeTarget already uses (real signal when available, sane default otherwise).
+const AUTO_ROUTINE_FREQ_WINDOW_WEEKS=4;
+const AUTO_ROUTINE_FREQ_MIN_ACTIVE_WEEKS=2;
+// Diminishing-returns per-session set ceiling for a single muscle (matches PRIORITY_VOLUME_SET_CAP
+// elsewhere) — used only as the tier-3 fallback to infer a sane sessions/week when there's not yet
+// enough real per-muscle history to observe a true cadence. Open item, not yet re-verified against
+// a fresh literature pass: confirm 11 is still the right number to derive fallback cadence from,
+// separately from the unrelated PRIORITY_VOLUME_SET_CAP=10 hard per-session cap it happens to be
+// close to.
+const AUTO_ROUTINE_FALLBACK_SETS_PER_SESSION=11;
+// Trailing rolling-week buckets (most recent first) used to observe how many REAL weeks the user
+// was actually training at all in this window, and how many of those weeks this muscle got hit —
+// deliberately NOT calendar/Monday-aligned (same rolling convention as MUSCLE_VOLUME_WINDOW_DAYS;
+// getWeekBuckets is the one intentional calendar-based exception, reserved for the Home Weekly
+// Consistency chart only).
+function getAutoRoutineFreqWeekBuckets(){
+  const buckets=[];
+  for(let i=0;i<AUTO_ROUTINE_FREQ_WINDOW_WEEKS;i++){
+    const end=Date.now()-i*7*864e5;
+    buckets.push({start:end-7*864e5,end});
+  }
+  return buckets;
+}
+// hits = how many of those weeks this muscle was actually directly trained (same hit definition
+// as getDaysSinceMuscleDirectlyTrained: primary muscle, non-injured exercise, at least one done
+// set). activeWeeks = how many of those weeks the user trained AT ALL (any muscle) — the
+// denominator, so a week the user was simply away doesn't get counted as a "miss" for this muscle.
+function getMuscleObservedFrequency(muscle){
+  const buckets=getAutoRoutineFreqWeekBuckets();
+  let activeWeeks=0,hits=0;
+  buckets.forEach(b=>{
+    let bucketActive=false,bucketHit=false;
+    (state.history||[]).forEach(w=>{
+      if(!w)return;
+      const t=new Date(w.date).getTime();
+      if(t>=b.start&&t<b.end){
+        bucketActive=true;
+        if((w.exercises||[]).some(e=>{
+          const exData=getExercise(e.exId);
+          return exData&&exData.muscle===muscle&&!isExerciseInjured(e.exId)&&(e.sets||[]).some(s=>s.done);
+        }))bucketHit=true;
+      }
+    });
+    if(bucketActive)activeWeeks++;
+    if(bucketHit)hits++;
   });
-  return days.size;
+  return{hits,activeWeeks};
+}
+// The real-world cap on how many days' worth of this muscle's weekly target a single session is
+// allowed to absorb — tier 1 uses the muscle's own observed cadence (7/observedSessionsPerWeek);
+// tier 3 (not enough real history: fewer than AUTO_ROUTINE_FREQ_MIN_ACTIVE_WEEKS active weeks, or
+// this muscle wasn't hit in any of them) falls back to a cadence inferred from the fallback
+// per-session set ceiling instead of guessing a flat number of sessions/week.
+function getMuscleCapDays(m,muscle){
+  const{hits,activeWeeks}=getMuscleObservedFrequency(muscle);
+  if(activeWeeks>=AUTO_ROUTINE_FREQ_MIN_ACTIVE_WEEKS&&hits>0){
+    return 7/(hits/activeWeeks);
+  }
+  const weeklyTarget=getMesoMuscleVolumeTarget(m,muscle);
+  const recommendedSessionsPerWeek=Math.max(1,Math.ceil(weeklyTarget/AUTO_ROUTINE_FALLBACK_SETS_PER_SESSION));
+  return 7/recommendedSessionsPerWeek;
 }
 function getMuscleSessionShare(m,muscle){
   const weeklyTarget=getMesoMuscleVolumeTarget(m,muscle);
   const delivered=getMuscleVolume(muscle).sets;
   const remainingTarget=Math.max(0,weeklyTarget-delivered);
-  const sessionsSoFar=getAutoRoutineSessionsSoFarThisWeek();
-  const assumedRemaining=Math.max(1,ASSUMED_SESSIONS_PER_WEEK-sessionsSoFar);
-  const weights=[];
-  for(let i=0;i<assumedRemaining;i++)weights.push(assumedRemaining-i);
-  const weightSum=weights.reduce((a,b)=>a+b,0);
-  const todayShare=Math.round(remainingTarget*weights[0]/weightSum);
-  return{weeklyTarget,delivered,remainingTarget,todayShare,assumedRemaining};
+  const daysSince=getDaysSinceMuscleDirectlyTrained(muscle);
+  const capDays=getMuscleCapDays(m,muscle);
+  let accrued;
+  if(daysSince==null){
+    // Never trained before in real history — same precedent as computeVolumeProgressIncrement's
+    // days==null handling: treat as a full week's worth already accrued rather than dividing by
+    // an undefined gap, so a brand-new muscle isn't starved on its first-ever Auto Session.
+    accrued=weeklyTarget;
+  }else{
+    accrued=(weeklyTarget/7)*Math.min(daysSince,capDays);
+  }
+  const todayShare=Math.round(Math.min(remainingTarget,accrued));
+  return{weeklyTarget,delivered,remainingTarget,todayShare,capDays,daysSince};
 }
 function buildAutoSession(mesoIdx,minutesAvailable){
   const m=state.mesocycles[mesoIdx];if(!m)return null;
@@ -11640,6 +11767,59 @@ function updatePlateInventorySummary(){
   summaryEl.innerHTML=owned.length
     ?'<div class="small text2">'+owned.length+' size'+(owned.length!==1?'s':'')+' set \u2014 smallest '+owned[0]+'kg. Tap to edit.</div>'
     :'<div class="small text2">No plates set yet \u2014 tap to edit.</div>';
+}
+// SETTINGS GROUPING (2026-08-26, user's explicit request: "settings menus are getting out of
+// hand and hard to understand"): wraps the previously-flat list of 13 top-level Settings sections
+// into 4 collapsible groups (Equipment & Progression / Training / App / Data & Backup). Purely a
+// display-grouping layer — every individual setting, its id, and its own existing collapsible
+// sub-section (Plates/Progression Increments/Volume Landmarks) is untouched, just nested one level
+// deeper visually. Collapsed state persists per-group in state.settingsGroupCollapsed, same pattern
+// as the pre-existing per-section collapse flags (plateSectionCollapsed etc), defaulting to
+// collapsed (true) the first time a group is seen so a fresh/updated install opens to a short list
+// of 4 headers rather than everything sprung open at once.
+function toggleSettingsGroup(key){
+  if(!state.settingsGroupCollapsed)state.settingsGroupCollapsed={};
+  const collapsed=!(state.settingsGroupCollapsed[key]===false);
+  state.settingsGroupCollapsed[key]=!collapsed;
+  save();
+  applySettingsGroupState(key);
+}
+function applySettingsGroupState(key){
+  const expanded=!!(state.settingsGroupCollapsed&&state.settingsGroupCollapsed[key]===false);
+  const body=document.getElementById('settings-group-body-'+key);
+  const chevron=document.getElementById('settings-group-chevron-'+key);
+  if(body)body.style.display=expanded?'block':'none';
+  if(chevron)chevron.textContent=expanded?'▾':'▸';
+}
+function initSettingsGroups(){
+  if(!state.settingsGroupCollapsed)state.settingsGroupCollapsed={};
+  SETTINGS_GROUPS.forEach(applySettingsGroupState);
+}
+// Same pattern, separate namespace, for the Meso (Cycle) Settings modal — built 2026-08-26 per
+// user's explicit follow-up complaint ("meso settings were the worst to navigate"): that modal had
+// ~10 flat sections (rotation/repeats, auto volume, continuous volume, deload + all its sub-
+// fields, RIR ramp + rep-target prediction, early deload detection) stacked with no grouping at
+// all, denser than the plain Settings screen was. Grouped into 4: Rotation & Repeats, Volume
+// Automation, Deload (folds in Early Deload Detection — it's the "when" to Deload's "what"), RIR
+// Ramp. Purely display-nesting: every input id, its onchange wiring, and saveMesoSettings() are
+// untouched.
+function toggleMesoSettingsGroup(key){
+  if(!state.mesoSettingsGroupCollapsed)state.mesoSettingsGroupCollapsed={};
+  const collapsed=!(state.mesoSettingsGroupCollapsed[key]===false);
+  state.mesoSettingsGroupCollapsed[key]=!collapsed;
+  save();
+  applyMesoSettingsGroupState(key);
+}
+function applyMesoSettingsGroupState(key){
+  const expanded=!!(state.mesoSettingsGroupCollapsed&&state.mesoSettingsGroupCollapsed[key]===false);
+  const body=document.getElementById('meso-group-body-'+key);
+  const chevron=document.getElementById('meso-group-chevron-'+key);
+  if(body)body.style.display=expanded?'block':'none';
+  if(chevron)chevron.textContent=expanded?'▾':'▸';
+}
+function initMesoSettingsGroups(){
+  if(!state.mesoSettingsGroupCollapsed)state.mesoSettingsGroupCollapsed={};
+  MESO_SETTINGS_GROUPS.forEach(applyMesoSettingsGroupState);
 }
 function togglePlateSection(){
   state.plateSectionCollapsed=!state.plateSectionCollapsed;
