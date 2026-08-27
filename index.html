@@ -386,6 +386,9 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div class="home-sec" id="home-sec-autoRoutine" style="padding:0 16px 12px;">
       <button class="btn btn-primary btn-full" onclick="openAutoRoutineFromHome()" style="font-size:13px;border-radius:var(--radius);">🎯 Auto Routine</button>
     </div>
+    <div class="home-sec" id="home-sec-physio" style="padding:0 16px 12px;">
+      <button class="btn btn-ghost btn-full" onclick="openPhysioScreen()" style="font-size:13px;border-radius:var(--radius);">🧘 Physio &amp; Stretching</button>
+    </div>
     <div class="home-sec" id="home-sec-chart" data-home-key="chart">
       <div class="sec-hdr"><span class="sec-hdr-title">Weekly Consistency</span></div>
       <div id="weekly-consistency-chart" style="margin:0 16px 16px;padding:14px;background:var(--bg2);border-radius:var(--radius);"></div>
@@ -669,7 +672,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-08-26.2</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-08-27.2</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -781,7 +784,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div id="picker-breadcrumb" style="padding:4px 16px 8px;font-size:12px;color:var(--text3);border-bottom:1px solid var(--border);min-height:24px"></div>
     <div id="picker-list" style="max-height:52vh;overflow-y:auto"></div>
     <div id="picker-add-bar" style="display:none;padding:10px 16px 4px">
-      <button class="btn btn-primary btn-full" onclick="pickerAddExercise()">＋ Add to Workout</button>
+      <button class="btn btn-primary btn-full" id="picker-add-bar-btn" onclick="pickerAddExercise()">＋ Add to Workout</button>
     </div>
     <div class="modal-actions" style="padding-top:4px">
       <button class="btn btn-ghost flex-1" onclick="closeModal('modal-add-exercise')">Cancel</button>
@@ -861,8 +864,10 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <div id="auto-routine-pool-tabs" style="display:flex;gap:6px;margin-bottom:8px"></div>
       <div id="auto-routine-pool-list" style="max-height:52vh;overflow-y:auto"></div>
     </div>
-    <div class="modal-actions">
-      <button class="btn btn-primary flex-1" onclick="closeModal('modal-auto-routine-pool')">Done</button>
+    <div class="modal-actions" style="flex-wrap:wrap">
+      <button class="btn btn-ghost flex-1" style="min-width:150px" onclick="openAutoRoutinePoolBrowsePicker()">🔍 Browse Library</button>
+      <button class="btn btn-ghost flex-1" style="min-width:150px" onclick="openNewExerciseModalForPool()">＋ Custom Exercise</button>
+      <button class="btn btn-primary flex-1" style="min-width:150px" onclick="closeModal('modal-auto-routine-pool')">Done</button>
     </div>
   </div>
 </div>
@@ -948,7 +953,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div class="modal-body">
       <div class="input-label">Exercise Name</div><input id="new-ex-name" placeholder="e.g. Incline Dumbbell Press"/>
       <div class="input-label mt12">Primary Muscle</div>
-      <select id="new-ex-muscle"><option>Chest</option><option>Back</option><option>Shoulders</option><option>Biceps</option><option>Triceps</option><option>Legs</option><option>Glutes</option><option>Core</option><option>Calves</option><option>Full Body</option></select>
+      <select id="new-ex-muscle"></select>
       <div class="input-label mt12">Secondary Muscles</div><input id="new-ex-secondary" placeholder="e.g. Triceps, Front Delts"/>
       <div class="input-label mt12">Indirect Credit Overrides (optional)</div>
       <input id="new-ex-secondary-fractions" placeholder="e.g. Biceps:0.4, Forearms:0.2"/>
@@ -1103,6 +1108,132 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     </div>
   </div>
   <div class="bottom-nav" id="nav-measurements"></div>
+</div>
+
+<!-- PHYSIO & STRETCHING (2026-08-27, user's explicit request — kept as its own section rather
+     than folded into the lifting Exercise DB/history: no weight/progression, hold-based "sets"
+     (rounds × seconds) instead of reps, own history log so it never touches muscle volume
+     landmarks or Auto Volume/Review calculations, which only ever look at state.history/
+     state.exercises. Reuses playTimerSound()/fireTimerCompleteAlert() from the rest-timer system
+     (pure side-effect functions, no workout-specific coupling) but its own drift-corrected
+     countdown state/vars — sharing the single global rest-timer bar risked a stretch-hold
+     colliding with an actual in-workout rest timer if both ever ran at once. -->
+<div class="screen" id="screen-physio">
+  <div class="workout-header" style="padding-bottom:14px">
+    <div style="display:flex;align-items:center;gap:10px">
+      <button class="icon-btn" onclick="switchTab('home')">←</button>
+      <div style="font-size:17px;font-weight:700">Physio &amp; Stretching</div>
+    </div>
+  </div>
+  <div class="scroll pb">
+    <div style="padding:12px 16px 0">
+      <button class="btn btn-primary btn-full" onclick="startPhysioSession()">▶ Start Session</button>
+      <div style="display:flex;gap:10px;margin-top:10px">
+        <button class="btn btn-ghost flex-1" onclick="openNewPhysioExerciseModal()">＋ Add Exercise</button>
+        <button class="btn btn-ghost flex-1" onclick="openPhysioHistoryModal()">🕘 History</button>
+      </div>
+    </div>
+    <div class="section-label">Exercises</div>
+    <div id="physio-exercise-list" style="padding:0 16px 20px"></div>
+  </div>
+</div>
+
+<div class="screen" id="screen-physio-session">
+  <div class="workout-header" style="padding-bottom:14px">
+    <div style="display:flex;align-items:center;gap:10px">
+      <button class="icon-btn" onclick="exitPhysioSession()">✕</button>
+      <div style="font-size:17px;font-weight:700">Physio Session</div>
+    </div>
+    <div class="small text2 mt8" id="physio-session-progress"></div>
+  </div>
+  <div class="scroll pb" style="display:flex;flex-direction:column;align-items:center;padding-top:24px">
+    <div class="small text3" style="text-transform:uppercase;letter-spacing:1px" id="physio-session-exname"></div>
+    <div class="small text3 mt4" id="physio-session-bodyarea"></div>
+    <div id="physio-hold-display-wrap">
+      <div style="font-size:48px;font-weight:700;margin-top:22px;font-variant-numeric:tabular-nums;text-align:center" id="physio-hold-display">0:00</div>
+    </div>
+    <div id="physio-reps-input-wrap" style="display:none;width:100%;padding:0 16px;margin-top:22px">
+      <div style="display:flex;gap:10px">
+        <div style="flex:1">
+          <div class="input-label" style="text-align:center">Reps</div>
+          <input id="physio-reps-input" type="number" inputmode="numeric" min="0" style="text-align:center;font-size:20px;font-weight:700"/>
+        </div>
+        <div style="flex:1">
+          <div class="input-label" style="text-align:center">Weight (kg)</div>
+          <input id="physio-weight-input" type="number" inputmode="decimal" min="0" step="0.5" style="text-align:center;font-size:20px;font-weight:700"/>
+        </div>
+      </div>
+    </div>
+    <div class="small text2 mt8" id="physio-session-round"></div>
+    <div style="display:flex;gap:10px;margin-top:26px;width:100%;padding:0 16px">
+      <button class="btn btn-primary flex-1" id="physio-hold-start-btn" onclick="startPhysioHold()">▶ Start Hold</button>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:10px;width:100%;padding:0 16px">
+      <button class="btn btn-ghost flex-1" onclick="skipPhysioStep()">Skip</button>
+      <button class="btn btn-ghost flex-1" onclick="markPhysioStepDone()">✓ Mark Done</button>
+    </div>
+  </div>
+  <div style="padding:0 16px 16px;flex-shrink:0">
+    <button class="btn btn-ghost btn-full" onclick="finishPhysioSessionEarly()">Finish Session</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-new-physio-exercise">
+  <div class="modal"><div class="modal-handle"></div><div class="modal-title" id="physio-ex-modal-title">New Physio Exercise</div>
+    <div class="modal-body">
+      <div class="input-label">Name</div>
+      <input id="physio-ex-name" placeholder="e.g. Couch Stretch"/>
+      <div class="input-label mt12">Body Area</div>
+      <input id="physio-ex-bodyarea" placeholder="e.g. Hip Flexors, Ankles, Neck"/>
+      <div class="input-label mt12">Type</div>
+      <div style="display:flex;gap:8px">
+        <button type="button" class="sort-chip active" id="physio-ex-type-hold-chip" style="flex:1;text-align:center" onclick="setPhysioExerciseType('hold')">⏱ Timed Hold</button>
+        <button type="button" class="sort-chip" id="physio-ex-type-reps-chip" style="flex:1;text-align:center" onclick="setPhysioExerciseType('reps')">🔁 Reps</button>
+      </div>
+      <div id="physio-ex-hold-fields" style="display:flex;gap:10px;margin-top:12px">
+        <div style="flex:1">
+          <div class="input-label">Rounds</div>
+          <input id="physio-ex-rounds" type="number" inputmode="numeric" min="1" value="3"/>
+        </div>
+        <div style="flex:1">
+          <div class="input-label">Hold (seconds)</div>
+          <input id="physio-ex-seconds" type="number" inputmode="numeric" min="1" value="30"/>
+        </div>
+      </div>
+      <div id="physio-ex-reps-fields" style="display:none;gap:10px;margin-top:12px">
+        <div style="flex:1">
+          <div class="input-label">Rounds</div>
+          <input id="physio-ex-rounds-reps" type="number" inputmode="numeric" min="1" value="3"/>
+        </div>
+        <div style="flex:1">
+          <div class="input-label">Reps</div>
+          <input id="physio-ex-reps" type="number" inputmode="numeric" min="1" value="12"/>
+        </div>
+        <div style="flex:1">
+          <div class="input-label">Weight (kg, optional)</div>
+          <input id="physio-ex-weight" type="number" inputmode="decimal" min="0" step="0.5" placeholder="Bodyweight"/>
+        </div>
+      </div>
+      <div class="small text3 mt4" style="line-height:1.5">Reps-type exercises are still logged in this same separate physio section — no progression suggestions, no muscle volume tracking, same as a timed hold.</div>
+      <div class="input-label mt12">Note (optional)</div>
+      <input id="physio-ex-note" placeholder="Cues, band color, setup..."/>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost flex-1" onclick="closeModal('modal-new-physio-exercise')">Cancel</button>
+      <button class="btn btn-primary flex-1" onclick="saveNewPhysioExercise()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-physio-history">
+  <div class="modal"><div class="modal-handle"></div><div class="modal-title">Physio History</div>
+    <div class="modal-body">
+      <div id="physio-history-list" style="max-height:60vh;overflow-y:auto"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary flex-1" onclick="closeModal('modal-physio-history')">Done</button>
+    </div>
+  </div>
 </div>
 
 <!-- Generic Confirm Modal (replaces native confirm() which can be blocked in installed PWAs) -->
@@ -1430,9 +1561,9 @@ const SET_TYPES=[
   {id:'1rm',label:'1RM',desc:'Max effort single',badgeClass:'badge-1rm'},
   {id:'partials',label:'Partials',desc:'Beyond-failure partials',badgeClass:'badge-partials'},
 ];
-const MUSCLE_GROUPS=['Chest','Back','Shoulders','Biceps','Triceps','Quads','Hamstrings','Glutes','Core','Calves','Full Body'];
+const MUSCLE_GROUPS=['Chest','Back','Shoulders','Biceps','Triceps','Quads','Hamstrings','Glutes','Core','Calves','Tibialis','Full Body'];
 const MUSCLE_PAIRS={Chest:'Back',Back:'Chest',Biceps:'Triceps',Triceps:'Biceps',Quads:'Hamstrings',Hamstrings:'Quads'};
-const MUSCLE_COLORS={Chest:'#e8ff47',Back:'#47c8ff',Shoulders:'#ff8c00',Biceps:'#2ed573',Triceps:'#ff4757',Quads:'#cc44ff',Hamstrings:'#c2703d',Glutes:'#ff6b81',Core:'#ffd700',Calves:'#00cec9','Full Body':'#fd79a8'};
+const MUSCLE_COLORS={Chest:'#e8ff47',Back:'#47c8ff',Shoulders:'#ff8c00',Biceps:'#2ed573',Triceps:'#ff4757',Quads:'#cc44ff',Hamstrings:'#c2703d',Glutes:'#ff6b81',Core:'#ffd700',Calves:'#00cec9',Tibialis:'#74b9ff','Full Body':'#fd79a8'};
 // See getMuscleVolume for the full reasoning — declared this early (not right above
 // getMuscleVolume itself) because the Home screen's boot-time render chain can reach it well
 // before the script's own top-to-bottom pass would otherwise get there.
@@ -1663,7 +1794,7 @@ function buildDefaultRoutineExercises(){
 
 // ── STATE ──
 // Bump this whenever a change to `state`'s shape needs a one-time migration in load() below.
-const CURRENT_SCHEMA_VERSION=2;
+const CURRENT_SCHEMA_VERSION=3;
 // Declared here (not down by the settings-group functions that use it) per the app's known
 // top-level-const-hoisting gotcha: load() calls toggleSettingsGroup-adjacent code well before the
 // script's own top-to-bottom pass would otherwise reach a declaration placed near those functions.
@@ -1675,7 +1806,7 @@ let state={schemaVersion:CURRENT_SCHEMA_VERSION,exercises:[],routines:[],history
 let activeWorkout=null,workoutTimer=null,restTimer=null,restRemaining=0,restEndTime=null;
 let activeMesoContext=null;
 let mesoReelExpanded={}; // mesoIdx -> bool, ephemeral UI-only state for the home hero's reel expand/collapse (not persisted)
-let editingNoteExId=null,editingSetTypeInfo=null,pendingSetType=null,fromWorkout=false,editingExId=null,viewingRoutineIdx=null,libRowRegistry=[],exDbMuscleView=null,exDbMachineExpanded={},pickerDestination='workout';
+let editingNoteExId=null,editingSetTypeInfo=null,pendingSetType=null,fromWorkout=false,editingExId=null,viewingRoutineIdx=null,libRowRegistry=[],exDbMuscleView=null,exDbMachineExpanded={},pickerDestination='workout',editingPhysioExId=null;
 let progressExId=null,chartMetric='weight';
 
 // ── PERSISTENCE ──
@@ -1727,6 +1858,25 @@ function runMigrations(){
           const name=key.slice('Legs::'.length);
           const newMuscle=LEGACY_LEGS_TO_HAMSTRINGS.includes(name)?'Hamstrings':'Quads';
           migrated[newMuscle+'::'+name]=val;
+        }else{
+          migrated[key]=val;
+        }
+      });
+      state.customCatalogueFields=migrated;
+    }
+  }
+  if(v<3){
+    // v3: Tibialis split out as its own tracked muscle (previously "Tibialis Raise" lived under
+    // Calves with no volume landmark/tracking of its own) — migrate any exercise and custom
+    // catalogue field the user already created under the old grouping.
+    (state.exercises||[]).forEach(e=>{
+      if(e.muscle==='Calves'&&(e.name||'').startsWith('Tibialis Raise'))e.muscle='Tibialis';
+    });
+    if(state.customCatalogueFields){
+      const migrated={};
+      Object.entries(state.customCatalogueFields).forEach(([key,val])=>{
+        if(key.startsWith('Calves::Tibialis Raise')){
+          migrated['Tibialis::'+key.slice('Calves::'.length)]=val;
         }else{
           migrated[key]=val;
         }
@@ -1866,7 +2016,8 @@ function load(){
       Shoulders:{mv:4,mev:8,mav:14,mrv:26},Biceps:{mv:4,mev:8,mav:12,mrv:26},
       Triceps:{mv:2,mev:6,mav:9,mrv:18},Quads:{mv:4,mev:8,mav:11.5,mrv:20},
       Hamstrings:{mv:2,mev:6,mav:9,mrv:20},Glutes:{mv:0,mev:4,mav:7,mrv:16},
-      Core:{mv:0,mev:6,mav:10,mrv:25},Calves:{mv:4,mev:8,mav:11,mrv:20}
+      Core:{mv:0,mev:6,mav:10,mrv:25},Calves:{mv:4,mev:8,mav:11,mrv:20},
+      Tibialis:{mv:2,mev:6,mav:10,mrv:18}
     };
   }
   // One-time forced migration (2026-08-06, user's explicit request): existing installs still
@@ -1925,6 +2076,13 @@ function load(){
     state.volumeLandmarksRPMrv2Migrated=true;
   }
   if(!state.musclePriority)state.musclePriority={};
+  // Existing installs from before Tibialis was split out as its own tracked muscle (see v3
+  // migration above) won't have this key yet — backfill so it isn't silently missing a landmark
+  // and getting treated as untracked. Hardcoded (not read from DEFAULT_VOLUME_LANDMARKS) — that
+  // const isn't declared until later in the file and load() runs before that point (the known
+  // top-level-const-hoisting gotcha), same reason the fresh-install block just above duplicates
+  // its values instead of referencing the const too.
+  if(!state.volumeLandmarks['Tibialis'])state.volumeLandmarks['Tibialis']={mv:2,mev:6,mav:10,mrv:18};
   if(!state.injuredExercises)state.injuredExercises={};
   if(!state.injuredExerciseHistory)state.injuredExerciseHistory=[];
   // Priority/back-burner history (2026-08-09) — global log of every meso-pass priority
@@ -1933,6 +2091,8 @@ function load(){
   // from state.musclePriority above (the older Settings-level Low/Normal/High pills, still used
   // for imbalance notes only — a different, coexisting concept).
   if(!state.priorityHistory)state.priorityHistory=[];
+  if(!state.physioExercises)state.physioExercises=[];
+  if(!state.physioHistory)state.physioHistory=[];
   Object.keys(state.volumeLandmarks).forEach(m=>{if(!state.musclePriority[m])state.musclePriority[m]='normal';});
   if(!state.homeLayout)state.homeLayout=['meso','startEmpty','chart'];
   if(state.activeMesoId===undefined)state.activeMesoId=null;
@@ -2296,8 +2456,277 @@ function switchTab(tab){
   if(tab==='measurements')renderMeasurementsTab();
   if(tab==='settings'){buildPlateInventoryUI();buildVolumeLandmarksUI();initGoogleSync();initSettingsGroups();}
 }
+// ── PHYSIO & STRETCHING ──
+// Built 2026-08-27 per user's explicit request: physio/mobility work needed a home in FORGE, but
+// doesn't fit the lifting model (no weight, no MEV/MRV progression) and the user explicitly asked
+// to keep it separate rather than folding it into workout history/routines. So: its own exercise
+// list (state.physioExercises), its own session flow (rounds × hold-seconds instead of sets ×
+// reps), its own history log (state.physioHistory) — never touches state.exercises/state.history,
+// so Auto Volume, Review's volume charts, and muscle landmarks are completely unaware this exists.
+let physioSession=null; // {exercises:[{id,name,bodyArea,type,rounds:[{seconds,done}] or [{reps,weight,done}]}], exIdx, roundIdx}
+let physioExerciseType='hold'; // transient UI state for the New/Edit Physio Exercise modal's type toggle
+function openPhysioScreen(){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById('screen-physio').classList.add('active');
+  renderPhysioExerciseList();
+}
+function physioExerciseSummary(ex){
+  if(ex.type==='reps')return ex.rounds+'×'+ex.reps+' reps'+(ex.weight?' @ '+ex.weight+'kg':'');
+  return ex.rounds+'×'+ex.seconds+'s';
+}
+function renderPhysioExerciseList(){
+  const list=document.getElementById('physio-exercise-list');
+  if(!state.physioExercises.length){
+    list.innerHTML='<div class="small text3" style="padding:20px 0;text-align:center">No physio exercises yet — add one, or just hit Start Session once you have.</div>';
+    return;
+  }
+  list.innerHTML=state.physioExercises.map(ex=>
+    '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:var(--bg2);border-radius:10px;margin-bottom:8px">'
+    +'<div style="min-width:0;flex:1" onclick="openNewPhysioExerciseModal(\''+ex.id+'\')">'
+      +'<div style="font-weight:600;font-size:14px">'+escHtml(ex.name)+'</div>'
+      +'<div class="small text3">'+(ex.bodyArea?escHtml(ex.bodyArea)+' · ':'')+(ex.type==='reps'?'🔁 ':'⏱ ')+physioExerciseSummary(ex)+'</div>'
+    +'</div>'
+    +'<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deletePhysioExercise(\''+ex.id+'\')">🗑</button>'
+    +'</div>'
+  ).join('');
+}
+function setPhysioExerciseType(type){
+  physioExerciseType=type;
+  document.getElementById('physio-ex-type-hold-chip').classList.toggle('active',type==='hold');
+  document.getElementById('physio-ex-type-reps-chip').classList.toggle('active',type==='reps');
+  document.getElementById('physio-ex-hold-fields').style.display=type==='hold'?'flex':'none';
+  document.getElementById('physio-ex-reps-fields').style.display=type==='reps'?'flex':'none';
+}
+function openNewPhysioExerciseModal(id){
+  editingPhysioExId=id||null;
+  const ex=id?state.physioExercises.find(e=>e.id===id):null;
+  document.getElementById('physio-ex-modal-title').textContent=ex?'Edit Physio Exercise':'New Physio Exercise';
+  document.getElementById('physio-ex-name').value=ex?ex.name:'';
+  document.getElementById('physio-ex-bodyarea').value=ex?ex.bodyArea:'';
+  setPhysioExerciseType(ex?ex.type||'hold':'hold');
+  document.getElementById('physio-ex-rounds').value=ex&&ex.type!=='reps'?ex.rounds:3;
+  document.getElementById('physio-ex-seconds').value=ex&&ex.type!=='reps'?ex.seconds:30;
+  document.getElementById('physio-ex-rounds-reps').value=ex&&ex.type==='reps'?ex.rounds:3;
+  document.getElementById('physio-ex-reps').value=ex&&ex.type==='reps'?ex.reps:12;
+  document.getElementById('physio-ex-weight').value=ex&&ex.type==='reps'&&ex.weight?ex.weight:'';
+  document.getElementById('physio-ex-note').value=ex?(ex.note||''):'';
+  openModal('modal-new-physio-exercise');
+}
+function saveNewPhysioExercise(){
+  const name=document.getElementById('physio-ex-name').value.trim();if(!name)return;
+  const type=physioExerciseType;
+  const data=type==='reps'?{
+    name,type,
+    bodyArea:document.getElementById('physio-ex-bodyarea').value.trim(),
+    rounds:Math.max(1,parseInt(document.getElementById('physio-ex-rounds-reps').value)||3),
+    reps:Math.max(1,parseInt(document.getElementById('physio-ex-reps').value)||12),
+    weight:parseFloat(document.getElementById('physio-ex-weight').value)||0,
+    note:document.getElementById('physio-ex-note').value.trim()
+  }:{
+    name,type,
+    bodyArea:document.getElementById('physio-ex-bodyarea').value.trim(),
+    rounds:Math.max(1,parseInt(document.getElementById('physio-ex-rounds').value)||3),
+    seconds:Math.max(1,parseInt(document.getElementById('physio-ex-seconds').value)||30),
+    note:document.getElementById('physio-ex-note').value.trim()
+  };
+  if(editingPhysioExId){
+    const ex=state.physioExercises.find(e=>e.id===editingPhysioExId);
+    // Full replace (not Object.assign merge) when switching type — an old exercise edited from
+    // Hold to Reps (or back) shouldn't keep stale seconds/reps/weight fields from its old type.
+    if(ex){Object.keys(ex).forEach(k=>{if(k!=='id')delete ex[k];});Object.assign(ex,data);}
+  }else{
+    state.physioExercises.push({id:uid(),...data});
+  }
+  save();
+  closeModal('modal-new-physio-exercise');
+  renderPhysioExerciseList();
+}
+function deletePhysioExercise(id){
+  forgeConfirm('Delete exercise?','This removes it from your physio list. Past history entries are unaffected.',()=>{
+    state.physioExercises=state.physioExercises.filter(e=>e.id!==id);
+    save();
+    renderPhysioExerciseList();
+  });
+}
+function startPhysioSession(){
+  if(!state.physioExercises.length){
+    openNewPhysioExerciseModal();
+    return;
+  }
+  physioSession={
+    exercises:state.physioExercises.map(ex=>({
+      id:ex.id,name:ex.name,bodyArea:ex.bodyArea,type:ex.type||'hold',
+      rounds:ex.type==='reps'
+        ?Array.from({length:ex.rounds},()=>({reps:ex.reps,weight:ex.weight||0,done:false}))
+        :Array.from({length:ex.rounds},()=>({seconds:ex.seconds,done:false}))
+    })),
+    exIdx:0,roundIdx:0
+  };
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById('screen-physio-session').classList.add('active');
+  renderPhysioSessionStep();
+}
+function currentPhysioStep(){
+  if(!physioSession)return null;
+  const ex=physioSession.exercises[physioSession.exIdx];
+  if(!ex)return null;
+  return{ex,round:ex.rounds[physioSession.roundIdx]};
+}
+function renderPhysioSessionStep(){
+  stopPhysioHold();
+  const step=currentPhysioStep();
+  if(!step){finishPhysioSession();return;}
+  const{ex,round}=step;
+  document.getElementById('physio-session-progress').textContent='Exercise '+(physioSession.exIdx+1)+' of '+physioSession.exercises.length;
+  document.getElementById('physio-session-exname').textContent=ex.name;
+  document.getElementById('physio-session-bodyarea').textContent=ex.bodyArea||'';
+  document.getElementById('physio-session-round').textContent='Round '+(physioSession.roundIdx+1)+' of '+ex.rounds.length;
+  const isReps=ex.type==='reps';
+  document.getElementById('physio-hold-display-wrap').style.display=isReps?'none':'block';
+  document.getElementById('physio-reps-input-wrap').style.display=isReps?'block':'none';
+  document.getElementById('physio-hold-start-btn').style.display=isReps?'none':'block';
+  if(isReps){
+    document.getElementById('physio-reps-input').value=round.reps;
+    document.getElementById('physio-weight-input').value=round.weight||'';
+  }else{
+    physioHoldRemaining=round.seconds;
+    updatePhysioHoldDisplay();
+    document.getElementById('physio-hold-start-btn').textContent='▶ Start Hold';
+  }
+}
+function advancePhysioStep(){
+  const step=currentPhysioStep();
+  if(step){
+    // For reps-type steps, capture whatever the person left in the reps/weight inputs (they may
+    // have adjusted from the exercise's default) before marking the round done.
+    if(step.ex.type==='reps'){
+      step.round.reps=parseInt(document.getElementById('physio-reps-input').value)||step.round.reps;
+      step.round.weight=parseFloat(document.getElementById('physio-weight-input').value)||0;
+    }
+    step.round.done=true;
+  }
+  if(physioSession.roundIdx<physioSession.exercises[physioSession.exIdx].rounds.length-1){
+    physioSession.roundIdx++;
+  }else if(physioSession.exIdx<physioSession.exercises.length-1){
+    physioSession.exIdx++;physioSession.roundIdx=0;
+  }else{
+    finishPhysioSession();return;
+  }
+  renderPhysioSessionStep();
+}
+function skipPhysioStep(){
+  // Skip deliberately does NOT capture the reps/weight inputs (unlike Mark Done) — skipping means
+  // this round wasn't actually performed, so whatever's sitting in the inputs shouldn't be logged.
+  const step=currentPhysioStep();
+  if(step)step.round.done=false;
+  if(!physioSession)return;
+  if(physioSession.roundIdx<physioSession.exercises[physioSession.exIdx].rounds.length-1){
+    physioSession.roundIdx++;
+  }else if(physioSession.exIdx<physioSession.exercises.length-1){
+    physioSession.exIdx++;physioSession.roundIdx=0;
+  }else{
+    finishPhysioSession();return;
+  }
+  renderPhysioSessionStep();
+}
+function markPhysioStepDone(){advancePhysioStep();}
+// Same drift-corrected end-timestamp approach as startRestTimer (see that function's comment) —
+// deliberately separate state/vars from the workout rest-timer rather than sharing restEndTime/
+// restTimer, so a stretch hold can never collide with an in-progress workout's rest timer if both
+// happened to be running (physio is its own screen/section, but the underlying app state is
+// global). playTimerSound()/fireTimerCompleteAlert() are reused as-is — pure sound/vibration/
+// notification side effects with no workout-specific coupling.
+let physioHoldTimer=null,physioHoldEndTime=null,physioHoldRemaining=0;
+function startPhysioHold(){
+  const step=currentPhysioStep();if(!step)return;
+  try{
+    if(!sharedAudioCtx)sharedAudioCtx=new(window.AudioContext||window.webkitAudioContext)();
+    if(sharedAudioCtx.state==='suspended')sharedAudioCtx.resume();
+  }catch(e){/* audio not available — vibration/visual countdown still work */}
+  if(physioHoldTimer)clearInterval(physioHoldTimer);
+  physioHoldEndTime=Date.now()+step.round.seconds*1000;
+  physioHoldRemaining=step.round.seconds;
+  updatePhysioHoldDisplay();
+  document.getElementById('physio-hold-start-btn').style.display='none';
+  physioHoldTimer=setInterval(physioHoldTick,1000);
+}
+function physioHoldTick(){
+  physioHoldRemaining=Math.round((physioHoldEndTime-Date.now())/1000);
+  if(physioHoldRemaining<=0){
+    stopPhysioHold();
+    fireTimerCompleteAlert();
+    advancePhysioStep();
+  }else{
+    if(physioHoldRemaining<=3)playTimerTick();
+    updatePhysioHoldDisplay();
+  }
+}
+function updatePhysioHoldDisplay(){
+  const m=Math.floor(physioHoldRemaining/60),s=physioHoldRemaining%60;
+  const el=document.getElementById('physio-hold-display');
+  if(el){el.textContent=m+':'+String(s).padStart(2,'0');el.style.color=physioHoldRemaining<=3?'var(--red)':'var(--text)';}
+}
+function stopPhysioHold(){
+  if(physioHoldTimer){clearInterval(physioHoldTimer);physioHoldTimer=null;}
+  physioHoldEndTime=null;
+}
+function exitPhysioSession(){
+  if(!physioSession){switchTab('home');return;}
+  forgeConfirm('Discard this session?','Rounds completed so far won\'t be saved to history.',()=>{
+    stopPhysioHold();
+    physioSession=null;
+    switchTab('home');
+  });
+}
+function finishPhysioSessionEarly(){
+  forgeConfirm('Finish session now?','Any remaining exercises/rounds will be logged as not completed.',()=>finishPhysioSession(),{okLabel:'Finish',danger:false});
+}
+function finishPhysioSession(){
+  stopPhysioHold();
+  if(physioSession){
+    const entries=physioSession.exercises.map(ex=>({
+      exId:ex.id,name:ex.name,type:ex.type,
+      rounds:ex.type==='reps'
+        ?ex.rounds.map(r=>({reps:r.reps,weight:r.weight,done:r.done}))
+        :ex.rounds.map(r=>({seconds:r.seconds,done:r.done}))
+    })).filter(e=>e.rounds.some(r=>r.done));
+    if(entries.length){
+      state.physioHistory.unshift({id:uid(),date:new Date().toISOString(),entries});
+      save();
+    }
+  }
+  physioSession=null;
+  switchTab('home');
+}
+function openPhysioHistoryModal(){
+  renderPhysioHistoryList();
+  openModal('modal-physio-history');
+}
+function renderPhysioHistoryList(){
+  const list=document.getElementById('physio-history-list');
+  if(!state.physioHistory.length){
+    list.innerHTML='<div class="small text3" style="padding:20px 0;text-align:center">No physio sessions logged yet.</div>';
+    return;
+  }
+  list.innerHTML=state.physioHistory.map(sess=>{
+    const d=new Date(sess.date);
+    const holdEntries=sess.entries.filter(e=>e.type!=='reps');
+    const repEntries=sess.entries.filter(e=>e.type==='reps');
+    const totalHolds=holdEntries.reduce((sum,e)=>sum+e.rounds.filter(r=>r.done).length,0);
+    const totalSecs=holdEntries.reduce((sum,e)=>sum+e.rounds.filter(r=>r.done).reduce((s,r)=>s+r.seconds,0),0);
+    const totalRepSets=repEntries.reduce((sum,e)=>sum+e.rounds.filter(r=>r.done).length,0);
+    const exNames=sess.entries.map(e=>escHtml(e.name)).join(', ');
+    const summaryParts=[];
+    if(totalHolds)summaryParts.push(totalHolds+' holds · '+Math.round(totalSecs/60*10)/10+' min');
+    if(totalRepSets)summaryParts.push(totalRepSets+' rep sets');
+    return '<div style="padding:10px 0;border-bottom:1px solid var(--border)">'
+      +'<div style="font-weight:600;font-size:13px">'+d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})+'</div>'
+      +'<div class="small text2" style="margin-top:2px">'+exNames+'</div>'
+      +'<div class="small text3" style="margin-top:2px">'+summaryParts.join(' · ')+'</div>'
+      +'</div>';
+  }).join('');
+}
 function toggleTheme(){
-  state.lightMode=!state.lightMode;save();
   document.body.classList.toggle('light-mode',state.lightMode);
   document.getElementById('theme-btn').textContent=state.lightMode?'☀️':'🌙';
 }
@@ -2433,6 +2862,7 @@ const CATEGORY_ICONS = {
   'Glutes':       {key:'glutes',     color:'#22C55E'},
   'Core':         {key:'core',       color:'#3B82F6'},
   'Calves':       {key:'calves',     color:'#22C55E'},
+  'Tibialis':     {key:'calves',     color:'#74b9ff'},
   'Full Body':    {key:'fullBody',   color:'#A855F7'},
   'Push':         {key:'chest',      color:'#D4FF33'},
   'Pull':         {key:'back',       color:'#47C8FF'},
@@ -2589,7 +3019,11 @@ const EXERCISE_CATALOGUE={
   Calves:[
     {name:'Calf Raise',equipment:['Machine','Barbell','Dumbbell','Bodyweight','Leg Press Machine'],position:['Standing','Seated','Donkey'],grip:null,uni:true},
     {name:'Jump Rope',equipment:['Bodyweight'],position:null,grip:null,uni:false},
-    {name:'Tibialis Raise',equipment:['Bodyweight'],position:null,grip:null,uni:false},
+  ],
+  Tibialis:[
+    {name:'Tibialis Raise',equipment:['Bodyweight','Tib Bar','Resistance Band','Plate'],position:['Standing','Seated','Wall'],grip:null,uni:true},
+    {name:'Reverse Calf Raise',equipment:['Bodyweight','Tib Bar'],position:null,grip:null,uni:true},
+    {name:'Toe Walk',equipment:['Bodyweight'],position:['Heel','Toe'],grip:null,uni:false},
   ],
   Core:[
     {name:'Ab Rollout',equipment:['Ab Wheel','Barbell'],position:null,grip:null,uni:false},
@@ -2709,7 +3143,11 @@ const DEFAULT_VOLUME_LANDMARKS={
   Shoulders:{mv:4,mev:8,mav:14,mrv:26},Biceps:{mv:4,mev:8,mav:12,mrv:26},
   Triceps:{mv:2,mev:6,mav:9,mrv:18},Quads:{mv:4,mev:8,mav:11.5,mrv:20},
   Hamstrings:{mv:2,mev:6,mav:9,mrv:20},Glutes:{mv:0,mev:4,mav:7,mrv:16},
-  Core:{mv:0,mev:6,mav:10,mrv:25},Calves:{mv:4,mev:8,mav:11,mrv:20}
+  Core:{mv:0,mev:6,mav:10,mrv:25},Calves:{mv:4,mev:8,mav:11,mrv:20},
+  // Small, fast-recovering muscle (dorsiflexors) — genuinely under-researched next to the others
+  // above, so treat these as an even rougher starting point than the rest and tune to your own
+  // recovery sooner rather than later.
+  Tibialis:{mv:2,mev:6,mav:10,mrv:18}
 };
 const MODIFIER_PRESETS=['Paused','Slow Eccentric','Partial Reps','1.5 Reps','Ankle Weights','Chains','Bands','Deficit'];
 function renderModifierChips(containerEl,stateObj,onChange){
@@ -2741,7 +3179,16 @@ function renderModifierChips(containerEl,stateObj,onChange){
 let editingExIdx=null;
 let editExWorkoutMeta={useRIR:false};
 let editExState={muscle:null,exDef:null,equipment:null,position:null,grip:null,isUni:false,modifier:null,modifierCustomMode:false,attachment:null,customValues:{},addingField:null,cablePosition:null,benchBack:null,benchSeat:null,showBenchSetup:false};
-load();initNavs();buildTimerPresets();buildPlateInventoryUI();buildVolumeLandmarksUI();renderHomeScreen();checkForWorkoutDraft();initGoogleSyncWhenReady(20);
+function populateNewExerciseMuscleSelect(){
+  const sel=document.getElementById('new-ex-muscle');
+  if(!sel)return;
+  // Was a hand-written, static option list that had already drifted (still offered the legacy
+  // "Legs" value years after it was split into Quads/Hamstrings — see LEGACY_LEGS_TO_HAMSTRINGS/v2
+  // migration — and would have silently missed Tibialis too). Generated from MUSCLE_GROUPS instead
+  // so it can never drift from the muscles the rest of the app actually tracks again.
+  sel.innerHTML=MUSCLE_GROUPS.map(m=>'<option>'+m+'</option>').join('');
+}
+load();initNavs();buildTimerPresets();buildPlateInventoryUI();buildVolumeLandmarksUI();populateNewExerciseMuscleSelect();renderHomeScreen();checkForWorkoutDraft();initGoogleSyncWhenReady(20);
 document.getElementById('barbell-weight-input').value=state.barbellWeight||20;
 document.getElementById('prog-inc-dumbbell').value=state.progressionIncrements.Dumbbell;
 document.getElementById('prog-inc-cable').value=state.progressionIncrements.Cable;
@@ -8363,6 +8810,21 @@ function openAutoRoutinePoolModal(){
   renderAutoRoutinePoolList();
   openModal('modal-auto-routine-pool');
 }
+// Both built 2026-08-26 (user's explicit bug report: the pool modal could only toggle exercises
+// that already existed in state.exercises — an exercise never yet added to any routine/workout had
+// no way to reach the pool at all, and there was no in-modal path to create one). Reuses the exact
+// same standard picker (full EXERCISE_CATALOGUE browse+search+configure) and New Exercise modal
+// used everywhere else in the app — see pickerAddExercise/saveNewExercise's pickerDestination==='pool'
+// branches for where the result actually lands back in the pool.
+function openAutoRoutinePoolBrowsePicker(){
+  closeModal('modal-auto-routine-pool');
+  setTimeout(()=>openAddExerciseModal('pool'),300);
+}
+function openNewExerciseModalForPool(){
+  pickerDestination='pool';
+  closeModal('modal-auto-routine-pool');
+  openNewExerciseModalFromWorkout();
+}
 function toggleAutoRoutinePoolExercise(exId){
   if(!state.autoRoutinePool)state.autoRoutinePool=[];
   const idx=state.autoRoutinePool.indexOf(exId);
@@ -9390,6 +9852,8 @@ function renderPickerStep(){
   }else if(step===2){
     titleEl.textContent='Configure';
     addBar.style.display='block';
+    const addBarBtn=document.getElementById('picker-add-bar-btn');
+    if(addBarBtn)addBarBtn.textContent=pickerDestination==='pool'?'＋ Add to Pool':pickerDestination==='routine'?'＋ Add to Routine':'＋ Add to Workout';
     const ex=pickerState.exDef;
     const muscle=pickerState.muscle;
     const store=getCatFieldStore(muscle,ex.name);
@@ -9558,6 +10022,12 @@ function pickerAddExercise(){
     if(!editingRoutineExIds.includes(resolved.id))editingRoutineExIds.push(resolved.id);
     closeModal('modal-add-exercise');
     renderEditRoutineExList();
+  }else if(pickerDestination==='pool'){
+    if(!state.autoRoutinePool)state.autoRoutinePool=[];
+    if(!state.autoRoutinePool.includes(resolved.id))state.autoRoutinePool.push(resolved.id);
+    save();
+    closeModal('modal-add-exercise');
+    setTimeout(()=>{renderAutoRoutinePoolList();openModal('modal-auto-routine-pool');},300);
   }else{
     addExerciseToWorkout(resolved.id);
     closeModal('modal-add-exercise');
@@ -9751,10 +10221,21 @@ function saveNewExercise(){
   const uni=document.getElementById('new-ex-uni').checked;
   const name=buildLibraryExName(baseName,uni,modifier);
   const data={name,baseName,muscle:document.getElementById('new-ex-muscle').value,secondary:document.getElementById('new-ex-secondary').value.trim(),secondaryFractions:parseSecondaryFractionsInput(document.getElementById('new-ex-secondary-fractions').value),machine:document.getElementById('new-ex-machine').value,bw:document.getElementById('new-ex-bw').value,note:document.getElementById('new-ex-note').value.trim(),modifier,uni};
+  let newId=editingExId;
   if(editingExId){const ex=getExercise(editingExId);if(ex)Object.assign(ex,data);}
-  else state.exercises.push({id:uid(),generated:false,...data});
+  else{newId=uid();state.exercises.push({id:newId,generated:false,...data});}
   save();renderExerciseDB();closeModal('modal-new-exercise');
-  if(fromWorkout)setTimeout(()=>openAddExerciseModal(pickerDestination),300);
+  if(fromWorkout&&pickerDestination==='pool'){
+    // Pool has no picker step to re-select a just-created custom exercise from (the picker's
+    // search only ever covers EXERCISE_CATALOGUE template movements, never freeform ones) — so
+    // add it straight to the pool here instead of bouncing back through the picker.
+    if(!state.autoRoutinePool)state.autoRoutinePool=[];
+    if(!state.autoRoutinePool.includes(newId))state.autoRoutinePool.push(newId);
+    save();
+    setTimeout(()=>{renderAutoRoutinePoolList();openModal('modal-auto-routine-pool');},300);
+  }else if(fromWorkout){
+    setTimeout(()=>openAddExerciseModal(pickerDestination),300);
+  }
   if(activeWorkout)renderActiveWorkout();
 }
 
