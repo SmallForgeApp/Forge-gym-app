@@ -672,7 +672,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-08-27.2</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-08-27.4</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1117,7 +1117,18 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
      state.exercises. Reuses playTimerSound()/fireTimerCompleteAlert() from the rest-timer system
      (pure side-effect functions, no workout-specific coupling) but its own drift-corrected
      countdown state/vars — sharing the single global rest-timer bar risked a stretch-hold
-     colliding with an actual in-workout rest timer if both ever ran at once. -->
+     colliding with an actual in-workout rest timer if both ever ran at once.
+     EXPANDED 2026-08-27 (round 2, user's explicit list): multiple named Physio Routines instead of
+     one flat "do everything" list (state.physioRoutines — an ordered exerciseIds array, reordered
+     via the same initLongPressDragSort helper every other reorderable list in the app already
+     uses); per-routine weekly consistency (own getPhysioWeekBuckets, same calendar-Monday
+     convention as Home's getWeekBuckets — the app's one deliberately-calendar-based window, so
+     this reuses that same shape rather than the rolling-7-day convention everything volume-related
+     uses); history gets a delete-per-entry and Clear All; reps-type exercises now carry forward
+     last logged reps/weight (getLastPhysioRepsLog) instead of always resetting to the exercise's
+     stored default; a third exercise type, Max Hold (stopwatch counts UP, manually stopped,
+     recorded time compared against the all-time best via getPhysioMaxHoldBest) for the
+     hold-longer-each-time goal, distinct from the fixed-duration countdown Hold type. -->
 <div class="screen" id="screen-physio">
   <div class="workout-header" style="padding-bottom:14px">
     <div style="display:flex;align-items:center;gap:10px">
@@ -1127,14 +1138,20 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
   </div>
   <div class="scroll pb">
     <div style="padding:12px 16px 0">
-      <button class="btn btn-primary btn-full" onclick="startPhysioSession()">▶ Start Session</button>
-      <div style="display:flex;gap:10px;margin-top:10px">
-        <button class="btn btn-ghost flex-1" onclick="openNewPhysioExerciseModal()">＋ Add Exercise</button>
-        <button class="btn btn-ghost flex-1" onclick="openPhysioHistoryModal()">🕘 History</button>
-      </div>
+      <button class="btn btn-primary btn-full" onclick="openPhysioRoutineEditModal()">＋ New Physio Routine</button>
     </div>
-    <div class="section-label">Exercises</div>
-    <div id="physio-exercise-list" style="padding:0 16px 20px"></div>
+    <div class="section-label">Routines</div>
+    <div id="physio-routine-list" style="padding:0 16px 8px"></div>
+
+    <div class="section-label" style="display:flex;align-items:center;justify-content:space-between;padding-right:16px">
+      <span>Exercise Library</span>
+      <span style="cursor:pointer;color:var(--accent);font-size:12px;font-weight:700" onclick="openNewPhysioExerciseModal()">＋ Add</span>
+    </div>
+    <div id="physio-exercise-list" style="padding:0 16px 8px"></div>
+
+    <div style="padding:8px 16px 20px">
+      <button class="btn btn-ghost btn-full" onclick="openPhysioHistoryModal()">🕘 History</button>
+    </div>
   </div>
 </div>
 
@@ -1149,9 +1166,11 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
   <div class="scroll pb" style="display:flex;flex-direction:column;align-items:center;padding-top:24px">
     <div class="small text3" style="text-transform:uppercase;letter-spacing:1px" id="physio-session-exname"></div>
     <div class="small text3 mt4" id="physio-session-bodyarea"></div>
+    <div class="small text3 mt4" id="physio-session-note" style="display:none;font-style:italic;padding:0 24px;text-align:center"></div>
     <div id="physio-hold-display-wrap">
       <div style="font-size:48px;font-weight:700;margin-top:22px;font-variant-numeric:tabular-nums;text-align:center" id="physio-hold-display">0:00</div>
     </div>
+    <div class="small text2 mt4" id="physio-session-bestref" style="display:none"></div>
     <div id="physio-reps-input-wrap" style="display:none;width:100%;padding:0 16px;margin-top:22px">
       <div style="display:flex;gap:10px">
         <div style="flex:1">
@@ -1186,9 +1205,10 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <div class="input-label mt12">Body Area</div>
       <input id="physio-ex-bodyarea" placeholder="e.g. Hip Flexors, Ankles, Neck"/>
       <div class="input-label mt12">Type</div>
-      <div style="display:flex;gap:8px">
-        <button type="button" class="sort-chip active" id="physio-ex-type-hold-chip" style="flex:1;text-align:center" onclick="setPhysioExerciseType('hold')">⏱ Timed Hold</button>
-        <button type="button" class="sort-chip" id="physio-ex-type-reps-chip" style="flex:1;text-align:center" onclick="setPhysioExerciseType('reps')">🔁 Reps</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button type="button" class="sort-chip active" id="physio-ex-type-hold-chip" style="flex:1;min-width:100px;text-align:center" onclick="setPhysioExerciseType('hold')">⏱ Hold</button>
+        <button type="button" class="sort-chip" id="physio-ex-type-reps-chip" style="flex:1;min-width:100px;text-align:center" onclick="setPhysioExerciseType('reps')">🔁 Reps</button>
+        <button type="button" class="sort-chip" id="physio-ex-type-maxhold-chip" style="flex:1;min-width:100px;text-align:center" onclick="setPhysioExerciseType('maxHold')">⏳ Max Hold</button>
       </div>
       <div id="physio-ex-hold-fields" style="display:flex;gap:10px;margin-top:12px">
         <div style="flex:1">
@@ -1214,7 +1234,12 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
           <input id="physio-ex-weight" type="number" inputmode="decimal" min="0" step="0.5" placeholder="Bodyweight"/>
         </div>
       </div>
-      <div class="small text3 mt4" style="line-height:1.5">Reps-type exercises are still logged in this same separate physio section — no progression suggestions, no muscle volume tracking, same as a timed hold.</div>
+      <div id="physio-ex-maxhold-fields" style="display:none;margin-top:12px">
+        <div class="input-label">Rounds</div>
+        <input id="physio-ex-rounds-maxhold" type="number" inputmode="numeric" min="1" value="3"/>
+        <div class="small text3 mt4" style="line-height:1.5">No fixed time — you start the timer and stop it yourself when you're done. The app remembers your longest-ever hold so you can try to beat it next time.</div>
+      </div>
+      <div class="small text3 mt4" style="line-height:1.5">No progression suggestions or muscle volume tracking either way — this stays in its own separate physio section.</div>
       <div class="input-label mt12">Note (optional)</div>
       <input id="physio-ex-note" placeholder="Cues, band color, setup..."/>
     </div>
@@ -1225,12 +1250,32 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
   </div>
 </div>
 
+<div class="modal-overlay" id="modal-physio-routine-edit">
+  <div class="modal"><div class="modal-handle"></div><div class="modal-title" id="physio-routine-modal-title">New Physio Routine</div>
+    <div class="modal-body">
+      <div class="input-label">Name</div>
+      <input id="physio-routine-name" placeholder="e.g. Morning Mobility"/>
+      <div class="input-label mt12">Exercises in this routine</div>
+      <div class="small text3 mb8">Long-press and drag a row to reorder.</div>
+      <div id="physio-routine-ex-list"></div>
+      <div class="input-label mt12">Add from library</div>
+      <div id="physio-routine-add-list"></div>
+    </div>
+    <div class="modal-actions" style="flex-wrap:wrap">
+      <button class="btn btn-ghost flex-1" style="min-width:110px" onclick="closeModal('modal-physio-routine-edit')">Cancel</button>
+      <button class="btn btn-danger flex-1" style="min-width:110px;display:none" id="physio-routine-delete-btn" onclick="deletePhysioRoutine()">Delete</button>
+      <button class="btn btn-primary flex-1" style="min-width:110px" onclick="savePhysioRoutine()">Save</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-physio-history">
   <div class="modal"><div class="modal-handle"></div><div class="modal-title">Physio History</div>
     <div class="modal-body">
       <div id="physio-history-list" style="max-height:60vh;overflow-y:auto"></div>
     </div>
     <div class="modal-actions">
+      <button class="btn btn-danger flex-1" onclick="clearAllPhysioHistory()">Clear All</button>
       <button class="btn btn-primary flex-1" onclick="closeModal('modal-physio-history')">Done</button>
     </div>
   </div>
@@ -2092,6 +2137,7 @@ function load(){
   // for imbalance notes only — a different, coexisting concept).
   if(!state.priorityHistory)state.priorityHistory=[];
   if(!state.physioExercises)state.physioExercises=[];
+  if(!state.physioRoutines)state.physioRoutines=[];
   if(!state.physioHistory)state.physioHistory=[];
   Object.keys(state.volumeLandmarks).forEach(m=>{if(!state.musclePriority[m])state.musclePriority[m]='normal';});
   if(!state.homeLayout)state.homeLayout=['meso','startEmpty','chart'];
@@ -2463,28 +2509,52 @@ function switchTab(tab){
 // list (state.physioExercises), its own session flow (rounds × hold-seconds instead of sets ×
 // reps), its own history log (state.physioHistory) — never touches state.exercises/state.history,
 // so Auto Volume, Review's volume charts, and muscle landmarks are completely unaware this exists.
-let physioSession=null; // {exercises:[{id,name,bodyArea,type,rounds:[{seconds,done}] or [{reps,weight,done}]}], exIdx, roundIdx}
+// EXPANDED 2026-08-27 (round 2, user's explicit list): named Physio Routines (state.physioRoutines
+// — ordered exerciseIds), per-routine weekly consistency, history delete/clear-all, reps-type
+// carries forward last logged reps/weight, and a new Max Hold type (open-ended stopwatch you stop
+// yourself, compared against your all-time best).
+let physioSession=null; // {routineId,routineName,startedAt,exercises:[{id,name,bodyArea,note,type,rounds:[...]}], exIdx, roundIdx}
 let physioExerciseType='hold'; // transient UI state for the New/Edit Physio Exercise modal's type toggle
+let physioTimerDirection='down'; // 'down' for fixed Hold (countdown), 'up' for Max Hold (stopwatch) — only affects the red near-zero flash, which only makes sense counting down
+let editingPhysioRoutineId=null,editingPhysioRoutineExIds=[];
 function openPhysioScreen(){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('screen-physio').classList.add('active');
+  renderPhysioRoutineList();
   renderPhysioExerciseList();
+}
+function formatPhysioTime(seconds){
+  seconds=Math.max(0,Math.round(seconds));
+  const m=Math.floor(seconds/60),s=seconds%60;
+  return m>0?m+'m '+s+'s':s+'s';
+}
+function formatPhysioDuration(seconds){
+  const m=Math.round(seconds/60);
+  return m<1?'<1 min':m+' min';
 }
 function physioExerciseSummary(ex){
   if(ex.type==='reps')return ex.rounds+'×'+ex.reps+' reps'+(ex.weight?' @ '+ex.weight+'kg':'');
+  if(ex.type==='maxHold')return ex.rounds+'× max hold';
   return ex.rounds+'×'+ex.seconds+'s';
+}
+function physioExerciseTypeIcon(ex){
+  if(ex.type==='reps')return'🔁 ';
+  if(ex.type==='maxHold')return'⏳ ';
+  return'⏱ ';
 }
 function renderPhysioExerciseList(){
   const list=document.getElementById('physio-exercise-list');
+  if(!list)return;
   if(!state.physioExercises.length){
-    list.innerHTML='<div class="small text3" style="padding:20px 0;text-align:center">No physio exercises yet — add one, or just hit Start Session once you have.</div>';
+    list.innerHTML='<div class="small text3" style="padding:20px 0;text-align:center">No physio exercises yet — add one to start building a routine.</div>';
     return;
   }
   list.innerHTML=state.physioExercises.map(ex=>
     '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:var(--bg2);border-radius:10px;margin-bottom:8px">'
     +'<div style="min-width:0;flex:1" onclick="openNewPhysioExerciseModal(\''+ex.id+'\')">'
       +'<div style="font-weight:600;font-size:14px">'+escHtml(ex.name)+'</div>'
-      +'<div class="small text3">'+(ex.bodyArea?escHtml(ex.bodyArea)+' · ':'')+(ex.type==='reps'?'🔁 ':'⏱ ')+physioExerciseSummary(ex)+'</div>'
+      +'<div class="small text3">'+(ex.bodyArea?escHtml(ex.bodyArea)+' · ':'')+physioExerciseTypeIcon(ex)+physioExerciseSummary(ex)+'</div>'
+      +(ex.note?'<div class="small text3" style="margin-top:2px;font-style:italic">'+escHtml(ex.note)+'</div>':'')
     +'</div>'
     +'<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deletePhysioExercise(\''+ex.id+'\')">🗑</button>'
     +'</div>'
@@ -2494,8 +2564,10 @@ function setPhysioExerciseType(type){
   physioExerciseType=type;
   document.getElementById('physio-ex-type-hold-chip').classList.toggle('active',type==='hold');
   document.getElementById('physio-ex-type-reps-chip').classList.toggle('active',type==='reps');
+  document.getElementById('physio-ex-type-maxhold-chip').classList.toggle('active',type==='maxHold');
   document.getElementById('physio-ex-hold-fields').style.display=type==='hold'?'flex':'none';
   document.getElementById('physio-ex-reps-fields').style.display=type==='reps'?'flex':'none';
+  document.getElementById('physio-ex-maxhold-fields').style.display=type==='maxHold'?'block':'none';
 }
 function openNewPhysioExerciseModal(id){
   editingPhysioExId=id||null;
@@ -2504,31 +2576,37 @@ function openNewPhysioExerciseModal(id){
   document.getElementById('physio-ex-name').value=ex?ex.name:'';
   document.getElementById('physio-ex-bodyarea').value=ex?ex.bodyArea:'';
   setPhysioExerciseType(ex?ex.type||'hold':'hold');
-  document.getElementById('physio-ex-rounds').value=ex&&ex.type!=='reps'?ex.rounds:3;
-  document.getElementById('physio-ex-seconds').value=ex&&ex.type!=='reps'?ex.seconds:30;
+  document.getElementById('physio-ex-rounds').value=ex&&ex.type!=='reps'&&ex.type!=='maxHold'?ex.rounds:3;
+  document.getElementById('physio-ex-seconds').value=ex&&ex.type!=='reps'&&ex.type!=='maxHold'?ex.seconds:30;
   document.getElementById('physio-ex-rounds-reps').value=ex&&ex.type==='reps'?ex.rounds:3;
   document.getElementById('physio-ex-reps').value=ex&&ex.type==='reps'?ex.reps:12;
   document.getElementById('physio-ex-weight').value=ex&&ex.type==='reps'&&ex.weight?ex.weight:'';
+  document.getElementById('physio-ex-rounds-maxhold').value=ex&&ex.type==='maxHold'?ex.rounds:3;
   document.getElementById('physio-ex-note').value=ex?(ex.note||''):'';
   openModal('modal-new-physio-exercise');
 }
 function saveNewPhysioExercise(){
   const name=document.getElementById('physio-ex-name').value.trim();if(!name)return;
   const type=physioExerciseType;
-  const data=type==='reps'?{
-    name,type,
-    bodyArea:document.getElementById('physio-ex-bodyarea').value.trim(),
-    rounds:Math.max(1,parseInt(document.getElementById('physio-ex-rounds-reps').value)||3),
-    reps:Math.max(1,parseInt(document.getElementById('physio-ex-reps').value)||12),
-    weight:parseFloat(document.getElementById('physio-ex-weight').value)||0,
-    note:document.getElementById('physio-ex-note').value.trim()
-  }:{
-    name,type,
-    bodyArea:document.getElementById('physio-ex-bodyarea').value.trim(),
-    rounds:Math.max(1,parseInt(document.getElementById('physio-ex-rounds').value)||3),
-    seconds:Math.max(1,parseInt(document.getElementById('physio-ex-seconds').value)||30),
-    note:document.getElementById('physio-ex-note').value.trim()
-  };
+  const bodyArea=document.getElementById('physio-ex-bodyarea').value.trim();
+  const note=document.getElementById('physio-ex-note').value.trim();
+  let data;
+  if(type==='reps'){
+    data={name,type,bodyArea,note,
+      rounds:Math.max(1,parseInt(document.getElementById('physio-ex-rounds-reps').value)||3),
+      reps:Math.max(1,parseInt(document.getElementById('physio-ex-reps').value)||12),
+      weight:parseFloat(document.getElementById('physio-ex-weight').value)||0
+    };
+  }else if(type==='maxHold'){
+    data={name,type,bodyArea,note,
+      rounds:Math.max(1,parseInt(document.getElementById('physio-ex-rounds-maxhold').value)||3)
+    };
+  }else{
+    data={name,type,bodyArea,note,
+      rounds:Math.max(1,parseInt(document.getElementById('physio-ex-rounds').value)||3),
+      seconds:Math.max(1,parseInt(document.getElementById('physio-ex-seconds').value)||30)
+    };
+  }
   if(editingPhysioExId){
     const ex=state.physioExercises.find(e=>e.id===editingPhysioExId);
     // Full replace (not Object.assign merge) when switching type — an old exercise edited from
@@ -2542,24 +2620,178 @@ function saveNewPhysioExercise(){
   renderPhysioExerciseList();
 }
 function deletePhysioExercise(id){
-  forgeConfirm('Delete exercise?','This removes it from your physio list. Past history entries are unaffected.',()=>{
+  forgeConfirm('Delete exercise?','This removes it from your physio library and any routines using it. Past history entries are unaffected.',()=>{
     state.physioExercises=state.physioExercises.filter(e=>e.id!==id);
+    state.physioRoutines.forEach(r=>{r.exerciseIds=r.exerciseIds.filter(exId=>exId!==id);});
     save();
     renderPhysioExerciseList();
+    renderPhysioRoutineList();
   });
 }
-function startPhysioSession(){
-  if(!state.physioExercises.length){
-    openNewPhysioExerciseModal();
+// ── PHYSIO ROUTINES (2026-08-27, user's explicit ask: "build different physio routines" instead
+// of one flat always-do-everything list) ──
+// Calendar-Monday windows, matching Home's getWeekBuckets — the app's one deliberately calendar-
+// based window (everything volume-related elsewhere uses a rolling 7-day window instead; this
+// mirrors the OTHER convention on purpose since it's the same "how many weeks did I actually hit
+// this" question Home's own Weekly Consistency chart answers).
+function getPhysioWeekBuckets(routineId,numWeeks){
+  const now=new Date();
+  const day=now.getDay();
+  const diffToMonday=(day===0?-6:1-day);
+  const thisMonday=new Date(now.getFullYear(),now.getMonth(),now.getDate()+diffToMonday);
+  const buckets=[];
+  for(let i=numWeeks-1;i>=0;i--){
+    const start=new Date(thisMonday);start.setDate(thisMonday.getDate()-7*i);
+    const end=new Date(start);end.setDate(start.getDate()+7);
+    const count=(state.physioHistory||[]).filter(s=>{if(!s||s.routineId!==routineId)return false;const d=new Date(s.date);return d>=start&&d<end;}).length;
+    buckets.push({start,count});
+  }
+  return buckets;
+}
+function renderPhysioRoutineList(){
+  const list=document.getElementById('physio-routine-list');
+  if(!list)return;
+  if(!state.physioRoutines.length){
+    list.innerHTML='<div class="small text3" style="padding:20px 0;text-align:center">No physio routines yet — build one below, then add exercises from your library.</div>';
     return;
   }
+  list.innerHTML=state.physioRoutines.map(r=>{
+    const buckets=getPhysioWeekBuckets(r.id,5);
+    const maxCount=Math.max(1,...buckets.map(b=>b.count));
+    const barsHtml=buckets.map(b=>
+      '<div style="flex:1;height:22px;display:flex;align-items:flex-end">'
+      +'<div style="width:100%;height:'+(b.count>0?Math.round((b.count/maxCount)*100):8)+'%;min-height:3px;background:'+(b.count>0?'var(--accent)':'var(--bg4)')+';border-radius:2px"></div>'
+      +'</div>'
+    ).join('');
+    return '<div style="padding:12px;background:var(--bg2);border-radius:10px;margin-bottom:8px">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px" onclick="openPhysioRoutineEditModal(\''+r.id+'\')">'
+        +'<div style="min-width:0;flex:1">'
+          +'<div style="font-weight:600;font-size:14px">'+escHtml(r.name)+'</div>'
+          +'<div class="small text3">'+r.exerciseIds.length+' exercise'+(r.exerciseIds.length===1?'':'s')+'</div>'
+        +'</div>'
+        +'<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();startPhysioSession(\''+r.id+'\')" '+(r.exerciseIds.length?'':'disabled')+'>▶ Start</button>'
+      +'</div>'
+      +'<div style="display:flex;gap:4px;margin-top:10px">'+barsHtml+'</div>'
+    +'</div>';
+  }).join('');
+}
+function openPhysioRoutineEditModal(id){
+  editingPhysioRoutineId=id||null;
+  const r=id?state.physioRoutines.find(x=>x.id===id):null;
+  document.getElementById('physio-routine-modal-title').textContent=r?'Edit Physio Routine':'New Physio Routine';
+  document.getElementById('physio-routine-name').value=r?r.name:'';
+  editingPhysioRoutineExIds=r?[...r.exerciseIds]:[];
+  document.getElementById('physio-routine-delete-btn').style.display=r?'block':'none';
+  renderPhysioRoutineEditLists();
+  openModal('modal-physio-routine-edit');
+}
+function renderPhysioRoutineEditLists(){
+  const inList=document.getElementById('physio-routine-ex-list');
+  if(!editingPhysioRoutineExIds.length){
+    inList.innerHTML='<div class="small text3" style="padding:8px 0">No exercises yet — add some below.</div>';
+  }else{
+    inList.innerHTML=editingPhysioRoutineExIds.map((exId,idx)=>{
+      const ex=state.physioExercises.find(e=>e.id===exId);
+      if(!ex)return'';
+      return '<div data-physio-routine-ex-idx="'+idx+'" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--bg2);border-radius:8px;margin-bottom:6px">'
+        +'<div style="font-size:13px;font-weight:600">'+escHtml(ex.name)+'</div>'
+        +'<button class="btn btn-ghost btn-sm" onclick="removePhysioRoutineEx('+idx+')">✕</button>'
+        +'</div>';
+    }).join('');
+  }
+  initLongPressDragSort(inList,'[data-physio-routine-ex-idx]','data-physio-routine-ex-idx','button',(fromIdx,toIdx)=>{
+    fromIdx=parseInt(fromIdx);toIdx=parseInt(toIdx);
+    const moved=editingPhysioRoutineExIds.splice(fromIdx,1)[0];
+    editingPhysioRoutineExIds.splice(toIdx,0,moved);
+    renderPhysioRoutineEditLists();
+  });
+  const addList=document.getElementById('physio-routine-add-list');
+  const remaining=state.physioExercises.filter(ex=>!editingPhysioRoutineExIds.includes(ex.id));
+  addList.innerHTML=remaining.length?remaining.map(ex=>
+    '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--bg3);border-radius:8px;margin-bottom:6px;cursor:pointer" onclick="addPhysioRoutineEx(\''+ex.id+'\')">'
+    +'<div style="font-size:13px">'+escHtml(ex.name)+'</div>'
+    +'<span style="font-size:16px;color:var(--accent)">＋</span>'
+    +'</div>'
+  ).join(''):'<div class="small text3" style="padding:8px 0">No more exercises to add — create one from the library first.</div>';
+}
+function addPhysioRoutineEx(exId){
+  editingPhysioRoutineExIds.push(exId);
+  renderPhysioRoutineEditLists();
+}
+function removePhysioRoutineEx(idx){
+  editingPhysioRoutineExIds.splice(idx,1);
+  renderPhysioRoutineEditLists();
+}
+function savePhysioRoutine(){
+  const name=document.getElementById('physio-routine-name').value.trim();if(!name)return;
+  if(editingPhysioRoutineId){
+    const r=state.physioRoutines.find(x=>x.id===editingPhysioRoutineId);
+    if(r){r.name=name;r.exerciseIds=[...editingPhysioRoutineExIds];}
+  }else{
+    state.physioRoutines.push({id:uid(),name,exerciseIds:[...editingPhysioRoutineExIds]});
+  }
+  save();
+  closeModal('modal-physio-routine-edit');
+  renderPhysioRoutineList();
+}
+function deletePhysioRoutine(){
+  const id=editingPhysioRoutineId;if(!id)return;
+  forgeConfirm('Delete this routine?','The exercises themselves stay in your library — only this routine grouping is removed. Past history is unaffected.',()=>{
+    state.physioRoutines=state.physioRoutines.filter(r=>r.id!==id);
+    save();
+    closeModal('modal-physio-routine-edit');
+    renderPhysioRoutineList();
+  });
+}
+// ── PHYSIO CARRY-FORWARD (2026-08-27, user's explicit ask: "next physio session to remember the
+// weight from the previous") ──
+// Reps-type: last logged reps/weight (continuity, not a record — a rehab exercise's reps/weight
+// is something you maintain/adjust by feel, not chase upward). Max Hold: the all-time BEST across
+// every past session (a genuine personal record to beat, per the user's explicit framing —
+// different intent from reps-type, so a different lookup on purpose).
+function getLastPhysioRepsLog(exId){
+  for(const sess of state.physioHistory){
+    const entry=sess.entries.find(e=>e.exId===exId&&e.type==='reps');
+    if(!entry)continue;
+    const done=entry.rounds.filter(r=>r.done);
+    if(!done.length)continue;
+    const last=done[done.length-1];
+    return{reps:last.reps,weight:last.weight};
+  }
+  return null;
+}
+function getPhysioMaxHoldBest(exId){
+  let best=null;
+  (state.physioHistory||[]).forEach(sess=>{
+    sess.entries.forEach(e=>{
+      if(e.exId!==exId||e.type!=='maxHold')return;
+      e.rounds.forEach(r=>{if(r.done&&r.seconds!=null&&(best===null||r.seconds>best))best=r.seconds;});
+    });
+  });
+  return best;
+}
+function startPhysioSession(routineId){
+  const routine=state.physioRoutines.find(r=>r.id===routineId);
+  if(!routine||!routine.exerciseIds.length)return;
+  const exList=routine.exerciseIds.map(exId=>state.physioExercises.find(e=>e.id===exId)).filter(Boolean);
+  if(!exList.length)return;
   physioSession={
-    exercises:state.physioExercises.map(ex=>({
-      id:ex.id,name:ex.name,bodyArea:ex.bodyArea,type:ex.type||'hold',
-      rounds:ex.type==='reps'
-        ?Array.from({length:ex.rounds},()=>({reps:ex.reps,weight:ex.weight||0,done:false}))
-        :Array.from({length:ex.rounds},()=>({seconds:ex.seconds,done:false}))
-    })),
+    routineId:routine.id,routineName:routine.name,startedAt:Date.now(),
+    exercises:exList.map(ex=>{
+      if(ex.type==='reps'){
+        const last=getLastPhysioRepsLog(ex.id);
+        const defReps=last&&last.reps!=null?last.reps:ex.reps;
+        const defWeight=last&&last.weight!=null?last.weight:(ex.weight||0);
+        return{id:ex.id,name:ex.name,bodyArea:ex.bodyArea,note:ex.note,type:'reps',
+          rounds:Array.from({length:ex.rounds},()=>({reps:defReps,weight:defWeight,done:false}))};
+      }
+      if(ex.type==='maxHold'){
+        return{id:ex.id,name:ex.name,bodyArea:ex.bodyArea,note:ex.note,type:'maxHold',
+          rounds:Array.from({length:ex.rounds},()=>({seconds:null,done:false}))};
+      }
+      return{id:ex.id,name:ex.name,bodyArea:ex.bodyArea,note:ex.note,type:'hold',
+        rounds:Array.from({length:ex.rounds},()=>({seconds:ex.seconds,done:false}))};
+    }),
     exIdx:0,roundIdx:0
   };
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
@@ -2574,31 +2806,58 @@ function currentPhysioStep(){
 }
 function renderPhysioSessionStep(){
   stopPhysioHold();
+  stopPhysioMaxHold();
   const step=currentPhysioStep();
   if(!step){finishPhysioSession();return;}
   const{ex,round}=step;
   document.getElementById('physio-session-progress').textContent='Exercise '+(physioSession.exIdx+1)+' of '+physioSession.exercises.length;
   document.getElementById('physio-session-exname').textContent=ex.name;
   document.getElementById('physio-session-bodyarea').textContent=ex.bodyArea||'';
+  const noteEl=document.getElementById('physio-session-note');
+  noteEl.textContent=ex.note||'';
+  noteEl.style.display=ex.note?'block':'none';
   document.getElementById('physio-session-round').textContent='Round '+(physioSession.roundIdx+1)+' of '+ex.rounds.length;
+
   const isReps=ex.type==='reps';
+  const isMaxHold=ex.type==='maxHold';
   document.getElementById('physio-hold-display-wrap').style.display=isReps?'none':'block';
   document.getElementById('physio-reps-input-wrap').style.display=isReps?'block':'none';
-  document.getElementById('physio-hold-start-btn').style.display=isReps?'none':'block';
+
+  const startBtn=document.getElementById('physio-hold-start-btn');
+  startBtn.style.display=isReps?'none':'block';
+
+  const bestRefEl=document.getElementById('physio-session-bestref');
+  if(isMaxHold){
+    const best=getPhysioMaxHoldBest(ex.id);
+    bestRefEl.textContent=best?'🏆 Best so far: '+formatPhysioTime(best):'No record yet — set the bar today';
+    bestRefEl.style.display='block';
+  }else{
+    bestRefEl.style.display='none';
+  }
+
   if(isReps){
     document.getElementById('physio-reps-input').value=round.reps;
     document.getElementById('physio-weight-input').value=round.weight||'';
+  }else if(isMaxHold){
+    physioTimerDirection='up';
+    physioHoldRemaining=0;
+    updatePhysioHoldDisplay();
+    startBtn.textContent='▶ Start Timer';
+    startBtn.onclick=startPhysioMaxHold;
   }else{
+    physioTimerDirection='down';
     physioHoldRemaining=round.seconds;
     updatePhysioHoldDisplay();
-    document.getElementById('physio-hold-start-btn').textContent='▶ Start Hold';
+    startBtn.textContent='▶ Start Hold';
+    startBtn.onclick=startPhysioHold;
   }
 }
 function advancePhysioStep(){
   const step=currentPhysioStep();
   if(step){
     // For reps-type steps, capture whatever the person left in the reps/weight inputs (they may
-    // have adjusted from the exercise's default) before marking the round done.
+    // have adjusted from the carried-forward default) before marking the round done. Max Hold sets
+    // its own round.seconds/done directly in stopPhysioMaxHoldAndRecord before calling this.
     if(step.ex.type==='reps'){
       step.round.reps=parseInt(document.getElementById('physio-reps-input').value)||step.round.reps;
       step.round.weight=parseFloat(document.getElementById('physio-weight-input').value)||0;
@@ -2664,16 +2923,55 @@ function physioHoldTick(){
 function updatePhysioHoldDisplay(){
   const m=Math.floor(physioHoldRemaining/60),s=physioHoldRemaining%60;
   const el=document.getElementById('physio-hold-display');
-  if(el){el.textContent=m+':'+String(s).padStart(2,'0');el.style.color=physioHoldRemaining<=3?'var(--red)':'var(--text)';}
+  if(el){
+    el.textContent=m+':'+String(s).padStart(2,'0');
+    el.style.color=(physioTimerDirection==='down'&&physioHoldRemaining<=3)?'var(--red)':'var(--text)';
+  }
 }
 function stopPhysioHold(){
   if(physioHoldTimer){clearInterval(physioHoldTimer);physioHoldTimer=null;}
   physioHoldEndTime=null;
 }
+// ── MAX HOLD STOPWATCH (2026-08-27) ── counts UP from zero, no target, stopped manually — the
+// "hold it longer each time" goal the user described, distinct from the fixed-duration Hold type
+// above. Reuses the same physio-hold-display element/physioHoldRemaining var (updatePhysioHoldDisplay
+// is direction-agnostic once physioTimerDirection is set) rather than a parallel display, since only
+// one of the two timer modes is ever visible at once (one step is either Hold or Max Hold, never both).
+let physioMaxHoldTimer=null,physioMaxHoldStartTime=null;
+function startPhysioMaxHold(){
+  const step=currentPhysioStep();if(!step)return;
+  try{
+    if(!sharedAudioCtx)sharedAudioCtx=new(window.AudioContext||window.webkitAudioContext)();
+    if(sharedAudioCtx.state==='suspended')sharedAudioCtx.resume();
+  }catch(e){/* audio not available — visual stopwatch still works */}
+  physioMaxHoldStartTime=Date.now();
+  physioHoldRemaining=0;
+  updatePhysioHoldDisplay();
+  const btn=document.getElementById('physio-hold-start-btn');
+  btn.textContent='⏹ Stop & Record';
+  btn.onclick=stopPhysioMaxHoldAndRecord;
+  physioMaxHoldTimer=setInterval(physioMaxHoldTick,1000);
+}
+function physioMaxHoldTick(){
+  physioHoldRemaining=Math.round((Date.now()-physioMaxHoldStartTime)/1000);
+  updatePhysioHoldDisplay();
+}
+function stopPhysioMaxHold(){
+  if(physioMaxHoldTimer){clearInterval(physioMaxHoldTimer);physioMaxHoldTimer=null;}
+  physioMaxHoldStartTime=null;
+}
+function stopPhysioMaxHoldAndRecord(){
+  const step=currentPhysioStep();
+  const elapsed=physioMaxHoldStartTime?Math.round((Date.now()-physioMaxHoldStartTime)/1000):0;
+  stopPhysioMaxHold();
+  if(step)step.round.seconds=elapsed;
+  advancePhysioStep();
+}
 function exitPhysioSession(){
   if(!physioSession){switchTab('home');return;}
   forgeConfirm('Discard this session?','Rounds completed so far won\'t be saved to history.',()=>{
     stopPhysioHold();
+    stopPhysioMaxHold();
     physioSession=null;
     switchTab('home');
   });
@@ -2683,15 +2981,21 @@ function finishPhysioSessionEarly(){
 }
 function finishPhysioSession(){
   stopPhysioHold();
+  stopPhysioMaxHold();
   if(physioSession){
     const entries=physioSession.exercises.map(ex=>({
       exId:ex.id,name:ex.name,type:ex.type,
       rounds:ex.type==='reps'
         ?ex.rounds.map(r=>({reps:r.reps,weight:r.weight,done:r.done}))
-        :ex.rounds.map(r=>({seconds:r.seconds,done:r.done}))
+        :ex.rounds.map(r=>({seconds:r.seconds,done:r.done})) // covers both Hold and Max Hold — both are duration-shaped
     })).filter(e=>e.rounds.some(r=>r.done));
     if(entries.length){
-      state.physioHistory.unshift({id:uid(),date:new Date().toISOString(),entries});
+      state.physioHistory.unshift({
+        id:uid(),date:new Date().toISOString(),
+        routineId:physioSession.routineId,routineName:physioSession.routineName,
+        durationSeconds:Math.round((Date.now()-physioSession.startedAt)/1000),
+        entries
+      });
       save();
     }
   }
@@ -2710,21 +3014,47 @@ function renderPhysioHistoryList(){
   }
   list.innerHTML=state.physioHistory.map(sess=>{
     const d=new Date(sess.date);
-    const holdEntries=sess.entries.filter(e=>e.type!=='reps');
+    const holdEntries=sess.entries.filter(e=>e.type==='hold');
     const repEntries=sess.entries.filter(e=>e.type==='reps');
+    const maxHoldEntries=sess.entries.filter(e=>e.type==='maxHold');
     const totalHolds=holdEntries.reduce((sum,e)=>sum+e.rounds.filter(r=>r.done).length,0);
     const totalSecs=holdEntries.reduce((sum,e)=>sum+e.rounds.filter(r=>r.done).reduce((s,r)=>s+r.seconds,0),0);
     const totalRepSets=repEntries.reduce((sum,e)=>sum+e.rounds.filter(r=>r.done).length,0);
+    const maxHoldDone=maxHoldEntries.flatMap(e=>e.rounds.filter(r=>r.done).map(r=>r.seconds||0));
+    const bestMaxHold=maxHoldDone.length?Math.max(...maxHoldDone):0;
     const exNames=sess.entries.map(e=>escHtml(e.name)).join(', ');
     const summaryParts=[];
     if(totalHolds)summaryParts.push(totalHolds+' holds · '+Math.round(totalSecs/60*10)/10+' min');
     if(totalRepSets)summaryParts.push(totalRepSets+' rep sets');
-    return '<div style="padding:10px 0;border-bottom:1px solid var(--border)">'
-      +'<div style="font-weight:600;font-size:13px">'+d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})+'</div>'
-      +'<div class="small text2" style="margin-top:2px">'+exNames+'</div>'
-      +'<div class="small text3" style="margin-top:2px">'+summaryParts.join(' · ')+'</div>'
+    if(maxHoldDone.length)summaryParts.push('best hold '+formatPhysioTime(bestMaxHold));
+    const titleParts=[];
+    if(sess.routineName)titleParts.push(escHtml(sess.routineName));
+    titleParts.push(d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}));
+    if(sess.durationSeconds)titleParts.push(formatPhysioDuration(sess.durationSeconds));
+    return '<div style="padding:10px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'
+      +'<div style="min-width:0;flex:1">'
+        +'<div style="font-weight:600;font-size:13px">'+titleParts.join(' · ')+'</div>'
+        +'<div class="small text2" style="margin-top:2px">'+exNames+'</div>'
+        +'<div class="small text3" style="margin-top:2px">'+summaryParts.join(' · ')+'</div>'
+      +'</div>'
+      +'<button class="btn btn-ghost btn-sm" onclick="deletePhysioHistoryEntry(\''+sess.id+'\')">🗑</button>'
       +'</div>';
   }).join('');
+}
+function deletePhysioHistoryEntry(id){
+  forgeConfirm('Delete this session?','This removes it from your physio history permanently.',()=>{
+    state.physioHistory=state.physioHistory.filter(s=>s.id!==id);
+    save();
+    renderPhysioHistoryList();
+  });
+}
+function clearAllPhysioHistory(){
+  if(!state.physioHistory.length)return;
+  forgeConfirm('Clear all physio history?','This permanently deletes every logged physio session. This can\'t be undone.',()=>{
+    state.physioHistory=[];
+    save();
+    renderPhysioHistoryList();
+  },{okLabel:'Clear All',danger:true});
 }
 function toggleTheme(){
   document.body.classList.toggle('light-mode',state.lightMode);
@@ -6843,7 +7173,7 @@ function getRoutinePlannedMuscles(routine){
   });
   return seen;
 }
-let sorenessDraft={},pendingSorenessRoutineIdx=null,pendingVolumeMode='extra',pendingEfficientEligibility=null,pendingEfficientVolumeOn=false;
+let sorenessDraft={},pendingSorenessRoutineIdx=null,pendingVolumeMode='extra',pendingEfficientEligibility=null,pendingEfficientVolumeOn=false,pendingAutoSessionLaunch=null;
 // EFFICIENT VOLUME feature (redesigned 2026-08-06): builds a chain of small myo-rep bursts —
 // minimal rest between each, matching how myo-reps actually work (an activation set, then
 // several short-rest bursts of shrinking size, not one continuation) — sized so their combined
@@ -7041,6 +7371,7 @@ function closeSorenessModal(){
   document.getElementById('modal-soreness').classList.remove('open');
   pendingSorenessRoutineIdx=null;
   pendingEfficientEligibility=null;
+  pendingAutoSessionLaunch=null;
 }
 function confirmSorenessAndStart(){
   const i=pendingSorenessRoutineIdx;
@@ -7051,6 +7382,35 @@ function confirmSorenessAndStart(){
   pendingSorenessRoutineIdx=null;
   pendingEfficientEligibility=null;
   if(i!=null)startRoutineWorkout(i,scores,volumeMode,efficientVolumeOn);
+}
+// BUG FIX (2026-08-27, user's report: "when I click to run it, it doesn't ask the pre workout
+// muscle questions about recovery"): Auto Session/Auto Routine never went through
+// beginRoutineWithSorenessCheck at all — it has no backing routine index for that function's
+// routine-shaped lookups (getRoutinePlannedMuscles/getEfficientVolumeEligibility both take a real
+// routine object). Rather than force a fake routine through that path, this mirrors the same
+// soreness-check UI/flow with an Auto-Session-shaped entry and exit: muscles come directly from
+// the picks' own p.muscle list, and there's no ramp-due-volume or Efficient Volume section to show
+// (both are fixed-routine-ramp concepts that don't apply to an ad-hoc Auto Session) — hidden
+// explicitly rather than by borrowing a fake routine to make renderVolumeModePicker/
+// renderEfficientVolumeToggle hide themselves.
+function beginAutoSessionWithSorenessCheck(mesoIdx,picks){
+  const muscles=[...new Set(picks.map(p=>p.muscle))];
+  if(!muscles.length){launchAutoSessionWithPicks(mesoIdx,picks,{});return;}
+  pendingAutoSessionLaunch={mesoIdx,picks};
+  sorenessDraft={};
+  muscles.forEach(m=>sorenessDraft[m]=0);
+  renderSorenessList();
+  document.getElementById('volume-mode-section').style.display='none';
+  document.getElementById('efficient-volume-section').style.display='none';
+  document.getElementById('soreness-start-btn').onclick=confirmSorenessAndStartAutoSession;
+  document.getElementById('modal-soreness').classList.add('open');
+}
+function confirmSorenessAndStartAutoSession(){
+  const launch=pendingAutoSessionLaunch;
+  const scores={...sorenessDraft};
+  document.getElementById('modal-soreness').classList.remove('open');
+  pendingAutoSessionLaunch=null;
+  if(launch)launchAutoSessionWithPicks(launch.mesoIdx,launch.picks,scores);
 }
 // Builds the exercises array a workout WOULD start with for this routine, given the current
 // mesocycle/history state — the single source of truth for both the real seeding path
@@ -8549,13 +8909,23 @@ function getMuscleObservedFrequency(muscle){
 // tier 3 (not enough real history: fewer than AUTO_ROUTINE_FREQ_MIN_ACTIVE_WEEKS active weeks, or
 // this muscle wasn't hit in any of them) falls back to a cadence inferred from the fallback
 // per-session set ceiling instead of guessing a flat number of sessions/week.
+// AUTO_ROUTINE_FALLBACK_MIN_SESSIONS_PER_WEEK=2 (2026-08-27 bug fix, see getMuscleSessionShare's
+// comment on the same date): the tier-3 formula below used to floor at 1 session/week
+// (Math.max(1,...)), which for any muscle with a modest weekly target (MEV-level targets are
+// almost always ≤11 sets — the fallback set-ceiling itself) always resolved to exactly 1 — i.e. a
+// fresh meso's first-ever session was implicitly "recommended" to take literally every tracked
+// muscle's entire weekly target in one sitting, for every muscle at once. Raising the floor to 2
+// reflects ordinary hypertrophy frequency guidance (≥2x/week generally outperforms 1x/week at the
+// same weekly volume) and means the fallback cadence only ever recommends 1x/week for a muscle
+// whose target is large enough it genuinely wouldn't fit in two normal sessions anyway.
+const AUTO_ROUTINE_FALLBACK_MIN_SESSIONS_PER_WEEK=2;
 function getMuscleCapDays(m,muscle){
   const{hits,activeWeeks}=getMuscleObservedFrequency(muscle);
   if(activeWeeks>=AUTO_ROUTINE_FREQ_MIN_ACTIVE_WEEKS&&hits>0){
     return 7/(hits/activeWeeks);
   }
   const weeklyTarget=getMesoMuscleVolumeTarget(m,muscle);
-  const recommendedSessionsPerWeek=Math.max(1,Math.ceil(weeklyTarget/AUTO_ROUTINE_FALLBACK_SETS_PER_SESSION));
+  const recommendedSessionsPerWeek=Math.max(AUTO_ROUTINE_FALLBACK_MIN_SESSIONS_PER_WEEK,Math.ceil(weeklyTarget/AUTO_ROUTINE_FALLBACK_SETS_PER_SESSION));
   return 7/recommendedSessionsPerWeek;
 }
 function getMuscleSessionShare(m,muscle){
@@ -8564,15 +8934,21 @@ function getMuscleSessionShare(m,muscle){
   const remainingTarget=Math.max(0,weeklyTarget-delivered);
   const daysSince=getDaysSinceMuscleDirectlyTrained(muscle);
   const capDays=getMuscleCapDays(m,muscle);
-  let accrued;
-  if(daysSince==null){
-    // Never trained before in real history — same precedent as computeVolumeProgressIncrement's
-    // days==null handling: treat as a full week's worth already accrued rather than dividing by
-    // an undefined gap, so a brand-new muscle isn't starved on its first-ever Auto Session.
-    accrued=weeklyTarget;
-  }else{
-    accrued=(weeklyTarget/7)*Math.min(daysSince,capDays);
-  }
+  // BUG FIX (2026-08-27, user's report — a fresh meso's very first Auto Routine session crammed
+  // ~10 sets into EVERY muscle at once, a 201-minute, 76-set session): the old daysSince===null
+  // branch treated "never trained" as "the full weekly target is already accrued", intended to
+  // stop a brand-new muscle being starved of its very first dose. That reasoning holds for a SINGLE
+  // muscle new to an otherwise-established program, but on day 1 of a meso EVERY muscle is
+  // null simultaneously — so "give it the whole week's target right now" fired for all of them at
+  // once, which is exactly the cross-the-board pile-up this whole accrual system (getMuscleCapDays/
+  // AUTO_ROUTINE_FREQ_WINDOW_WEEKS) exists to prevent. Fix: treat a never-trained muscle as an
+  // effectively infinite gap (Infinity, not a special-cased full week) and let the SAME
+  // min(daysSince,capDays) clamp every other case already goes through apply here too — capDays
+  // (tier 3 fallback, since 0 active weeks) already IS the "fair single-session share" this needs,
+  // no special case required. A brand-new muscle still gets fully dosed on day 1 (nothing is
+  // starved — capDays there is calibrated for exactly this), just not the entire week's worth.
+  const effectiveDaysSince=daysSince==null?Infinity:daysSince;
+  const accrued=(weeklyTarget/7)*Math.min(effectiveDaysSince,capDays);
   const todayShare=Math.round(Math.min(remainingTarget,accrued));
   return{weeklyTarget,delivered,remainingTarget,todayShare,capDays,daysSince};
 }
@@ -8756,7 +9132,7 @@ function reorderForSupersetAdjacency(exercises){
   }
   return result;
 }
-function launchAutoSessionWithPicks(mesoIdx,picks){
+function launchAutoSessionWithPicks(mesoIdx,picks,sorenessScores){
   const m=state.mesocycles[mesoIdx];if(!m)return;
   let exercises=picks.map(p=>{
     const exData=getExercise(p.exId);
@@ -8795,6 +9171,12 @@ function launchAutoSessionWithPicks(mesoIdx,picks){
   if(grants.length)save();
   closeModal('modal-auto-session');
   beginWorkout('Auto Routine',exercises,null,exercises.map(e=>e.exId));
+  // Mirrors startRoutineWorkout's own post-beginWorkout soreness stamp — same guard shape (only
+  // apply if the workout that's actually active right now really is the one we just started, in
+  // case beginWorkout deferred to the Paused-Workout-conflict dialog instead of starting inline).
+  if(activeWorkout&&!activeWorkout.sourceRoutineId&&activeWorkout.name==='Auto Routine'){
+    activeWorkout.muscleSoreness=sorenessScores||{};
+  }
 }
 // Auto Routine exercise pool (2026-08-21, user's explicit request — "an array of exercises... 
 // selected by me that it can choose from"): a curated list, separate from what's in any fixed
@@ -8935,7 +9317,7 @@ function startPreviewedAutoRoutine(){
   if(!autoRoutinePreviewPicks)return;
   const{mesoIdx,picks}=autoRoutinePreviewPicks;
   closeModal('modal-auto-routine-preview');
-  launchAutoSessionWithPicks(mesoIdx,picks);
+  beginAutoSessionWithSorenessCheck(mesoIdx,picks);
 }
 function confirmAutoSession(){
   const input=document.getElementById('auto-session-minutes');
