@@ -672,7 +672,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-08-28.2</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-08-28.3</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -9340,13 +9340,39 @@ let autoRoutinePreviewPicks=null;
 // separate "long session, continue?" popup with a warning banner integrated directly into the
 // same screen — one look, not a confirm-then-preview double-step, and "Start Workout" itself is
 // the override for a long session, same override spirit as before just less friction.
+// Per-muscle weekly-target transparency (2026-08-28, user's follow-up after the trimming fix —
+// they could see the RAW set counts per exercise but had no way to tell whether a chunky-looking
+// number like "5 sets" was actually the muscle's whole week or just a partial catch-up share, so a
+// legitimately-large catch-up dose (e.g. after a skipped session) read as "dumping the whole week
+// in one sitting" even when it wasn't). Shows, per muscle in this session: what it'll be at AFTER
+// this session vs its real weekly target — so a genuine partial share is visibly a partial share,
+// and a muscle that's actually fully caught up (e.g. from a skipped day) is visibly that instead.
+function renderAutoRoutineWeeklyProgressHtml(mesoIdx,picks){
+  const m=state.mesocycles[mesoIdx];if(!m)return'';
+  const muscles=[...new Set(picks.map(p=>p.muscle))];
+  const rows=muscles.map(muscle=>{
+    const sessionSets=picks.filter(p=>p.muscle===muscle).reduce((a,p)=>a+p.sets,0);
+    const weeklyTarget=getMesoMuscleVolumeTarget(m,muscle);
+    const deliveredSoFar=getMuscleVolume(muscle).sets;
+    const afterThisSession=Math.min(weeklyTarget,deliveredSoFar+sessionSets);
+    const pct=weeklyTarget>0?Math.round((afterThisSession/weeklyTarget)*100):100;
+    return'<div class="small text3" style="display:flex;justify-content:space-between;padding:2px 0">'
+      +'<span>'+escHtml(muscle)+'</span>'
+      +'<span>'+Math.round(afterThisSession*10)/10+'/'+Math.round(weeklyTarget*10)/10+' this week ('+pct+'%)</span>'
+      +'</div>';
+  }).join('');
+  return'<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">'
+    +'<div class="small text3" style="font-weight:700;margin-bottom:4px">Toward this week\'s targets (after this session)</div>'
+    +rows+'</div>';
+}
 function showAutoRoutinePreview(mesoIdx,picks,estMinutes){
   autoRoutinePreviewPicks={mesoIdx,picks};
   const warnHtml=estMinutes>WARN_SESSION_MINUTES_THRESHOLD
     ?'<div class="exercise-soreness-warn severe" style="margin:0 0 10px">\u26a0\ufe0f This is an unusually long session (~'+estMinutes+' min). You can still start it below.</div>'
     :'';
   document.getElementById('auto-routine-preview-summary').innerHTML=warnHtml
-    +'<div class="text3">About '+estMinutes+' min \u2014 '+picks.length+' exercise'+(picks.length!==1?'s':'')+', '+picks.reduce((a,p)=>a+p.sets,0)+' total sets.</div>';
+    +'<div class="text3">About '+estMinutes+' min \u2014 '+picks.length+' exercise'+(picks.length!==1?'s':'')+', '+picks.reduce((a,p)=>a+p.sets,0)+' total sets.</div>'
+    +renderAutoRoutineWeeklyProgressHtml(mesoIdx,picks);
   const listEl=document.getElementById('auto-routine-preview-list');
   listEl.innerHTML=picks.map(p=>{
     const exData=getExercise(p.exId);
