@@ -672,7 +672,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-08-27.4</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-08-28.2</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -860,7 +860,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
   <div class="modal"><div class="modal-handle"></div>
     <div class="modal-title">Auto Routine Exercise Pool</div>
     <div class="modal-body">
-      <div class="small text3 mb8">Only exercises checked here are ever candidates for Auto Routine — separate from what's in your fixed routines, so you control exactly what it's allowed to pick.</div>
+      <div class="small text3 mb8">Only exercises checked here are ever candidates for Auto Routine — separate from what's in your fixed routines, so you control exactly what it's allowed to pick. Tap 📌 on any exercise to always use it for its muscle instead of letting freshness-rotation choose.</div>
       <div id="auto-routine-pool-tabs" style="display:flex;gap:6px;margin-bottom:8px"></div>
       <div id="auto-routine-pool-list" style="max-height:52vh;overflow-y:auto"></div>
     </div>
@@ -880,9 +880,9 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-sm" onclick="openAutoRoutinePoolModal()">Edit Pool</button>
     </div>
     <div class="modal-body">
-      <div class="small text3 mb8">Builds today's session from your Auto Routine exercise pool, based on what's needed AND how much time you give it — tell it 30 minutes and it tries to fill 30 minutes; tell it 3 hours and it tries to fill 3 hours. You'll always get a warning (not a hard block) if the result looks unusually long.</div>
+      <div class="small text3 mb8">Builds today's session from your Auto Routine exercise pool, based on what's needed AND how much time you give it — tell it 30 minutes and it tries to fill 30 minutes; tell it 3 hours and it tries to fill 3 hours. Leave it blank and it targets your own typical session length instead of going fully unconstrained. You'll always get a warning (not a hard block) if the result still looks unusually long.</div>
       <div class="input-label">Minutes available (optional)</div>
-      <input id="auto-session-minutes" type="number" min="1" inputmode="numeric" placeholder="Leave blank for a full session"/>
+      <input id="auto-session-minutes" type="number" min="1" inputmode="numeric" placeholder="Leave blank to use your typical session length"/>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost flex-1" onclick="closeModal('modal-auto-session')">Cancel</button>
@@ -2139,6 +2139,7 @@ function load(){
   if(!state.physioExercises)state.physioExercises=[];
   if(!state.physioRoutines)state.physioRoutines=[];
   if(!state.physioHistory)state.physioHistory=[];
+  if(!state.autoRoutineFixedExIds)state.autoRoutineFixedExIds=[];
   Object.keys(state.volumeLandmarks).forEach(m=>{if(!state.musclePriority[m])state.musclePriority[m]='normal';});
   if(!state.homeLayout)state.homeLayout=['meso','startEmpty','chart'];
   if(state.activeMesoId===undefined)state.activeMesoId=null;
@@ -8674,6 +8675,9 @@ function getDaysSinceExerciseTrained(exId){
 // 2026-08-21: draws from state.autoRoutinePool (a user-curated list, managed via Edit Pool on the
 // Auto Routine modal) when the user has actually set one up — falls back to "anything in any
 // routine" (the original behavior) if the pool is empty, so nothing breaks before it's configured.
+function isAutoRoutineFixed(exId){
+  return!!(state.autoRoutineFixedExIds&&state.autoRoutineFixedExIds.includes(exId));
+}
 function rankCandidatesForMuscle(muscle,excludeExId){
   const candidateIds=new Set();
   if(state.autoRoutinePool&&state.autoRoutinePool.length){
@@ -8696,8 +8700,18 @@ function rankCandidatesForMuscle(muscle,excludeExId){
     const recentPain=!!(lastFeedback&&lastFeedback.jointPain>=2);
     return{exId:id,name:exData.name,muscle:exData.muscle,daysSinceTrained,recentPain};
   });
+  // FIX TO AUTO ROUTINE (2026-08-28, user's explicit request): a pinned exercise sorts ahead of
+  // the normal freshness ranking, so whenever growMuscleOneSet needs to introduce a new exercise
+  // for this muscle, it reaches for the pinned one first instead of whatever's gone longest
+  // untouched — guaranteeing it's the one that shows up, not just eligible to. Recent joint pain
+  // still overrides the pin (auto-regulation safety wins over a static preference — a pin doesn't
+  // force a flared-up exercise back in). Two pins for the same muscle: both sort ahead of non-
+  // pinned candidates, freshness-ordered between themselves. This same ranking also backs the
+  // manual Switch Exercise picker, so a pinned exercise naturally surfaces first there too.
   list.sort((a,b)=>{
     if(a.recentPain!==b.recentPain)return a.recentPain?1:-1;
+    const aFixed=isAutoRoutineFixed(a.exId),bFixed=isAutoRoutineFixed(b.exId);
+    if(aFixed!==bFixed)return aFixed?-1:1;
     const aDays=a.daysSinceTrained==null?Infinity:a.daysSinceTrained;
     const bDays=b.daysSinceTrained==null?Infinity:b.daysSinceTrained;
     return bDays-aDays;
@@ -9210,7 +9224,32 @@ function openNewExerciseModalForPool(){
 function toggleAutoRoutinePoolExercise(exId){
   if(!state.autoRoutinePool)state.autoRoutinePool=[];
   const idx=state.autoRoutinePool.indexOf(exId);
-  if(idx>=0)state.autoRoutinePool.splice(idx,1);else state.autoRoutinePool.push(exId);
+  if(idx>=0){
+    state.autoRoutinePool.splice(idx,1);
+    // Can't stay fixed to Auto Routine if it's not even a pool candidate anymore.
+    if(state.autoRoutineFixedExIds){
+      const fi=state.autoRoutineFixedExIds.indexOf(exId);
+      if(fi>=0)state.autoRoutineFixedExIds.splice(fi,1);
+    }
+  }else{
+    state.autoRoutinePool.push(exId);
+  }
+  save();
+  renderAutoRoutinePoolList();
+}
+// FIX TO AUTO ROUTINE (2026-08-28, user's explicit request): pinning implies pool membership —
+// fixing something not yet in the pool adds it there too, since "always include this" requires it
+// be a candidate in the first place. See rankCandidatesForMuscle for how the pin is actually applied.
+function toggleAutoRoutineFixed(exId){
+  if(!state.autoRoutineFixedExIds)state.autoRoutineFixedExIds=[];
+  if(!state.autoRoutinePool)state.autoRoutinePool=[];
+  const idx=state.autoRoutineFixedExIds.indexOf(exId);
+  if(idx===-1){
+    state.autoRoutineFixedExIds.push(exId);
+    if(!state.autoRoutinePool.includes(exId))state.autoRoutinePool.push(exId);
+  }else{
+    state.autoRoutineFixedExIds.splice(idx,1);
+  }
   save();
   renderAutoRoutinePoolList();
 }
@@ -9264,9 +9303,14 @@ function renderAutoRoutinePoolList(){
   const listHtml=MUSCLE_GROUPS.filter(mu=>byMuscle[mu]&&byMuscle[mu].length).map(muscle=>{
     const items=byMuscle[muscle].map(ex=>{
       const checked=pool.has(ex.id);
-      return'<div style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid var(--border)" onclick="toggleAutoRoutinePoolExercise(\''+ex.id+'\')">'
-        +'<input type="checkbox" '+(checked?'checked':'')+' style="width:auto;pointer-events:none;flex-shrink:0"/>'
-        +'<div class="small">'+escHtml(ex.name)+'</div></div>';
+      const fixed=isAutoRoutineFixed(ex.id);
+      return'<div style="display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid var(--border)">'
+        +'<div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0" onclick="toggleAutoRoutinePoolExercise(\''+ex.id+'\')">'
+          +'<input type="checkbox" '+(checked?'checked':'')+' style="width:auto;pointer-events:none;flex-shrink:0"/>'
+          +'<div class="small" style="min-width:0">'+escHtml(ex.name)+'</div>'
+        +'</div>'
+        +'<button class="btn btn-ghost btn-sm" style="flex-shrink:0;padding:4px 8px'+(fixed?';color:var(--accent)':'')+'" onclick="event.stopPropagation();toggleAutoRoutineFixed(\''+ex.id+'\')" title="'+(fixed?'Unfix':'Always use this one for '+escHtml(muscle))+'">'+(fixed?'📌 Fixed':'📌')+'</button>'
+        +'</div>';
     }).join('');
     return'<div style="margin-top:12px"><div class="small text3" style="font-weight:700;text-transform:uppercase;letter-spacing:0.5px">'+escHtml(muscle)+'</div>'+items+'</div>';
   }).join('');
@@ -9319,10 +9363,31 @@ function startPreviewedAutoRoutine(){
   closeModal('modal-auto-routine-preview');
   beginAutoSessionWithSorenessCheck(mesoIdx,picks);
 }
+// BUG FIX (2026-08-28, user's second report of the same 76-set/200min session even after the
+// getMuscleSessionShare accrual fix): the real remaining cause was here, not in that per-muscle
+// math — leaving "Minutes available" blank passed minutesAvailable=null straight into
+// buildAutoSession, and its whole time-trimming block is gated behind `if(minutesAvailable)`, so a
+// blank field meant genuinely NO trim of any kind ran, regardless of how many muscles needed real
+// catch-up work at once. The old placeholder ("Leave blank for a full session") was honest about
+// that being the design, but "unlimited" is not what a person leaving a field blank actually wants
+// — it's what happens when several muscles each have a legitimate few-set need and there's no
+// session-wide budget to weigh them against. Fix: blank now resolves to the person's own typical
+// real session length (median of recent logged workout durations) instead of null, so the exact
+// same trimming logic that already exists for an explicit number now also runs for the default
+// case. An explicit large number (someone genuinely wants a 3-hour session) still behaves exactly
+// as before — this only changes what happens when nothing is typed.
+function getTypicalSessionMinutes(){
+  const durations=(state.history||[]).filter(w=>w&&w.duration>0).slice(0,10).map(w=>w.duration/60);
+  if(!durations.length)return 75; // no real session history yet — sane placeholder default, not a guess presented as fact
+  durations.sort((a,b)=>a-b);
+  const mid=Math.floor(durations.length/2);
+  const median=durations.length%2?durations[mid]:(durations[mid-1]+durations[mid])/2;
+  return Math.round(median);
+}
 function confirmAutoSession(){
   const input=document.getElementById('auto-session-minutes');
   const val=input?parseInt(input.value,10):NaN;
-  const minutes=(!isNaN(val)&&val>0)?val:null;
+  const minutes=(!isNaN(val)&&val>0)?val:getTypicalSessionMinutes();
   const picks=buildAutoSession(autoSessionMesoIdx,minutes);
   if(!picks||!picks.length){
     alert('Nothing left to train right now \u2014 every muscle looks covered for this rolling week, or your Auto Routine pool has no exercises for what\'s needed.');
