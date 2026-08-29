@@ -672,7 +672,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-08-28.3</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-08-28.4</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -880,9 +880,10 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-sm" onclick="openAutoRoutinePoolModal()">Edit Pool</button>
     </div>
     <div class="modal-body">
-      <div class="small text3 mb8">Builds today's session from your Auto Routine exercise pool, based on what's needed AND how much time you give it — tell it 30 minutes and it tries to fill 30 minutes; tell it 3 hours and it tries to fill 3 hours. Leave it blank and it targets your own typical session length instead of going fully unconstrained. You'll always get a warning (not a hard block) if the result still looks unusually long.</div>
+      <div class="small text3 mb8">Builds today's session from your Auto Routine exercise pool, based on what's needed AND how much time you give it — tell it 30 minutes and it tries to fill 30 minutes; tell it 3 hours and it tries to fill 3 hours. Leave it blank and it splits what's currently owed across an assumed 4 sessions this week instead of trying to fit it all in one — fewer/shorter sessions than that means more sessions needed to catch up; more/longer sessions means you can do fewer, or you'll be doing more than the minimum, which is your call either way. You'll always get a warning (not a hard block) if the result still looks unusually long.</div>
       <div class="input-label">Minutes available (optional)</div>
-      <input id="auto-session-minutes" type="number" min="1" inputmode="numeric" placeholder="Leave blank to use your typical session length"/>
+      <input id="auto-session-minutes" type="number" min="1" inputmode="numeric" placeholder="Leave blank to use the default below"/>
+      <div class="small text3 mt4" id="auto-session-default-estimate"></div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost flex-1" onclick="closeModal('modal-auto-session')">Cancel</button>
@@ -8933,13 +8934,25 @@ function getMuscleObservedFrequency(muscle){
 // same weekly volume) and means the fallback cadence only ever recommends 1x/week for a muscle
 // whose target is large enough it genuinely wouldn't fit in two normal sessions anyway.
 const AUTO_ROUTINE_FALLBACK_MIN_SESSIONS_PER_WEEK=2;
+// Fast-recovering small muscles tolerate (and benefit from) much higher frequency than the flat
+// 2x/week floor above assumes — 2026-08-28, user's explicit example: Calves getting a whole week's
+// target (9 sets) crammed into one session after an 11-day break, when in their own words "calves
+// can be trained frequently... every other day" and a single sitting should look more like 2 sets
+// (if hit nearly every session) or 4 (if every other one). The flat floor had no way to express
+// that — it only scaled UP for muscles needing MORE than 2 sessions/week, never up for muscles that
+// could safely take MORE frequency at a proportionally lower per-session dose. This map overrides
+// the floor per muscle (still only a FLOOR — a genuinely large weeklyTarget can still push a listed
+// muscle's own recommendedSessionsPerWeek higher, same as before); muscles not listed keep the
+// flat default. Tibialis/Core included alongside Calves for the same fast-recovery reasoning.
+const AUTO_ROUTINE_MUSCLE_MIN_SESSIONS_PER_WEEK={Calves:4,Tibialis:4,Core:4};
 function getMuscleCapDays(m,muscle){
   const{hits,activeWeeks}=getMuscleObservedFrequency(muscle);
   if(activeWeeks>=AUTO_ROUTINE_FREQ_MIN_ACTIVE_WEEKS&&hits>0){
     return 7/(hits/activeWeeks);
   }
   const weeklyTarget=getMesoMuscleVolumeTarget(m,muscle);
-  const recommendedSessionsPerWeek=Math.max(AUTO_ROUTINE_FALLBACK_MIN_SESSIONS_PER_WEEK,Math.ceil(weeklyTarget/AUTO_ROUTINE_FALLBACK_SETS_PER_SESSION));
+  const muscleFloor=AUTO_ROUTINE_MUSCLE_MIN_SESSIONS_PER_WEEK[muscle]||AUTO_ROUTINE_FALLBACK_MIN_SESSIONS_PER_WEEK;
+  const recommendedSessionsPerWeek=Math.max(muscleFloor,Math.ceil(weeklyTarget/AUTO_ROUTINE_FALLBACK_SETS_PER_SESSION));
   return 7/recommendedSessionsPerWeek;
 }
 function getMuscleSessionShare(m,muscle){
@@ -9319,6 +9332,8 @@ function renderAutoRoutinePoolList(){
 function openAutoSessionModal(mesoIdx){
   autoSessionMesoIdx=mesoIdx;
   const input=document.getElementById('auto-session-minutes');if(input)input.value='';
+  const est=document.getElementById('auto-session-default-estimate');
+  if(est)est.textContent='Default if left blank: ~'+getDefaultAutoSessionMinutes(mesoIdx)+' min (assumes '+AUTO_ROUTINE_DEFAULT_SESSIONS_PER_WEEK+' sessions this week)';
   openModal('modal-auto-session');
 }
 // Home screen entry point (2026-08-21, user's explicit request for a dedicated home-screen
@@ -9394,26 +9409,39 @@ function startPreviewedAutoRoutine(){
 // math — leaving "Minutes available" blank passed minutesAvailable=null straight into
 // buildAutoSession, and its whole time-trimming block is gated behind `if(minutesAvailable)`, so a
 // blank field meant genuinely NO trim of any kind ran, regardless of how many muscles needed real
-// catch-up work at once. The old placeholder ("Leave blank for a full session") was honest about
-// that being the design, but "unlimited" is not what a person leaving a field blank actually wants
-// — it's what happens when several muscles each have a legitimate few-set need and there's no
-// session-wide budget to weigh them against. Fix: blank now resolves to the person's own typical
-// real session length (median of recent logged workout durations) instead of null, so the exact
-// same trimming logic that already exists for an explicit number now also runs for the default
-// case. An explicit large number (someone genuinely wants a 3-hour session) still behaves exactly
-// as before — this only changes what happens when nothing is typed.
-function getTypicalSessionMinutes(){
-  const durations=(state.history||[]).filter(w=>w&&w.duration>0).slice(0,10).map(w=>w.duration/60);
-  if(!durations.length)return 75; // no real session history yet — sane placeholder default, not a guess presented as fact
-  durations.sort((a,b)=>a-b);
-  const mid=Math.floor(durations.length/2);
-  const median=durations.length%2?durations[mid]:(durations[mid-1]+durations[mid])/2;
-  return Math.round(median);
+// catch-up work at once.
+// SUPERSEDED SAME DAY (round 2, user's explicit design): a first cut defaulted blank to the
+// person's own median historical session length, which fixed the total but didn't tell the person
+// WHY that number, or what trade-off changing it implies. Replaced with the user's own spec:
+// assume AUTO_ROUTINE_DEFAULT_SESSIONS_PER_WEEK sessions/week, split whatever's CURRENTLY owed
+// across all muscles evenly across that many, and show the resulting minutes as a labeled estimate
+// (see the modal's live "Default if left blank: ~X min" readout) rather than a silent fallback —
+// so choosing a shorter session explicitly means more sessions needed to catch up, and a longer
+// one means fewer sessions or genuinely more than the minimum, the person's call either way. An
+// explicit typed number is completely unaffected either version.
+const AUTO_ROUTINE_DEFAULT_SESSIONS_PER_WEEK=4;
+// Real remaining work across every muscle right now — same remainingTarget getMuscleSessionShare
+// already computes per muscle (weeklyTarget minus true rolling-7-day delivered), just summed. Used
+// only to size the DEFAULT session length; the accrual/capDays system still governs how much of
+// that total any single session is actually allowed to claim (see getMuscleSessionShare/
+// getMuscleCapDays) — this is a planning estimate, not a second allocation mechanism.
+function getAutoRoutineTotalWeeklyNeed(mesoIdx){
+  const m=state.mesocycles[mesoIdx];if(!m)return 0;
+  return MUSCLE_GROUPS.filter(mu=>mu!=='Full Body').reduce((sum,muscle)=>{
+    if(isMuscleFullyResting(muscle))return sum;
+    return sum+getMuscleSessionShare(m,muscle).remainingTarget;
+  },0);
+}
+function getDefaultAutoSessionMinutes(mesoIdx){
+  const totalNeed=getAutoRoutineTotalWeeklyNeed(mesoIdx);
+  if(totalNeed<=0)return 30; // nothing currently owed anywhere — short floor rather than 0
+  const setsPerDefaultSession=totalNeed/AUTO_ROUTINE_DEFAULT_SESSIONS_PER_WEEK;
+  return Math.max(20,Math.round(setsPerDefaultSession*ISOLATION_SET_SECONDS/60));
 }
 function confirmAutoSession(){
   const input=document.getElementById('auto-session-minutes');
   const val=input?parseInt(input.value,10):NaN;
-  const minutes=(!isNaN(val)&&val>0)?val:getTypicalSessionMinutes();
+  const minutes=(!isNaN(val)&&val>0)?val:getDefaultAutoSessionMinutes(autoSessionMesoIdx);
   const picks=buildAutoSession(autoSessionMesoIdx,minutes);
   if(!picks||!picks.length){
     alert('Nothing left to train right now \u2014 every muscle looks covered for this rolling week, or your Auto Routine pool has no exercises for what\'s needed.');
