@@ -672,7 +672,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-08-29.2</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-08-29.3</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -2141,6 +2141,7 @@ function load(){
   if(!state.physioRoutines)state.physioRoutines=[];
   if(!state.physioHistory)state.physioHistory=[];
   if(!state.autoRoutineMuscleProgress)state.autoRoutineMuscleProgress={};
+  if(!state.autoRoutineActiveMuscles||Array.isArray(state.autoRoutineActiveMuscles.muscles))state.autoRoutineActiveMuscles={};
   if(!state.autoRoutineFixedExIds)state.autoRoutineFixedExIds=[];
   Object.keys(state.volumeLandmarks).forEach(m=>{if(!state.musclePriority[m])state.musclePriority[m]='normal';});
   if(!state.homeLayout)state.homeLayout=['meso','startEmpty','chart'];
@@ -8831,7 +8832,15 @@ function estimateSetSeconds(exId){
 function estimatePicksSeconds(picks){
   return picks.reduce((a,p)=>a+p.sets*estimateSetSeconds(p.exId),0)+countSupersetAdjustedExerciseSlots(picks)*30;
 }
-const AUTO_ROUTINE_EXERCISE_VARIETY_THRESHOLD=5; // 2026-08-21, user's explicit call: beyond ~5 sets of the SAME exercise for a muscle, split the rest onto a different one rather than keep stacking toward the muscle's own tiered cap on one movement.
+// BUG FIX (found via external test handover, same day): this was 5, calibrated back when the
+// per-muscle cap was a flat 10 (PRIORITY_VOLUME_SET_CAP) — beyond 5 on one exercise, split the
+// rest. But the 2026-08-29 tiered scheduler's own exposure caps (fast:3/small:4/large:5) are ALL
+// ≤5, so growMuscleOneSet's cap check (see below) always returned false before the variety check
+// could ever be reached — the split branch was dead code, every muscle always got one exercise for
+// its entire per-session dose regardless of pool size. Lowered to 2 (below even the smallest tier
+// cap) so variety is actually reachable at the new, smaller per-session scale: fast tier splits
+// ~2+1, small ~2+2, large ~2+2+1, pool permitting.
+const AUTO_ROUTINE_EXERCISE_VARIETY_THRESHOLD=2;
 // Adds ONE set toward `muscle`'s total for this session, respecting BOTH the muscle's own tiered
 // per-exposure cap (AUTO_ROUTINE_MUSCLE_TIERS — see the scheduler section above; replaces the old
 // flat PRIORITY_VOLUME_SET_CAP=10-for-everyone check, 2026-08-29) and the per-EXERCISE variety
@@ -8887,6 +8896,17 @@ function getAutoRoutineMuscleProgress(muscle){
   if(!p||p.current==null)return lm.mev;
   return p.current;
 }
+// BUG FIX (found via test suite, same day): freshness used to normalize against a flat 7 days,
+// inherited from Continuous Volume Mode's own formula — a reasonable baseline when everything ran
+// on roughly weekly cadences, but wrong here: the tiered scheduler's own ideal gaps range 1-2.5
+// days, so a fast-recovering muscle (Calves/Tibialis/Core, ideal gap ~1.5 days) trained EXACTLY on
+// its own schedule still only scored ~0.2 freshness on a flat 7-day clock, while a large muscle on
+// its own 2.5-day schedule scored ~0.36 — meaning fast-recovering muscles could almost never win
+// the active/MRV slot, precisely backwards from the user's own stated example (Calves being
+// well-suited to frequent, prioritized training). Fixed to normalize against each muscle's OWN
+// tier-default ideal gap instead of a flat number, so "exactly on schedule" scores the same
+// (~1.0) regardless of whether that schedule is 1.5 or 2.5 days. Uses the tier default rather than
+// the active-adjusted gap (getMuscleGapDays) to avoid a circular readiness<->active-set dependency.
 function getAutoRoutineMuscleReadiness(muscle){
   if(isMuscleStruggling(muscle)||isMuscleFullyResting(muscle))return 0;
   const lm=getMuscleLandmarks(muscle);
@@ -8894,27 +8914,84 @@ function getAutoRoutineMuscleReadiness(muscle){
   const span=lm.mrv-lm.mev;
   const headroom=span>0?Math.max(0,Math.min(1,(lm.mrv-progress)/span)):0;
   const daysSince=getDaysSinceMuscleDirectlyTrained(muscle);
-  const freshness=Math.min(1,(daysSince==null?7:daysSince)/7);
+  const idealGap=getMuscleTier(muscle).idealGapDays;
+  const freshness=Math.min(1,(daysSince==null?idealGap:daysSince)/idealGap);
   return(headroom*0.6+freshness*0.4)*getMuscleTrendMultiplier(muscle);
 }
 // Recomputed fresh every call (not persisted/locked-in) — same "auto-rotates as readiness shifts"
 // philosophy Continuous Volume Mode already uses for its own active set, just without needing a
 // meso to host the setting.
+// BUG FIX (found via 300-session simulation, same day): recomputing from scratch on every single
+// call — no memory of who was picked last time — caused the active set to churn essentially every
+// session, since headroom naturally erodes for whichever muscle is currently being pushed (the
+// exact thing that's supposed to happen as it climbs), letting some OTHER muscle with still-full
+// headroom edge it out almost immediately. Confirmed empirically: across a 300-session realistic
+// simulation, no muscle ever reached MRV — most churned out and got clamped back to MAV before
+// climbing meaningfully past it at all. This mirrors why the real meso's own Continuous Volume Mode
+// has activeStreak TENURE tracking (deliberately left out of this simplified version as "too
+// complex, no clean equivalent without a meso") — that omission turned out to break the feature's
+// entire core promise, not just a minor rough edge. Fixed with a persisted specialization block
+// (state.autoRoutineActiveMuscles): once picked, the same muscles stay active for
+// AUTO_ROUTINE_ACTIVE_BLOCK_DAYS (a real specialization-block length, not a single-session
+// decision) UNLESS one of them hits its own MRV, becomes struggling/resting, or the block simply
+// expires — at which point a fresh pick happens. This is the standing counterpart to what a real
+// meso already gets from picking priority muscles once per pass rather than re-deciding it every
+// set.
+const AUTO_ROUTINE_ACTIVE_BLOCK_DAYS=28; // ~4-week specialization block, matching common RP/coaching guidance for how long a specialization phase typically runs — explicit placeholder, tune with real data
+// BUG FIX (found via extended simulation, same day): the first version tracked one shared "since"
+// timestamp for the whole 2-muscle block and invalidated it ENTIRELY the moment ANY member became
+// ineligible (including simply reaching its own MRV — success, not failure). That meant whichever
+// of the two finished first "poisoned" the whole block and evicted the OTHER member before it had
+// finished its own climb either, forcing both to restart from scratch on a fresh pick. Confirmed
+// via a 1000-session simulation: progress kept plateauing in the low-to-mid 20s, never quite
+// reaching MRV, because the pair kept getting reshuffled together instead of one slot opening up
+// independently once its occupant was actually done. Fixed to track tenure PER MUSCLE
+// (state.autoRoutineActiveMuscles is now {muscle: sinceISOString}, not one shared array+timestamp)
+// — each slot is evaluated and, if needed, refilled independently, so a muscle that's still
+// climbing keeps its slot uninterrupted regardless of what happens to the other one.
 function getAutoRoutineActiveMuscles(){
-  const allMuscles=Object.keys(state.volumeLandmarks||{});
-  const scored=allMuscles
-    .filter(mu=>!isMuscleStruggling(mu)&&!isMuscleFullyResting(mu))
-    .map(mu=>({mu,score:getAutoRoutineMuscleReadiness(mu)}))
-    .filter(x=>x.score>0)
-    .sort((a,b)=>b.score-a.score);
-  return new Set(scored.slice(0,AUTO_ROUTINE_MAX_ACTIVE_MUSCLES).map(x=>x.mu));
+  if(!state.autoRoutineActiveMuscles||Array.isArray(state.autoRoutineActiveMuscles.muscles))state.autoRoutineActiveMuscles={};
+  const rec=state.autoRoutineActiveMuscles;
+  const isSlotValid=(mu)=>{
+    if(!rec[mu])return false;
+    const ageDays=Math.round((Date.now()-new Date(rec[mu]))/864e5);
+    if(ageDays>=AUTO_ROUTINE_ACTIVE_BLOCK_DAYS)return false;
+    if(isMuscleStruggling(mu)||isMuscleFullyResting(mu))return false;
+    if(getAutoRoutineMuscleProgress(mu)>=getMuscleLandmarks(mu).mrv)return false;
+    return true;
+  };
+  let keep=Object.keys(rec).filter(isSlotValid).slice(0,AUTO_ROUTINE_MAX_ACTIVE_MUSCLES);
+  if(keep.length<AUTO_ROUTINE_MAX_ACTIVE_MUSCLES){
+    const allMuscles=Object.keys(state.volumeLandmarks||{});
+    const candidates=allMuscles
+      .filter(mu=>!keep.includes(mu)&&!isMuscleStruggling(mu)&&!isMuscleFullyResting(mu)&&getAutoRoutineMuscleProgress(mu)<getMuscleLandmarks(mu).mrv)
+      .map(mu=>({mu,score:getAutoRoutineMuscleReadiness(mu)}))
+      .filter(x=>x.score>0)
+      .sort((a,b)=>b.score-a.score);
+    const needed=AUTO_ROUTINE_MAX_ACTIVE_MUSCLES-keep.length;
+    keep=keep.concat(candidates.slice(0,needed).map(x=>x.mu));
+  }
+  const newRec={};
+  keep.forEach(mu=>{newRec[mu]=rec[mu]||new Date().toISOString();}); // keep an existing slot's real tenure start; stamp a genuinely new slot fresh
+  state.autoRoutineActiveMuscles=newRec;
+  return new Set(keep);
 }
 // The target Auto Routine's scheduler doses toward — replaces getMesoMuscleVolumeTarget for Auto
 // Routine purposes specifically. That function and its meso-rotation ramp are completely untouched
 // and still used exactly as before by Auto Volume Distribution, Review, and a real meso's own
 // display — this is a parallel number, not a replacement of the underlying function.
+// BUG FIX (found via test suite, same day): this used to just return the raw stored progress
+// directly. advanceAutoRoutineMuscleProgress only clamps that raw value down to MAV when it
+// actually RUNS (once a session launches) — so between sessions, or during the pre-launch preview,
+// a muscle that was active a session or two ago but has since rotated out could still read back
+// its stale, un-clamped (above-MAV) value here, since nothing had re-clamped it yet. Fixed to
+// re-clamp at READ time too, against the CURRENT active set (computed fresh) — this is what
+// actually guarantees "never past MAV unless active" holds at every moment, not just right after
+// the next advance() call happens to run.
 function getAutoRoutineMuscleTargetNow(muscle){
-  return getAutoRoutineMuscleProgress(muscle);
+  const raw=getAutoRoutineMuscleProgress(muscle);
+  const lm=getMuscleLandmarks(muscle);
+  return getAutoRoutineActiveMuscles().has(muscle)?raw:Math.min(raw,lm.mav);
 }
 // Advances progress for whatever was actually trained this session — called once per Auto Routine
 // session (launchAutoSessionWithPicks), replacing the meso-scoped grantMuscleVolumeProgress call
@@ -8933,6 +9010,24 @@ function getAutoRoutineMuscleTargetNow(muscle){
 // gets capped at MAV every single time this runs, no grace period. That's a bigger single-session
 // drop for a muscle that just lost active status than a real detraining curve would suggest, but
 // it's the only way to make the ceiling actually hold at all times rather than approximately.
+// BUG FIX (found via external test handover, same day): this used to call the shared
+// computeVolumeProgressIncrement(muscle) — round(daysSinceLastTrained/7) — which is correct for the
+// real meso's own Continuous Volume Mode (genuinely weekly-paced routines) but returns 0 for any
+// gap under 3.5 days. Since this whole rebuild runs muscles on 1-2.5 day tiered cadences by design,
+// that formula silently blocked ALL progress on nearly every real Auto Routine session — active
+// muscles never actually climbed toward MRV in practice, confirmed via a 90-day/45-session
+// simulation. Fixed with a dedicated increment scaled to THIS muscle's own ideal cadence instead of
+// a hardcoded weekly one: grants idealGapDays/7 sets per exposure, so a muscle exposed every
+// idealGapDays days still nets ~1 set of progress per real week overall — same pacing intent as the
+// meso's own system, just distributed across however many exposures that cadence actually produces
+// instead of assuming exactly one per week. computeVolumeProgressIncrement itself is UNCHANGED and
+// still used exactly as before by the real meso's grantMuscleVolumeProgress.
+function getAutoRoutineProgressIncrement(muscle,activeSet){
+  const days=getDaysSinceMuscleDirectlyTrained(muscle);
+  if(days==null)return 1; // never trained before — same "treat like a normal week's worth" precedent as computeVolumeProgressIncrement
+  const gaps=getMuscleGapDays(muscle,activeSet);
+  return Math.max(0,gaps.idealGapDays/7);
+}
 function advanceAutoRoutineMuscleProgress(trainedMuscles){
   if(!state.autoRoutineMuscleProgress)state.autoRoutineMuscleProgress={};
   const activeSet=getAutoRoutineActiveMuscles();
@@ -8949,7 +9044,7 @@ function advanceAutoRoutineMuscleProgress(trainedMuscles){
     const ceiling=isActive?lm.mrv:lm.mav;
     const cur=Math.max(lm.mev,p.current);
     if(cur>=ceiling)return;
-    const inc=computeVolumeProgressIncrement(muscle);
+    const inc=getAutoRoutineProgressIncrement(muscle,activeSet);
     if(inc<=0)return;
     const next=Math.min(ceiling,cur+inc);
     if(next<=cur)return;
@@ -9013,15 +9108,18 @@ function getAutoRoutineFreqWeekBuckets(){
   }
   return buckets;
 }
-// hits = how many of those weeks this muscle was actually directly trained (same hit definition
-// as getDaysSinceMuscleDirectlyTrained: primary muscle, non-injured exercise, at least one done
-// set). activeWeeks = how many of those weeks the user trained AT ALL (any muscle) — the
-// denominator, so a week the user was simply away doesn't get counted as a "miss" for this muscle.
+// hits = how many REAL SESSIONS actually trained this muscle within the window (not "was it hit at
+// least once this week" — that was a boolean-per-week bug found via testing: it capped hits at
+// activeWeeks, meaning hits/activeWeeks could never exceed 1, so the override below could never
+// resolve to anything more frequent than "once a week" no matter how often the muscle was actually
+// trained — directly wrong for a scheduler whose tiers expect 1-2.5 day cadences). activeWeeks =
+// how many of those weeks the user trained AT ALL (any muscle) — the denominator, so a week the
+// user was simply away doesn't get counted as a "miss" for this muscle.
 function getMuscleObservedFrequency(muscle){
   const buckets=getAutoRoutineFreqWeekBuckets();
   let activeWeeks=0,hits=0;
   buckets.forEach(b=>{
-    let bucketActive=false,bucketHit=false;
+    let bucketActive=false;
     (state.history||[]).forEach(w=>{
       if(!w)return;
       const t=new Date(w.date).getTime();
@@ -9030,11 +9128,10 @@ function getMuscleObservedFrequency(muscle){
         if((w.exercises||[]).some(e=>{
           const exData=getExercise(e.exId);
           return exData&&exData.muscle===muscle&&!isExerciseInjured(e.exId)&&(e.sets||[]).some(s=>s.done);
-        }))bucketHit=true;
+        }))hits++; // count this SESSION as a hit, not just "this week had one"
       }
     });
     if(bucketActive)activeWeeks++;
-    if(bucketHit)hits++;
   });
   return{hits,activeWeeks};
 }
@@ -9085,6 +9182,7 @@ function getMuscleExposureDose(muscle,activeSet){
 // concept with no clean standalone equivalent built yet) and for tagging the resulting workout's
 // meso context. Everything about WHAT gets trained and how much is fully independent of it.
 function buildAutoSession(mesoIdx,minutesAvailable){
+  if(minutesAvailable!=null&&minutesAvailable<=0)minutesAvailable=null; // defensive: a non-positive budget from any future caller means "no real budget," not "build nothing" — confirmAutoSession's own UI path already guards this, this just protects other/future callers
   const activeSet=getAutoRoutineActiveMuscles();
   const allMuscles=Object.keys(state.volumeLandmarks||{});
   const priorityMuscles=allMuscles.filter(mu=>activeSet.has(mu));
@@ -9286,7 +9384,10 @@ function launchAutoSessionWithPicks(mesoIdx,picks,sorenessScores){
   exercises=reorderForSupersetAdjacency(exercises);
   activeMesoContext=mesoIdx!=null?{mesoIdx,catchUp:true,isAutoSession:true,routinePos:null}:null;
   const grants=advanceAutoRoutineMuscleProgress(exercises.map(e=>getExercise(e.exId)).filter(Boolean).map(ex=>ex.muscle))||[];
-  if(grants.length)save();
+  // Unconditional (not just "if grants.length") — advanceAutoRoutineMuscleProgress may also have
+  // just picked a NEW specialization block (state.autoRoutineActiveMuscles) or hard-clamped a
+  // muscle back to MAV even in a session that produces zero real grants; both need to persist too.
+  save();
   closeModal('modal-auto-session');
   beginWorkout('Auto Routine',exercises,null,exercises.map(e=>e.exId));
   // Mirrors startRoutineWorkout's own post-beginWorkout soreness stamp — same guard shape (only
@@ -9522,10 +9623,21 @@ function getDefaultAutoSessionMinutes(){
   if(totalDue<=0)return 30; // nothing currently owed anywhere — short floor rather than 0
   return Math.max(20,Math.round(totalDue*ISOLATION_SET_SECONDS/60));
 }
+// BUG FIX (found via external test handover, same day): this used to synthesize a numeric budget
+// even when the field was left blank (falling back to getDefaultAutoSessionMinutes()) and pass
+// THAT into buildAutoSession — contradicting the modal's own copy ("leave blank and it fills a
+// session with everything due today") and the in-code comment claiming the same. Since
+// getDefaultAutoSessionMinutes' estimate uses a flat isolation-only per-set time while
+// buildAutoSession's own real per-exercise estimate is compound-aware (210s vs 150s), the
+// synthesized budget could under-estimate a compound-heavy session and trigger real trimming the
+// user never asked for and wasn't told about. Fixed: a blank field now passes null straight through
+// (no budget at all, matching what buildAutoSession(mesoIdx,null) already does correctly — skip
+// trimming/time-fill entirely, return exactly what's due). getDefaultAutoSessionMinutes is now used
+// ONLY for the modal's displayed estimate text, never as a real constraint.
 function confirmAutoSession(){
   const input=document.getElementById('auto-session-minutes');
   const val=input?parseInt(input.value,10):NaN;
-  const minutes=(!isNaN(val)&&val>0)?val:getDefaultAutoSessionMinutes();
+  const minutes=(!isNaN(val)&&val>0)?val:null;
   const picks=buildAutoSession(autoSessionMesoIdx,minutes);
   if(!picks||!picks.length){
     alert('Nothing left to train right now \u2014 every muscle looks covered for this rolling week, or your Auto Routine pool has no exercises for what\'s needed.');
