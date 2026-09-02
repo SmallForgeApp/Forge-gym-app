@@ -672,7 +672,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-08-29.3</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-08-29.4</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -7177,7 +7177,7 @@ function getRoutinePlannedMuscles(routine){
   });
   return seen;
 }
-let sorenessDraft={},pendingSorenessRoutineIdx=null,pendingVolumeMode='extra',pendingEfficientEligibility=null,pendingEfficientVolumeOn=false,pendingAutoSessionLaunch=null;
+let sorenessDraft={},pendingSorenessRoutineIdx=null,pendingVolumeMode='extra',pendingEfficientEligibility=null,pendingEfficientVolumeOn=false,pendingAutoSessionLaunch=null,pendingSorenessForSeeding=null;
 // EFFICIENT VOLUME feature (redesigned 2026-08-06): builds a chain of small myo-rep bursts —
 // minimal rest between each, matching how myo-reps actually work (an activation set, then
 // several short-rest bursts of shrinking size, not one continuation) — sized so their combined
@@ -7656,7 +7656,12 @@ function buildRoutineSeedPlan(routineIdx,commit){
 }
 function startRoutineWorkout(i,sorenessScores,volumeMode,efficientVolumeOn){
   volumeMode=volumeMode||'extra'; // other direct entry points (meso quick-start, Revisit, Routine Detail Start) bypass the picker — default preserves today's existing always-auto-add behavior for them
+  // BUG FIX: set BEFORE buildRoutineSeedPlan (which computes every set's target via getSetTarget)
+  // so soreness-based weight capping actually sees this session's real scores instead of nothing —
+  // see the comment above getSetTarget's own soreness read for the full story.
+  pendingSorenessForSeeding=sorenessScores||{};
   const plan=buildRoutineSeedPlan(i,true);
+  pendingSorenessForSeeding=null;
   if(!plan)return;
   const{r,activeMeso,mesoRIRInfo,volSuggestions,addSetExIds,exercises,mesoNote,grantedPhaseBCredits,grantedVolumeProgress,activeMesoId}=plan;
   beginWorkout(r.name,exercises,r.id,[...(r.exerciseIds||[])]);
@@ -8238,7 +8243,20 @@ function getSetTarget(exId,workoutEx,setIdx,exData,routineId){
   // weight and silently becoming a no-op. Only applies to this plain cross-session path — a live
   // same-session anchor (you already lifted more THIS session) is real-time evidence and takes
   // priority over a pre-workout guess.
-  const sorenessScore=(activeWorkout&&activeWorkout.muscleSoreness&&exData)?activeWorkout.muscleSoreness[exData.muscle]:null;
+  // BUG FIX (found via external test handover): activeWorkout doesn't exist yet the first time
+  // this runs — buildRoutineSeedPlan/launchAutoSessionWithPicks both call getSetTarget for every
+  // set BEFORE beginWorkout creates activeWorkout, and BEFORE the soreness scores the person just
+  // submitted get stamped onto it. That meant soreness-based capping silently never applied to a
+  // freshly-started workout's INITIAL targets, for the whole app, not just Auto Routine — confirmed
+  // via harness: a soreness-2 rating that should have suppressed a weight increase didn't, because
+  // activeWorkout.muscleSoreness was still empty at the moment this ran. Fixed with
+  // pendingSorenessForSeeding — a transient global the seed-time caller (startRoutineWorkout /
+  // launchAutoSessionWithPicks) sets right before calling into set-computation and clears right
+  // after, used as a fallback ONLY when activeWorkout doesn't have its own soreness yet. Every
+  // preview/estimate caller of buildRoutineSeedPlan (commit:false) never sets this, so they're
+  // completely unaffected — this only fires for the one real, committed seed pass.
+  const effectiveMuscleSoreness=(activeWorkout&&activeWorkout.muscleSoreness)?activeWorkout.muscleSoreness:pendingSorenessForSeeding;
+  const sorenessScore=(effectiveMuscleSoreness&&exData)?effectiveMuscleSoreness[exData.muscle]:null;
   const mesoOverrodeWeight=!!(mesoOverride&&mesoOverride.weight!=null);
   if(sorenessScore===2&&!mesoOverrodeWeight&&targetWeight>w){
     targetWeight=w;targetReps=repsMetric;
@@ -9350,6 +9368,17 @@ function reorderForSupersetAdjacency(exercises){
 // Auto Routine's own standing tracker (advanceAutoRoutineMuscleProgress), never the meso's.
 function launchAutoSessionWithPicks(mesoIdx,picks,sorenessScores){
   const m=mesoIdx!=null?state.mesocycles[mesoIdx]:null;
+  // BUG FIX (external test handover, issues #9 and #10): two separate ordering bugs, same root
+  // pattern — global state read by getSetTarget during the picks.map() below wasn't populated yet.
+  // #9: activeMesoContext used to get set AFTER this map (so getMesoProgressionOverride inside
+  // getSetTarget saw null/stale meso context for every set — a deload weight-cut or reset-baseline
+  // override never actually applied to an Auto Routine session). Moved to the TOP, before any
+  // set gets computed. #10: activeWorkout.muscleSoreness used to get stamped only AFTER
+  // beginWorkout, well after every set's target was already finalized — soreness-based capping
+  // silently never applied. Fixed the same way as startRoutineWorkout: pendingSorenessForSeeding
+  // set here, cleared right after.
+  activeMesoContext=mesoIdx!=null?{mesoIdx,catchUp:true,isAutoSession:true,routinePos:null}:null;
+  pendingSorenessForSeeding=sorenessScores||{};
   let exercises=picks.map(p=>{
     const exData=getExercise(p.exId);
     // No routine of its own to resolve a rep range from — borrow whatever any routine containing
@@ -9380,9 +9409,9 @@ function launchAutoSessionWithPicks(mesoIdx,picks,sorenessScores){
     }
     return{exId:p.exId,sets,supersetGroup:null,repRange,useRIR:true};
   });
+  pendingSorenessForSeeding=null;
   autoLinkKnownSupersets(exercises);
   exercises=reorderForSupersetAdjacency(exercises);
-  activeMesoContext=mesoIdx!=null?{mesoIdx,catchUp:true,isAutoSession:true,routinePos:null}:null;
   const grants=advanceAutoRoutineMuscleProgress(exercises.map(e=>getExercise(e.exId)).filter(Boolean).map(ex=>ex.muscle))||[];
   // Unconditional (not just "if grants.length") — advanceAutoRoutineMuscleProgress may also have
   // just picked a NEW specialization block (state.autoRoutineActiveMuscles) or hard-clamped a
