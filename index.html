@@ -1637,6 +1637,12 @@ const EFFICIENT_VOLUME_EQUIPMENT_LIST=['Barbell','Dumbbell','Cable','Machine','S
 // (checkForWorkoutDraft/initGoogleSyncWhenReady never run). Keep this above the boot call at
 // the bottom of the init block below.
 const EFFICIENT_VOLUME_CREDIT_CAP=1.0;
+// Declared here rather than next to the rest of the soreness-modal state (its usual home, near
+// pendingSorenessRoutineIdx) — same TDZ class as the EFFICIENT_VOLUME_CREDIT_CAP bug above.
+// getSetTarget reads this, and the boot-time chain renderHomeScreen -> renderActiveMesoHero ->
+// getPredictedSetCounts -> buildRoutineSeedPlan -> getSetTarget can reach it for any user with an
+// active mesocycle, before its original declaration point further down the file ever executes.
+let pendingSorenessForSeeding=null;
 // ── INDIRECT/FRACTIONAL VOLUME CREDIT (2026-08-11) ──
 // A secondary muscle doesn't get the same stimulus as the primary target, so it's credited at a
 // fraction of the primary's set count rather than a full set. Previously this was a single flat
@@ -7177,7 +7183,7 @@ function getRoutinePlannedMuscles(routine){
   });
   return seen;
 }
-let sorenessDraft={},pendingSorenessRoutineIdx=null,pendingVolumeMode='extra',pendingEfficientEligibility=null,pendingEfficientVolumeOn=false,pendingAutoSessionLaunch=null,pendingSorenessForSeeding=null;
+let sorenessDraft={},pendingSorenessRoutineIdx=null,pendingVolumeMode='extra',pendingEfficientEligibility=null,pendingEfficientVolumeOn=false,pendingAutoSessionLaunch=null;
 // EFFICIENT VOLUME feature (redesigned 2026-08-06): builds a chain of small myo-rep bursts —
 // minimal rest between each, matching how myo-reps actually work (an activation set, then
 // several short-rest bursts of shrinking size, not one continuation) — sized so their combined
