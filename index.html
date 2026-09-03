@@ -1643,6 +1643,43 @@ const EFFICIENT_VOLUME_CREDIT_CAP=1.0;
 // getPredictedSetCounts -> buildRoutineSeedPlan -> getSetTarget can reach it for any user with an
 // active mesocycle, before its original declaration point further down the file ever executes.
 let pendingSorenessForSeeding=null;
+// Plate-loaded equipment (real physical plates, discrete jumps set by what's in inventory) — kept
+// as the same equipment list getEfficientVolumeMechanism's 'myo' category uses, so the two stay in
+// sync. Previously getEquipmentIncrement only special-cased 'Barbell' literally; Smith Machine,
+// Trap Bar, EZ Bar, Weighted, and Plate all silently fell through to the flat
+// progressionIncrements.Other default, ignoring the user's actual plates even though they're
+// loaded identically to a barbell. Declared here rather than next to getEquipmentIncrement itself
+// (its usual home) — same TDZ class as EFFICIENT_VOLUME_CREDIT_CAP and pendingSorenessForSeeding
+// above: getSetTarget -> getEquipmentIncrement is reachable from the boot-time renderHomeScreen ->
+// renderActiveMesoHero -> getPredictedSetCounts -> buildRoutineSeedPlan chain for any user with an
+// active mesocycle, before this constant's original declaration point further down the file ever
+// executes.
+const PLATE_LOADED_EQUIPMENT=['Barbell','Smith Machine','Weighted','EZ Bar','Trap Bar','Plate'];
+// COMPOUND-MOVEMENT SECONDARY-MUSCLE SEEDING (2026-09-02 fix, see #7 in the bug handover).
+// isCompoundExercise (defined later) classifies an exercise as compound purely by whether its
+// `secondary` field is filled in — but resolveExercise (below) always generated new exercises
+// with secondary:'', so NOTHING the app auto-generates could ever be classified as compound, no
+// matter how compound it actually is (Squat, Deadlift, Bench Press, Pull-Up all included). That
+// silently broke two systems: buildAutoSession's own time-per-set estimate (always used the
+// shorter isolation duration) and indirect/secondary volume credit (always zero). Rather than
+// relying on a user-fillable free-text field for something load-bearing, seed a reasonable
+// `secondary` at generation time for well-known compound movement names — the same primary-muscle
+// pairs the app already models in SECONDARY_MUSCLE_FRACTION_DEFAULTS below, picking the single
+// largest mover per primary muscle since `secondary` is a one-value field. Deliberately a
+// keyword allowlist, not a guess for anything unmatched: an isolation movement (Curl, Extension,
+// Fly, Raise) or an unrecognized/custom name stays secondary:'', exactly like before — this only
+// fixes the specific, common case of well-known compounds silently misclassified, not every
+// possible exercise.
+const COMPOUND_MOVEMENT_KEYWORDS=['bench press','squat','deadlift','row','pull-up','pull up','chin-up','chin up','pulldown','overhead press','shoulder press','military press','leg press','lunge','dip','clean','snatch','thruster','hip thrust','push press','front squat','goblet squat'];
+const COMPOUND_MOVEMENT_SECONDARY={
+  Back:'Biceps',Chest:'Triceps',Shoulders:'Triceps',
+  Quads:'Glutes',Hamstrings:'Glutes',Glutes:'Hamstrings',Core:'Back'
+};
+function guessSecondaryMuscle(muscle,exName){
+  const n=(exName||'').toLowerCase();
+  if(!COMPOUND_MOVEMENT_KEYWORDS.some(k=>n.includes(k)))return'';
+  return COMPOUND_MOVEMENT_SECONDARY[muscle]||'';
+}
 // ── INDIRECT/FRACTIONAL VOLUME CREDIT (2026-08-11) ──
 // A secondary muscle doesn't get the same stimulus as the primary target, so it's credited at a
 // fraction of the primary's set count rather than a full set. Previously this was a single flat
@@ -1969,6 +2006,12 @@ function load(){
   // Purge old hardcoded exercises (IDs like e1, ex2, ebi3 etc.) — replaced by new catalogue system
   state.exercises=(state.exercises||[]).filter(e=>e.id&&(e.id.startsWith('gx')||(!e.id.match(/^e[a-z]?\d+$/))));
   state.exercises=state.exercises.map(e=>({secondary:'',machine:'',bw:'no',...e}));
+  // Backfill for #7's fix above: exercises generated before this fix existed are still sitting
+  // with secondary:'' from the old code path. Only touches auto-generated exercises with a still-
+  // blank secondary — never overwrites a user's own manual edit (which would no longer be blank).
+  state.exercises.forEach(e=>{
+    if(e.generated&&!e.secondary)e.secondary=guessSecondaryMuscle(e.muscle,e.name);
+  });
   runMigrations();
   if(!state.accentColor)state.accentColor='#D97757';
   applyAccentColor(state.accentColor);
@@ -3464,7 +3507,7 @@ function resolveExercise(muscle,exName,equipment,position,grip,isUni,modifier,at
     if(existing)return existing;
   }
   const isBW=equipment==='Bodyweight';
-  const ex={id,name:fullName,muscle,secondary:'',machine:equipment||'',bw:isBW?'bw':'no',note:'',uni:isUni,modifier,attachment:attachment||'',customValues:customValues||{},settings:settings||{},position:position||'',grip:grip||'',generated:true};
+  const ex={id,name:fullName,muscle,secondary:guessSecondaryMuscle(muscle,exName),machine:equipment||'',bw:isBW?'bw':'no',note:'',uni:isUni,modifier,attachment:attachment||'',customValues:customValues||{},settings:settings||{},position:position||'',grip:grip||'',generated:true};
   state.exercises.push(ex);save();
   return ex;
 }
@@ -5218,7 +5261,19 @@ function getMesoMuscleTargetRIR(m,muscle){
   if(m.phase==='deload')return{deload:true,rir:m.deloadTargetRIR!=null?m.deloadTargetRIR:4};
   if(!m.rirRampEnabled)return null;
   const lm=getMuscleLandmarks(muscle);
-  const progress=getEffectiveMuscleProgress(m,muscle);
+  // BUG FIX (2026-09-02, see #12 in the bug handover): m.muscleVolumeProgress is Continuous
+  // Volume Mode's own per-meso store. Auto Routine sessions tied to this meso never write there —
+  // they write exclusively to the separate, global state.autoRoutineMuscleProgress (same store as
+  // getAutoRoutineMuscleProgress/advanceAutoRoutineMuscleProgress) — so a muscle trained only
+  // through Auto Routine always looked like "still sitting at MEV" here, and the RIR ramp toward
+  // harder effort as volume climbs never advanced for it. Fall back to Auto Routine's own tracked
+  // progress (if any) instead of a flat MEV default whenever CVM's own store has nothing for this
+  // muscle yet — getEffectiveMuscleProgress already had this exact fallback seam (its third
+  // param), just never used by its one caller until now. A muscle CVM has genuinely tracked
+  // itself takes priority unchanged; this only fills the gap when CVM's own store is empty.
+  const autoProgress=state.autoRoutineMuscleProgress&&state.autoRoutineMuscleProgress[muscle];
+  const fallback=autoProgress&&autoProgress.current!=null?autoProgress.current:lm.mev;
+  const progress=getEffectiveMuscleProgress(m,muscle,fallback);
   const span=lm.mrv-lm.mev;
   const muscleFraction=span>0?Math.max(0,Math.min(1,(progress-lm.mev)/span)):0;
   const end=m.rirEnd!=null?m.rirEnd:0;
@@ -8400,7 +8455,7 @@ const TREND_ICONS={
 };
 function getEquipmentIncrement(exData){
   const eq=(exData&&exData.machine||'').trim();
-  if(eq==='Barbell'){
+  if(PLATE_LOADED_EQUIPMENT.includes(eq)){
     const avail=Object.keys(state.plates||{}).map(k=>parseFloat(k)).filter(k=>!isNaN(k)&&state.plates[k]>0);
     if(avail.length)return Math.round(Math.min(...avail)*2*100)/100;
     return 0.5;
@@ -8920,6 +8975,75 @@ function getAutoRoutineMuscleProgress(muscle){
   if(!p||p.current==null)return lm.mev;
   return p.current;
 }
+// AUTO-ROUTINE-SPECIFIC eligibility/safety checks (2026-09-02 fix, see #6/#8 in the bug
+// handover). rankCandidatesForMuscle — the function that actually determines what Auto Routine
+// can pick from — correctly prefers state.autoRoutinePool over state.routines when a pool is
+// configured, since that's the real candidate source. But isMuscleFullyResting, isMuscleStruggling
+// (via getMuscleDeclineSignal), and getMuscleTrendMultiplier are ALSO used by Continuous Volume
+// Mode and Review, where routines-only is the correct, unrelated-to-Auto-Routine semantic — so
+// those shared functions are intentionally left untouched. These are pool-aware siblings, used
+// only by Auto Routine's own call sites, so a muscle whose real (pool-driven) candidates differ
+// from its routine-linked ones can't be misjudged as resting/not-declining/trend-neutral based on
+// exercises Auto Routine doesn't even use — including missing a genuine decline signal on a
+// pool-only exercise, which is a safety-check gap, not just an eligibility mismatch.
+function getAutoRoutineCandidateExIds(muscle){
+  const ids=new Set();
+  if(state.autoRoutinePool&&state.autoRoutinePool.length){
+    state.autoRoutinePool.forEach(id=>{
+      const exData=getExercise(id);
+      if(exData&&exData.muscle===muscle)ids.add(id);
+    });
+  }else{
+    (state.routines||[]).forEach(r=>(r.exerciseIds||[]).forEach(id=>{
+      const exData=getExercise(id);
+      if(exData&&exData.muscle===muscle)ids.add(id);
+    }));
+  }
+  return[...ids];
+}
+function isAutoRoutineMuscleFullyResting(muscle){
+  const exIds=getAutoRoutineCandidateExIds(muscle);
+  if(!exIds.length)return false;
+  return exIds.every(id=>isExerciseInjured(id));
+}
+function getAutoRoutineMuscleDeclineSignal(muscle){
+  const exIds=getAutoRoutineCandidateExIds(muscle).filter(id=>!isExerciseInjured(id));
+  for(const exId of exIds){
+    const recent=getRecentNormalTopSets(exId,3); // index 0 = most recent
+    if(recent.length<2)continue;
+    const points=[...recent].reverse(); // oldest -> newest
+    let up=false,down=false;
+    for(let i=1;i<points.length;i++){
+      const c=comparePerf(points[i-1],points[i]);
+      if(c>0)up=true;if(c<0)down=true;
+    }
+    if(down&&!up)return true;
+  }
+  return false;
+}
+function isAutoRoutineMuscleStruggling(muscle){
+  const rec=getVolumeRecommendation(muscle);
+  return rec.status==='pain-flag'||rec.status==='high-fatigue'||getAutoRoutineMuscleDeclineSignal(muscle);
+}
+function getAutoRoutineMuscleTrendMultiplier(muscle){
+  const exIds=getAutoRoutineCandidateExIds(muscle).filter(id=>!isExerciseInjured(id));
+  let up=0,down=0;
+  exIds.forEach(exId=>{
+    const recent=getRecentNormalTopSets(exId,3);
+    if(recent.length<2)return;
+    const points=[...recent].reverse();
+    let sawUp=false,sawDown=false;
+    for(let i=1;i<points.length;i++){
+      const c=comparePerf(points[i-1],points[i]);
+      if(c>0)sawUp=true;if(c<0)sawDown=true;
+    }
+    if(sawUp&&!sawDown)up++;else if(sawDown&&!sawUp)down++;
+  });
+  if(up===0&&down===0)return 1;
+  if(up>down)return 1.15;
+  if(down>up)return 0.85;
+  return 1;
+}
 // BUG FIX (found via test suite, same day): freshness used to normalize against a flat 7 days,
 // inherited from Continuous Volume Mode's own formula — a reasonable baseline when everything ran
 // on roughly weekly cadences, but wrong here: the tiered scheduler's own ideal gaps range 1-2.5
@@ -8931,8 +9055,21 @@ function getAutoRoutineMuscleProgress(muscle){
 // tier-default ideal gap instead of a flat number, so "exactly on schedule" scores the same
 // (~1.0) regardless of whether that schedule is 1.5 or 2.5 days. Uses the tier default rather than
 // the active-adjusted gap (getMuscleGapDays) to avoid a circular readiness<->active-set dependency.
+// Settings-level per-muscle priority (Low/Normal/High pills, Volume Landmarks screen) — a real,
+// user-facing control genuinely used elsewhere (getMesoVolumeSuggestions, the Review tab's
+// priority-imbalance notes), but previously invisible to Auto Routine entirely: a muscle marked
+// Low and one marked High got identical treatment. Nudges readiness the same shape/magnitude as
+// getAutoRoutineMuscleTrendMultiplier's up/down nudges, applied as its own separate factor rather
+// than folded into that function, so a declining trend and a Low priority setting can both apply
+// independently instead of one silently overwriting the other.
+function getAutoRoutineMusclePriorityMultiplier(muscle){
+  const priority=(state.musclePriority&&state.musclePriority[muscle])||'normal';
+  if(priority==='high')return 1.2;
+  if(priority==='low')return 0.8;
+  return 1;
+}
 function getAutoRoutineMuscleReadiness(muscle){
-  if(isMuscleStruggling(muscle)||isMuscleFullyResting(muscle))return 0;
+  if(isAutoRoutineMuscleStruggling(muscle)||isAutoRoutineMuscleFullyResting(muscle))return 0;
   const lm=getMuscleLandmarks(muscle);
   const progress=getAutoRoutineMuscleProgress(muscle);
   const span=lm.mrv-lm.mev;
@@ -8940,7 +9077,7 @@ function getAutoRoutineMuscleReadiness(muscle){
   const daysSince=getDaysSinceMuscleDirectlyTrained(muscle);
   const idealGap=getMuscleTier(muscle).idealGapDays;
   const freshness=Math.min(1,(daysSince==null?idealGap:daysSince)/idealGap);
-  return(headroom*0.6+freshness*0.4)*getMuscleTrendMultiplier(muscle);
+  return(headroom*0.6+freshness*0.4)*getAutoRoutineMuscleTrendMultiplier(muscle)*getAutoRoutineMusclePriorityMultiplier(muscle);
 }
 // Recomputed fresh every call (not persisted/locked-in) — same "auto-rotates as readiness shifts"
 // philosophy Continuous Volume Mode already uses for its own active set, just without needing a
@@ -8980,7 +9117,7 @@ function getAutoRoutineActiveMuscles(){
     if(!rec[mu])return false;
     const ageDays=Math.round((Date.now()-new Date(rec[mu]))/864e5);
     if(ageDays>=AUTO_ROUTINE_ACTIVE_BLOCK_DAYS)return false;
-    if(isMuscleStruggling(mu)||isMuscleFullyResting(mu))return false;
+    if(isAutoRoutineMuscleStruggling(mu)||isAutoRoutineMuscleFullyResting(mu))return false;
     if(getAutoRoutineMuscleProgress(mu)>=getMuscleLandmarks(mu).mrv)return false;
     return true;
   };
@@ -8988,7 +9125,7 @@ function getAutoRoutineActiveMuscles(){
   if(keep.length<AUTO_ROUTINE_MAX_ACTIVE_MUSCLES){
     const allMuscles=Object.keys(state.volumeLandmarks||{});
     const candidates=allMuscles
-      .filter(mu=>!keep.includes(mu)&&!isMuscleStruggling(mu)&&!isMuscleFullyResting(mu)&&getAutoRoutineMuscleProgress(mu)<getMuscleLandmarks(mu).mrv)
+      .filter(mu=>!keep.includes(mu)&&!isAutoRoutineMuscleStruggling(mu)&&!isAutoRoutineMuscleFullyResting(mu)&&getAutoRoutineMuscleProgress(mu)<getMuscleLandmarks(mu).mrv)
       .map(mu=>({mu,score:getAutoRoutineMuscleReadiness(mu)}))
       .filter(x=>x.score>0)
       .sort((a,b)=>b.score-a.score);
@@ -9064,7 +9201,7 @@ function advanceAutoRoutineMuscleProgress(trainedMuscles){
     const isActive=activeSet.has(muscle);
     if(!isActive&&p.current>lm.mav)p.current=lm.mav; // hard, immediate ceiling — see comment above
     if(!trainedSet.has(muscle))return; // only actually-trained muscles advance this session
-    if(isMuscleStruggling(muscle)||isMuscleFullyResting(muscle))return;
+    if(isAutoRoutineMuscleStruggling(muscle)||isAutoRoutineMuscleFullyResting(muscle))return;
     const ceiling=isActive?lm.mrv:lm.mav;
     const cur=Math.max(lm.mev,p.current);
     if(cur>=ceiling)return;
@@ -9213,7 +9350,7 @@ function buildAutoSession(mesoIdx,minutesAvailable){
   const otherMuscles=allMuscles.filter(mu=>!activeSet.has(mu));
   const orderedMuscles=priorityMuscles.concat(otherMuscles);
   let needByMuscle={};
-  orderedMuscles.forEach(muscle=>{needByMuscle[muscle]=isMuscleFullyResting(muscle)?0:getMuscleExposureDose(muscle,activeSet).dose;});
+  orderedMuscles.forEach(muscle=>{needByMuscle[muscle]=isAutoRoutineMuscleFullyResting(muscle)?0:getMuscleExposureDose(muscle,activeSet).dose;});
   // REMOVED 2026-08-29: the old "CONTINUOUS VOLUME MODE weekly budget" scaling step (meso-scoped
   // m.continuousVolumeMode/m.continuousWeeklySetBudget) that used to sit here. It existed to scale
   // several muscles' raw needs down to a real weekly budget under the OLD model, where per-muscle
@@ -9274,7 +9411,7 @@ function buildAutoSession(mesoIdx,minutesAvailable){
         // per-exposure scheduler a muscle inside its own minimum recovery gap isn't just "at zero
         // need," it's genuinely not allowed to be trained yet, and filling leftover time by
         // training it anyway would silently defeat the whole point of having a minimum gap.
-        const fillCandidates=orderedMuscles.filter(mu=>!includedMuscles.has(mu)&&!isMuscleFullyResting(mu)&&getMuscleExposureInfo(mu,activeSet).eligible);
+        const fillCandidates=orderedMuscles.filter(mu=>!includedMuscles.has(mu)&&!isAutoRoutineMuscleFullyResting(mu)&&getMuscleExposureInfo(mu,activeSet).eligible);
         fillCandidates.sort((a,b)=>getAutoRoutineMuscleReadiness(b)-getAutoRoutineMuscleReadiness(a));
         for(const muscle of fillCandidates){
           if(estimateTotalSeconds()>=budgetSec)break;
@@ -9430,6 +9567,14 @@ function launchAutoSessionWithPicks(mesoIdx,picks,sorenessScores){
   // case beginWorkout deferred to the Paused-Workout-conflict dialog instead of starting inline).
   if(activeWorkout&&!activeWorkout.sourceRoutineId&&activeWorkout.name==='Auto Routine'){
     activeWorkout.muscleSoreness=sorenessScores||{};
+    // BUG FIX (external test handover, issue #11): startRoutineWorkout already stashes what it
+    // granted onto activeWorkout specifically so cancelWorkout() can undo it on Discard — this
+    // path granted progress via advanceAutoRoutineMuscleProgress above but never stashed it, so a
+    // session started and immediately discarded (zero real sets done) permanently kept whatever
+    // weekly-target advance it was granted at launch. Same stash shape as
+    // activeWorkout.grantedVolumeProgress, its own store (state.autoRoutineMuscleProgress) and
+    // revert function (below) since it isn't meso-scoped the way Continuous Volume Mode's is.
+    if(grants.length)activeWorkout.grantedAutoRoutineProgress=grants;
   }
 }
 // Auto Routine exercise pool (2026-08-21, user's explicit request — "an array of exercises... 
@@ -9518,6 +9663,12 @@ function bulkSetAutoRoutinePoolTab(add){
   const pool=new Set(state.autoRoutinePool);
   shown.forEach(ex=>{if(add)pool.add(ex.id);else pool.delete(ex.id);});
   state.autoRoutinePool=[...pool];
+  // Same invariant toggleAutoRoutinePoolExercise already enforces: can't stay fixed to Auto Routine
+  // if it's not even a pool candidate anymore. Without this, a bulk remove leaves an orphaned pin
+  // in autoRoutineFixedExIds that silently resurfaces if the exercise ever re-enters the pool later.
+  if(!add&&state.autoRoutineFixedExIds&&state.autoRoutineFixedExIds.length){
+    state.autoRoutineFixedExIds=state.autoRoutineFixedExIds.filter(id=>pool.has(id));
+  }
   save();
   renderAutoRoutinePoolList();
 }
@@ -9556,7 +9707,15 @@ function renderAutoRoutinePoolList(){
   }).join('');
   el.innerHTML=bulkBar+(listHtml||'<div class="small text3" style="padding:10px 0">Nothing here yet.</div>');
 }
+// Measurements-pending gate (2026-09-02 fix, see #14 in the bug handover): mirrors the regular
+// flow's gate at the meso-detail "Start" button — if this meso is in deload with a measurements
+// check-in still pending, route there first instead of silently letting an Auto Session skip
+// past the exact moment ("before the deload's first workout") that check-in was designed for.
 function openAutoSessionModal(mesoIdx){
+  if(mesoIdx!=null){
+    const m=state.mesocycles[mesoIdx];
+    if(m&&m.phase==='deload'&&m.measurementsPending){startMesoMeasurements(mesoIdx);return;}
+  }
   autoSessionMesoIdx=mesoIdx;
   const input=document.getElementById('auto-session-minutes');if(input)input.value='';
   const est=document.getElementById('auto-session-default-estimate');
@@ -9649,7 +9808,7 @@ function startPreviewedAutoRoutine(){
 function getAutoRoutineTotalDueNow(){
   const activeSet=getAutoRoutineActiveMuscles();
   return Object.keys(state.volumeLandmarks||{}).reduce((sum,muscle)=>{
-    if(isMuscleFullyResting(muscle))return sum;
+    if(isAutoRoutineMuscleFullyResting(muscle))return sum;
     return sum+getMuscleExposureDose(muscle,activeSet).dose;
   },0);
 }
@@ -11586,6 +11745,7 @@ function confirmFinishWorkout(){
     // committed at start (see revertGrantedPhaseBCredits/buildRoutineSeedPlan's commit block):
     // no real training happened, so it shouldn't count as this pass's extra-rotation set either.
     revertGrantedPhaseBCredits();
+    revertGrantedAutoRoutineProgress();
   }
 
   const ids=activeWorkout.exercises.map(e=>e.exId);
@@ -11716,8 +11876,28 @@ function confirmFinishWorkout(){
 function cancelWorkout(){
   forgeConfirm('Discard Workout?','Everything you\'ve logged in this session will be lost. This cannot be undone.',()=>{
     revertGrantedPhaseBCredits();
+    revertGrantedAutoRoutineProgress();
     activeMesoContext=null;endWorkout();
   });
+}
+// Undoes exactly the Auto Routine standing-progress grant(s) this specific session made at launch
+// (see the stash comment in launchAutoSessionWithPicks) — sibling to revertGrantedPhaseBCredits
+// below, kept separate since state.autoRoutineMuscleProgress is its own global store, not scoped
+// to any mesocycle. Floors at the muscle's own MEV, matching advanceAutoRoutineMuscleProgress's
+// own floor, so a revert can't push a muscle's standing progress below where it always resets to.
+function revertGrantedAutoRoutineProgress(){
+  if(!activeWorkout)return;
+  const grants=activeWorkout.grantedAutoRoutineProgress;
+  if(!grants||!grants.length)return;
+  if(!state.autoRoutineMuscleProgress)return;
+  let changed=false;
+  grants.forEach(({muscle,delta})=>{
+    const p=state.autoRoutineMuscleProgress[muscle];if(!p)return;
+    const lm=getMuscleLandmarks(muscle);
+    p.current=Math.max(lm.mev,p.current-delta);
+    changed=true;
+  });
+  if(changed)save();
 }
 // Undoes exactly the Phase B extra-rotation credit(s) this specific session granted at start
 // (see the fix comment above buildRoutineSeedPlan's commit block) — looked up by the meso's
