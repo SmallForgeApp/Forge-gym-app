@@ -672,7 +672,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-08-29.4</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-04.2</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -8916,10 +8916,15 @@ function estimatePicksSeconds(picks){
 // rest. But the 2026-08-29 tiered scheduler's own exposure caps (fast:3/small:4/large:5) are ALL
 // ≤5, so growMuscleOneSet's cap check (see below) always returned false before the variety check
 // could ever be reached — the split branch was dead code, every muscle always got one exercise for
-// its entire per-session dose regardless of pool size. Lowered to 2 (below even the smallest tier
-// cap) so variety is actually reachable at the new, smaller per-session scale: fast tier splits
-// ~2+1, small ~2+2, large ~2+2+1, pool permitting.
-const AUTO_ROUTINE_EXERCISE_VARIETY_THRESHOLD=2;
+// its entire per-session dose regardless of pool size.
+// UPDATED (user's explicit preference, 2026-09-04): initially lowered to 2, but that split a
+// muscle onto a second exercise as soon as a 3rd set was needed at all — the user felt this adds
+// session time and reduces the enjoyment of per-session exercise variation, and would rather a
+// single exercise absorb everything up to 3 sets before a second one is ever introduced. Raised to
+// 3: fast tier (cap 3) never splits at all now (matches its own cap exactly), small tier (cap 4)
+// splits ~3+1, large tier (cap 5) splits ~3+2, only once a muscle's own dose genuinely needs more
+// than 3 sets in one session.
+const AUTO_ROUTINE_EXERCISE_VARIETY_THRESHOLD=3;
 // Adds ONE set toward `muscle`'s total for this session, respecting BOTH the muscle's own tiered
 // per-exposure cap (AUTO_ROUTINE_MUSCLE_TIERS — see the scheduler section above; replaces the old
 // flat PRIORITY_VOLUME_SET_CAP=10-for-everyone check, 2026-08-29) and the per-EXERCISE variety
