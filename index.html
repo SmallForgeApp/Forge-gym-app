@@ -672,7 +672,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-04.2</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-05.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -2110,9 +2110,10 @@ function load(){
       Chest:{mv:4,mev:8,mav:12,mrv:22},Back:{mv:6,mev:10,mav:14,mrv:25},
       Shoulders:{mv:4,mev:8,mav:14,mrv:26},Biceps:{mv:4,mev:8,mav:12,mrv:26},
       Triceps:{mv:2,mev:6,mav:9,mrv:18},Quads:{mv:4,mev:8,mav:11.5,mrv:20},
-      Hamstrings:{mv:2,mev:6,mav:9,mrv:20},Glutes:{mv:0,mev:4,mav:7,mrv:16},
-      Core:{mv:0,mev:6,mav:10,mrv:25},Calves:{mv:4,mev:8,mav:11,mrv:20},
+      Hamstrings:{mv:2,mev:6,mav:9,mrv:20},Calves:{mv:4,mev:8,mav:11,mrv:20},
       Tibialis:{mv:2,mev:6,mav:10,mrv:18}
+      // Glutes/Core deliberately excluded (2026-09-05, user's explicit request) — see the
+      // one-time migration below for existing installs; this covers fresh ones the same way.
     };
   }
   // One-time forced migration (2026-08-06, user's explicit request): existing installs still
@@ -2171,6 +2172,24 @@ function load(){
     state.volumeLandmarksRPMrv2Migrated=true;
   }
   if(!state.musclePriority)state.musclePriority={};
+  // One-time forced migration (2026-09-05, user's explicit request): "don't include glutes and core
+  // in any volume tracking" — user doesn't train either directly and confirmed both out of scope.
+  // state.volumeLandmarks is the canonical tracked-muscle list used everywhere (Auto Routine,
+  // Continuous Volume Mode, Review, Settings' Volume Landmarks editor all key off
+  // Object.keys(state.volumeLandmarks) or state.volumeLandmarks[muscle] directly) — deleting these
+  // two keys here is what actually removes them from every one of those systems at once, not just
+  // Auto Routine specifically. MUSCLE_GROUPS itself, the exercise catalogue, and any existing
+  // exercises tagged Glutes/Core as their primary or secondary muscle are UNCHANGED — the user can
+  // still log those exercises normally, they just no longer count toward a landmark/MEV-MRV target.
+  // Gated so it only ever fires once and never re-deletes a landmark the user manually re-adds later.
+  if(!state.glutesCoreVolumeTrackingExcluded){
+    delete state.volumeLandmarks['Glutes'];
+    delete state.volumeLandmarks['Core'];
+    if(state.autoRoutineMuscleProgress){delete state.autoRoutineMuscleProgress['Glutes'];delete state.autoRoutineMuscleProgress['Core'];}
+    if(state.autoRoutineActiveMuscles){delete state.autoRoutineActiveMuscles['Glutes'];delete state.autoRoutineActiveMuscles['Core'];}
+    delete state.musclePriority['Glutes'];delete state.musclePriority['Core'];
+    state.glutesCoreVolumeTrackingExcluded=true;
+  }
   // Existing installs from before Tibialis was split out as its own tracked muscle (see v3
   // migration above) won't have this key yet — backfill so it isn't silently missing a landmark
   // and getting treated as untracked. Hardcoded (not read from DEFAULT_VOLUME_LANDMARKS) — that
@@ -3525,8 +3544,9 @@ const DEFAULT_VOLUME_LANDMARKS={
   Chest:{mv:4,mev:8,mav:12,mrv:22},Back:{mv:6,mev:10,mav:14,mrv:25},
   Shoulders:{mv:4,mev:8,mav:14,mrv:26},Biceps:{mv:4,mev:8,mav:12,mrv:26},
   Triceps:{mv:2,mev:6,mav:9,mrv:18},Quads:{mv:4,mev:8,mav:11.5,mrv:20},
-  Hamstrings:{mv:2,mev:6,mav:9,mrv:20},Glutes:{mv:0,mev:4,mav:7,mrv:16},
-  Core:{mv:0,mev:6,mav:10,mrv:25},Calves:{mv:4,mev:8,mav:11,mrv:20},
+  Hamstrings:{mv:2,mev:6,mav:9,mrv:20},Calves:{mv:4,mev:8,mav:11,mrv:20},
+  // Glutes/Core deliberately excluded (2026-09-05, user's explicit request) — a Settings "Reset to
+  // Defaults" shouldn't be able to silently re-add tracking for muscles the user asked to exclude.
   // Small, fast-recovering muscle (dorsiflexors) — genuinely under-researched next to the others
   // above, so treat these as an even rougher starting point than the rest and tune to your own
   // recovery sooner rather than later.
@@ -8938,7 +8958,7 @@ const AUTO_ROUTINE_EXERCISE_VARIETY_THRESHOLD=3;
 // not a meso's continuousVolumeMode/priorityMuscles settings.
 function growMuscleOneSet(picks,muscle,activeSet){
   const total=picks.filter(p=>p.muscle===muscle).reduce((a,p)=>a+p.sets,0);
-  if(total>=getMuscleTier(muscle).exposureCap)return false;
+  if(total>=getMuscleExposureCap(muscle))return false;
   let target=picks.find(p=>p.muscle===muscle&&p.sets<AUTO_ROUTINE_EXERCISE_VARIETY_THRESHOLD);
   if(!target){
     const usedIds=new Set(picks.filter(p=>p.muscle===muscle).map(p=>p.exId));
@@ -9011,20 +9031,44 @@ function isAutoRoutineMuscleFullyResting(muscle){
   if(!exIds.length)return false;
   return exIds.every(id=>isExerciseInjured(id));
 }
+// BUG FIX (2026-09-04, user's explicit report): getAutoRoutineMuscleDeclineSignal used to flag a
+// muscle "struggling" off a SINGLE candidate exercise showing two down hops, stopping at the first
+// one found rather than checking the others — a genuine regression on one exercise could veto the
+// whole muscle even when every OTHER exercise was clearly trending up. Concretely: this flagged
+// Chest off one Bench Press dip while 0 other Chest exercises were even checked, and flagged Back
+// off one Pull-Up dip while its other 3 exercises were all trending up. Root cause has two parts:
+//  1) No majority/quorum across the muscle's own candidate pool — one down exercise outvoted
+//     everything else instantly instead of being weighed against it.
+//  2) comparePerf's e1RM (Epley) comparison can read as "down" on a perfectly normal double-
+//     progression step: hit a rep ceiling, weight bumps up, reps reset lower — if the rep drop is
+//     proportionally bigger than the weight increase, the calculated e1RM dips for a session or two
+//     even though the person is objectively lifting more weight. That's progression, not decline,
+//     but the raw ORM math can't tell the difference.
+// Fixed with getPerfHopDirection (below) — a genuine weight INCREASE can never count as a down hop,
+// regardless of what the rep-adjusted e1RM math says — and a majority vote across every candidate
+// exercise with enough data (more declining exercises than not), rather than any single exercise
+// being able to veto the whole muscle.
+function getPerfHopDirection(a,b){
+  const c=comparePerf(a,b);
+  if(c<0&&(b.weight||0)>(a.weight||0))return 0; // weight went UP — never a regression, even if e1RM dipped from a bigger proportional rep reset
+  return c;
+}
 function getAutoRoutineMuscleDeclineSignal(muscle){
   const exIds=getAutoRoutineCandidateExIds(muscle).filter(id=>!isExerciseInjured(id));
-  for(const exId of exIds){
+  let declining=0,notDeclining=0;
+  exIds.forEach(exId=>{
     const recent=getRecentNormalTopSets(exId,3); // index 0 = most recent
-    if(recent.length<2)continue;
+    if(recent.length<2)return; // not enough data on this exercise to have an opinion
     const points=[...recent].reverse(); // oldest -> newest
     let up=false,down=false;
     for(let i=1;i<points.length;i++){
-      const c=comparePerf(points[i-1],points[i]);
+      const c=getPerfHopDirection(points[i-1],points[i]);
       if(c>0)up=true;if(c<0)down=true;
     }
-    if(down&&!up)return true;
-  }
-  return false;
+    if(down&&!up)declining++;else notDeclining++;
+  });
+  if(declining===0)return false;
+  return declining>notDeclining; // majority of the muscle's own exercises must agree, not just one
 }
 function isAutoRoutineMuscleStruggling(muscle){
   const rec=getVolumeRecommendation(muscle);
@@ -9039,7 +9083,7 @@ function getAutoRoutineMuscleTrendMultiplier(muscle){
     const points=[...recent].reverse();
     let sawUp=false,sawDown=false;
     for(let i=1;i<points.length;i++){
-      const c=comparePerf(points[i-1],points[i]);
+      const c=getPerfHopDirection(points[i-1],points[i]); // same weight-increase-aware fix as the decline signal above
       if(c>0)sawUp=true;if(c<0)sawDown=true;
     }
     if(sawUp&&!sawDown)up++;else if(sawDown&&!sawUp)down++;
@@ -9103,7 +9147,7 @@ function getAutoRoutineMuscleReadiness(muscle){
 // expires — at which point a fresh pick happens. This is the standing counterpart to what a real
 // meso already gets from picking priority muscles once per pass rather than re-deciding it every
 // set.
-const AUTO_ROUTINE_ACTIVE_BLOCK_DAYS=28; // ~4-week specialization block, matching common RP/coaching guidance for how long a specialization phase typically runs — explicit placeholder, tune with real data
+const AUTO_ROUTINE_ACTIVE_BLOCK_DAYS=42; // UPDATED 2026-09-04: was 28 (4wk) — raised to 42 (6wk) to match the new ramp hard-cap below, so a slow-to-finish muscle isn't evicted by tenure before the hard-cap forces it to MRV on its own
 // BUG FIX (found via extended simulation, same day): the first version tracked one shared "since"
 // timestamp for the whole 2-muscle block and invalidated it ENTIRELY the moment ANY member became
 // ineligible (including simply reaching its own MRV — success, not failure). That meant whichever
@@ -9157,7 +9201,12 @@ function getAutoRoutineActiveMuscles(){
 function getAutoRoutineMuscleTargetNow(muscle){
   const raw=getAutoRoutineMuscleProgress(muscle);
   const lm=getMuscleLandmarks(muscle);
-  return getAutoRoutineActiveMuscles().has(muscle)?raw:Math.min(raw,lm.mav);
+  if(!getAutoRoutineActiveMuscles().has(muscle))return Math.min(raw,lm.mev);
+  // Active: live calendar-based target (see getAutoRoutineActiveRampTarget) — never below whatever's
+  // already been granted (p.current), since a stale/short tenure record should never look like a
+  // regression from real progress already made.
+  const tenureStart=state.autoRoutineActiveMuscles&&state.autoRoutineActiveMuscles[muscle];
+  return Math.max(raw,getAutoRoutineActiveRampTarget(muscle,tenureStart));
 }
 // Advances progress for whatever was actually trained this session — called once per Auto Routine
 // session (launchAutoSessionWithPicks), replacing the meso-scoped grantMuscleVolumeProgress call
@@ -9194,9 +9243,34 @@ function getAutoRoutineProgressIncrement(muscle,activeSet){
   const gaps=getMuscleGapDays(muscle,activeSet);
   return Math.max(0,gaps.idealGapDays/7);
 }
+// RAMP REDESIGN (2026-09-04, user's explicit request): "reach MEV ramp to MRV in 4 weeks, hard cap
+// at 6." The old per-exposure increment (idealGapDays/7 per exposure, above) paced an active
+// muscle's climb from MEV to MRV at roughly 1 set/week regardless of span size — confirmed via
+// simulation to take 15-23 real weeks depending on muscle (a 10-18 set MEV-MRV span at ~1/wk). That
+// pace was also structurally undercut by AUTO_ROUTINE_ACTIVE_BLOCK_DAYS (used to be 28) evicting the
+// muscle back to MEV long before it ever got there — so in real use, no muscle could complete a
+// climb at all. Replaced with a CALENDAR-based target instead of a per-exposure-count one: given how
+// long this muscle has been continuously active (state.autoRoutineActiveMuscles[muscle], already
+// tracked for tenure/eviction), the live target is a straight-line interpolation from MEV to MRV
+// over AUTO_ROUTINE_RAMP_TARGET_DAYS (28 = 4wk), clamped to MRV outright once
+// AUTO_ROUTINE_RAMP_HARD_CAP_DAYS (42 = 6wk) has passed — regardless of how many real sessions
+// actually happened. This deliberately decouples "how fast the target climbs" from "how often you
+// train" — session frequency now only affects whether REAL delivered volume can keep up with that
+// target (bounded by each muscle's own exposure cap — see AUTO_ROUTINE_EXPOSURE_CAP_OVERRIDES, sized
+// for this exact pace), not whether the target itself advances on schedule.
+const AUTO_ROUTINE_RAMP_TARGET_DAYS=28; // 4 weeks — the pace a consistently-trained muscle should complete its MEV->MRV climb in
+const AUTO_ROUTINE_RAMP_HARD_CAP_DAYS=42; // 6 weeks — force-complete regardless of pace once this many days have passed since going active
+function getAutoRoutineActiveRampTarget(muscle,tenureStartISO){
+  const lm=getMuscleLandmarks(muscle);
+  if(!tenureStartISO)return lm.mev; // no tenure record yet — shouldn't happen for an active muscle, but never regress below MEV if it does
+  const elapsedDays=(Date.now()-new Date(tenureStartISO))/864e5;
+  if(elapsedDays>=AUTO_ROUTINE_RAMP_HARD_CAP_DAYS)return lm.mrv; // hard cap — no more waiting on pace
+  const frac=Math.max(0,Math.min(1,elapsedDays/AUTO_ROUTINE_RAMP_TARGET_DAYS));
+  return lm.mev+frac*(lm.mrv-lm.mev);
+}
 function advanceAutoRoutineMuscleProgress(trainedMuscles){
   if(!state.autoRoutineMuscleProgress)state.autoRoutineMuscleProgress={};
-  const activeSet=getAutoRoutineActiveMuscles();
+  const activeSet=getAutoRoutineActiveMuscles(); // also refreshes state.autoRoutineActiveMuscles' tenure timestamps as a side effect
   const trainedSet=new Set(trainedMuscles);
   const grants=[];
   Object.keys(state.volumeLandmarks||{}).forEach(muscle=>{
@@ -9204,11 +9278,29 @@ function advanceAutoRoutineMuscleProgress(trainedMuscles){
     if(!state.autoRoutineMuscleProgress[muscle])state.autoRoutineMuscleProgress[muscle]={current:lm.mev};
     const p=state.autoRoutineMuscleProgress[muscle];
     const isActive=activeSet.has(muscle);
-    if(!isActive&&p.current>lm.mav)p.current=lm.mav; // hard, immediate ceiling — see comment above
+    // UPDATED (user's explicit request, 2026-09-04): back-burner muscles clamp to MEV now, not MAV
+    // — "stay at MEV" was the ask, not "still build toward MAV." Was p.current>lm.mav / lm.mav.
+    if(!isActive&&p.current>lm.mev)p.current=lm.mev; // hard, immediate ceiling — see comment above
     if(!trainedSet.has(muscle))return; // only actually-trained muscles advance this session
     if(isAutoRoutineMuscleStruggling(muscle)||isAutoRoutineMuscleFullyResting(muscle))return;
-    const ceiling=isActive?lm.mrv:lm.mav;
-    const cur=Math.max(lm.mev,p.current);
+    if(isActive){
+      // CALENDAR-BASED ramp (see getAutoRoutineActiveRampTarget above) — jump straight to wherever
+      // the 4-week schedule says we should be by now (never backwards), rather than a small fixed
+      // per-exposure step. A muscle trained less often just "catches up" in bigger jumps whenever it
+      // IS trained; one hasn't been trained at all since going active still gets force-completed to
+      // MRV once AUTO_ROUTINE_RAMP_HARD_CAP_DAYS passes (see the read-time clamp in
+      // getAutoRoutineMuscleTargetNow — that part doesn't even require this function to run).
+      const target=getAutoRoutineActiveRampTarget(muscle,state.autoRoutineActiveMuscles&&state.autoRoutineActiveMuscles[muscle]);
+      const next=Math.min(lm.mrv,Math.max(p.current,target));
+      if(next<=p.current)return;
+      const delta=next-p.current;
+      p.current=next;
+      grants.push({muscle,delta});
+      return;
+    }
+    // Non-active: unchanged climb-to-MEV-only logic (see BUG FIX comment history below)
+    const ceiling=lm.mev;
+    const cur=p.current;
     if(cur>=ceiling)return;
     const inc=getAutoRoutineProgressIncrement(muscle,activeSet);
     if(inc<=0)return;
@@ -9253,6 +9345,18 @@ const AUTO_ROUTINE_MUSCLE_TIERS={
   small:{muscles:['Shoulders','Biceps','Triceps'],minGapDays:1.5,idealGapDays:2,exposureCap:4},
   large:{muscles:['Chest','Back','Quads','Hamstrings','Glutes'],minGapDays:2,idealGapDays:2.5,exposureCap:5}
 };
+// PER-MUSCLE CAP OVERRIDES (2026-09-04, user's explicit request): raised so 4 sessions/week can
+// deliver full MRV for every muscle the user actually trains, then +1 past that on top (user's own
+// buffer request) — no longer a clean per-tier number since e.g. Quads/Hamstrings need less headroom
+// than Chest/Back within the same "large" tier, and Triceps needs less than Shoulders/Biceps within
+// "small". Glutes/Core intentionally excluded — user doesn't train these directly, tier default
+// (5/3) stands until/unless that changes. Falls back to the tier default for any muscle not listed.
+const AUTO_ROUTINE_EXPOSURE_CAP_OVERRIDES={
+  Quads:6,Hamstrings:6,Chest:7,Triceps:6,Back:8,Calves:6,Tibialis:6,Shoulders:8,Biceps:8
+};
+function getMuscleExposureCap(muscle){
+  return AUTO_ROUTINE_EXPOSURE_CAP_OVERRIDES[muscle]??getMuscleTier(muscle).exposureCap;
+}
 function getMuscleTier(muscle){
   for(const key in AUTO_ROUTINE_MUSCLE_TIERS){
     if(AUTO_ROUTINE_MUSCLE_TIERS[key].muscles.includes(muscle))return AUTO_ROUTINE_MUSCLE_TIERS[key];
@@ -9314,7 +9418,7 @@ function getMuscleGapDays(muscle,activeSet){
   if(activeWeeks>=AUTO_ROUTINE_FREQ_MIN_ACTIVE_WEEKS&&hits>0){
     idealGapDays=7/(hits/activeWeeks); // real cadence beats the table guess once there's enough of it
   }
-  return{minGapDays,idealGapDays,isPriority,exposureCap:tier.exposureCap};
+  return{minGapDays,idealGapDays,isPriority,exposureCap:getMuscleExposureCap(muscle)};
 }
 function getMuscleExposureInfo(muscle,activeSet){
   const gaps=getMuscleGapDays(muscle,activeSet||getAutoRoutineActiveMuscles());
@@ -9371,7 +9475,7 @@ function buildAutoSession(mesoIdx,minutesAvailable){
   orderedMuscles.forEach(muscle=>{
     const need=needByMuscle[muscle];
     if(!need||need<=0)return;
-    const target=Math.min(Math.round(need),getMuscleTier(muscle).exposureCap);
+    const target=Math.min(Math.round(need),getMuscleExposureCap(muscle));
     for(let i=0;i<target;i++){if(!growMuscleOneSet(picks,muscle,activeSet))break;}
   });
   if(minutesAvailable){
@@ -13041,7 +13145,12 @@ function renderReview(){
   // A reason sentence still appears under the bar, but only for statuses that actually need one;
   // 'building' and 'mav-to-mrv' (nothing wrong) get just the chip. 'mav-to-mrv' previously had no
   // representation anywhere (old icons map had no entry for it) — now it's an explicit green chip.
-  const trainedWithRec=MUSCLE_GROUPS.filter(m=>ms[m]>0).map(m=>({m,rec:state.volumeLandmarks[m]?getVolumeRecommendation(m):null}));
+  // UPDATED (2026-09-05, user's explicit request): only muscles that still HAVE landmarks get a bar
+  // at all now — used to be any muscle with ms[m]>0 (including secondary-credit-only volume), which
+  // would've kept showing a bar for Glutes/Core (no chip/caption, just a naked number) even after
+  // excluding them from landmark tracking below. Requiring state.volumeLandmarks[m] up front hides
+  // them from Review entirely, consistent with Auto Routine (which already keys off the same dict).
+  const trainedWithRec=MUSCLE_GROUPS.filter(m=>ms[m]>0&&state.volumeLandmarks[m]).map(m=>({m,rec:getVolumeRecommendation(m)}));
   trainedWithRec.sort((a,b)=>{
     const ai=a.rec?VOLUME_STATUS_ORDER.indexOf(a.rec.status):999;
     const bi=b.rec?VOLUME_STATUS_ORDER.indexOf(b.rec.status):999;
