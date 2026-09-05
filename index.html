@@ -459,6 +459,9 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-orange flex-1" onclick="openSupersetModal()">🔗 Super</button>
       <button class="btn btn-primary flex-1" onclick="finishWorkout()">Done ✓</button>
     </div>
+    <div id="extend-auto-session-row" style="display:none;margin-top:7px">
+      <button class="btn btn-ghost btn-full" onclick="openExtendAutoSessionModal()">➕ Extend Session</button>
+    </div>
     <div style="display:flex;gap:7px;margin-top:7px">
       <button class="btn btn-ghost flex-1" onclick="pauseWorkout()">⏸️ Pause for later</button>
       <button class="btn btn-danger flex-1" onclick="cancelWorkout()">Discard Workout</button>
@@ -672,7 +675,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-05.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-05.2</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -880,16 +883,35 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <button class="btn btn-ghost btn-sm" onclick="openAutoRoutinePoolModal()">Edit Pool</button>
     </div>
     <div class="modal-body">
-      <div class="small text3 mb8">Builds today's session from your Auto Routine exercise pool — no active mesocycle required. Each muscle only shows up if it's actually due (past its own minimum recovery gap since last trained), and gets a per-exposure dose sized for its own recovery speed. Up to 2 muscles at a time are auto-selected by readiness to push toward MRV; everyone else progresses normally but is capped at MAV. Leave "Minutes available" blank and it fills a session with everything due today; give it a number and it trims or fills to fit that time instead. You'll always get a warning (not a hard block) if the result still looks unusually long.</div>
+      <div class="small text3 mb8">Builds today's session from your Auto Routine exercise pool — no active mesocycle required. Each muscle only shows up if it's actually due (past its own minimum recovery gap since last trained), and gets a per-exposure dose sized for its own recovery speed, already accounting for any indirect/secondary credit it's picked up elsewhere this week. Up to 2 muscles at a time are auto-selected by readiness and ramp from MEV to MRV over about 4 weeks (hard-capped by 6); everyone else holds at MEV. Leave both fields below blank and it fills a session with everything due today (topped up to at least 10 sets if genuinely-eligible work allows); set Minutes OR Sets and it trims or fills to fit that instead — only one can be active at a time. You'll always get a warning (not a hard block) if the result still looks unusually long.</div>
       <div class="input-label">Minutes available (optional)</div>
-      <input id="auto-session-minutes" type="number" min="1" inputmode="numeric" placeholder="Leave blank to use the default below"/>
+      <input id="auto-session-minutes" type="number" min="1" inputmode="numeric" placeholder="Leave blank to use the default below" oninput="document.getElementById('auto-session-sets').value=''"/>
       <div class="small text3 mt4" id="auto-session-default-estimate"></div>
+      <div class="input-label mt8">Sets budget (optional)</div>
+      <input id="auto-session-sets" type="number" min="1" inputmode="numeric" placeholder="Total sets across the whole session" oninput="document.getElementById('auto-session-minutes').value=''"/>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost flex-1" onclick="closeModal('modal-auto-session')">Cancel</button>
       <button class="btn btn-primary flex-1" onclick="confirmAutoSession()">Build & Start</button>
     </div>
   </div>
+</div>
+<div class="modal-overlay" id="modal-extend-auto-session">
+  <div class="modal"><div class="modal-handle"></div>
+    <div class="modal-title">Extend this session</div>
+    <div class="modal-body">
+      <div class="small text3 mb8">Tops up toward a new total for the whole session — not just adding this number on top of what you've already done. Grows exercises already here first, then pulls in new muscles if there's still room. Enter minutes OR sets, not both.</div>
+      <div class="input-label">More minutes</div>
+      <input id="extend-auto-session-minutes" type="number" min="1" inputmode="numeric" placeholder="e.g. 15" oninput="document.getElementById('extend-auto-session-sets').value=''"/>
+      <div class="input-label mt8">More sets</div>
+      <input id="extend-auto-session-sets" type="number" min="1" inputmode="numeric" placeholder="e.g. 6" oninput="document.getElementById('extend-auto-session-minutes').value=''"/>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost flex-1" onclick="closeModal('modal-extend-auto-session')">Cancel</button>
+      <button class="btn btn-primary flex-1" onclick="promptExtendActiveAutoSession()">Add More</button>
+    </div>
+  </div>
+</div>
 </div>
 
 <!-- Switch Exercise (2026-08-21) -->
@@ -8048,6 +8070,8 @@ function renderActiveWorkout(){
     }
   });
   updateWorkoutStats();updateWorkoutEstimate();initWorkoutReorder();scheduleSaveActiveWorkoutDraft();
+  const extendRow=document.getElementById('extend-auto-session-row');
+  if(extendRow)extendRow.style.display=isActiveAutoRoutineSession()?'':'none';
 }
 
 function getSessionsForExercise(exId,limit,routineId){
@@ -8956,9 +8980,9 @@ const AUTO_ROUTINE_EXERCISE_VARIETY_THRESHOLD=3;
 // (nothing added) once the muscle's own tiered cap is reached. 2026-08-29: no longer takes a meso
 // (`m`) — protectRank now comes from Auto Routine's own standing readiness (getAutoRoutineMuscleReadiness),
 // not a meso's continuousVolumeMode/priorityMuscles settings.
-function growMuscleOneSet(picks,muscle,activeSet){
+function growMuscleOneSet(picks,muscle,activeSet,allowExceedCap){
   const total=picks.filter(p=>p.muscle===muscle).reduce((a,p)=>a+p.sets,0);
-  if(total>=getMuscleExposureCap(muscle))return false;
+  if(!allowExceedCap&&total>=getMuscleExposureCap(muscle))return false; // allowExceedCap (handover spec §4, 2026-09-05): mid-session extend only, after an explicit user confirm — every build/fill call above passes nothing here and stays a hard limit
   let target=picks.find(p=>p.muscle===muscle&&p.sets<AUTO_ROUTINE_EXERCISE_VARIETY_THRESHOLD);
   if(!target){
     const usedIds=new Set(picks.filter(p=>p.muscle===muscle).map(p=>p.exId));
@@ -9431,14 +9455,46 @@ function getMuscleExposureInfo(muscle,activeSet){
 // Floor prevents scaling all the way to a token near-zero dose after a very long layoff.
 const AUTO_ROUTINE_BREAK_RECOVERY_WINDOW_DAYS=14;
 const AUTO_ROUTINE_BREAK_SCALE_FLOOR=0.5;
-function getMuscleExposureDose(muscle,activeSet){
+// SECONDARY/INDIRECT-AWARE EXPOSURE DOSING (2026-09-05, handover spec §1): getMuscleExposureDose
+// used to dose every muscle on weeklyTargetNow alone, with zero awareness of what's already been
+// delivered this week — direct or indirect (secondary-muscle credit from another exercise, e.g.
+// Triceps from Bench Press). That both inflated session length and let back-burner muscles rack up
+// more real weekly volume than intended, since nothing ever reduced dose for stimulus already
+// received another way. Mirrors the exact direct-vs-indirect precedent the real meso side already
+// uses (see getMuscleVolumeBreakdown's own comment): priority/active muscles are judged on DIRECT
+// volume alone (indirect credit shouldn't let an MRV push look more "done" than the real direct work
+// delivered); back-burner muscles use the plain existing getMuscleVolume (direct+indirect blended,
+// unchanged, real per-exercise secondary fraction). `picks` is the in-progress buildAutoSession
+// array so far THIS build — combined with real history so a muscle scheduled later in the ordering
+// correctly sees credit an earlier exercise in this same session already gave it, not a stale
+// pre-session number. Defaults to [] so existing callers with no live picks context (e.g.
+// getAutoRoutineTotalDueNow's pre-build estimate) are unaffected.
+function getAutoRoutineDeliveredSoFar(muscle,activeSet,picks){
+  const isPriority=activeSet.has(muscle);
+  const histDelivered=isPriority?getMuscleVolumeBreakdown(muscle).direct:getMuscleVolume(muscle).sets;
+  let liveDirect=0,liveIndirect=0;
+  (picks||[]).forEach(p=>{
+    const exData=getExercise(p.exId);if(!exData)return;
+    if(exData.muscle===muscle)liveDirect+=p.sets;
+    else if(exData.secondary&&exData.secondary.split(',').some(s=>s.trim()===muscle))liveIndirect+=p.sets*getSecondaryMuscleFraction(exData,muscle);
+  });
+  return histDelivered+liveDirect+(isPriority?0:liveIndirect); // priority: direct-only, same rule live as historical
+}
+function getMuscleExposureDose(muscle,activeSet,picks){
   activeSet=activeSet||getAutoRoutineActiveMuscles();
+  picks=picks||[];
   const info=getMuscleExposureInfo(muscle,activeSet);
   if(!info.eligible)return{...info,weeklyTargetNow:0,dose:0};
   const weeklyTargetNow=getAutoRoutineMuscleTargetNow(muscle);
   if(weeklyTargetNow<=0)return{...info,weeklyTargetNow,dose:0};
+  // Confirmed via simulation (handover spec §1): with zero history, getMuscleVolume/
+  // getMuscleVolumeBreakdown correctly return 0, so delivered=0 and remaining=weeklyTargetNow
+  // automatically — no special-casing "first session" needed or wanted here.
+  const delivered=getAutoRoutineDeliveredSoFar(muscle,activeSet,picks);
+  const remaining=Math.max(0,weeklyTargetNow-delivered);
+  if(remaining<=0)return{...info,weeklyTargetNow,dose:0}; // target genuinely already met this week — direct progress for priority, direct-or-indirect for back-burner
   const idealSessionsPerWeek=7/info.idealGapDays;
-  const baseDose=Math.min(info.exposureCap,weeklyTargetNow/idealSessionsPerWeek);
+  const baseDose=Math.min(info.exposureCap,remaining/idealSessionsPerWeek);
   let scaleFactor=1;
   if(info.daysSince!=null&&info.daysSince>info.idealGapDays){
     scaleFactor=Math.max(AUTO_ROUTINE_BREAK_SCALE_FLOOR,Math.min(1,1-(info.daysSince-info.idealGapDays)/AUTO_ROUTINE_BREAK_RECOVERY_WINDOW_DAYS));
@@ -9451,70 +9507,73 @@ function getMuscleExposureDose(muscle,activeSet){
 // if one happens to be active, is only consulted for its RIR ramp (a genuinely meso-rotation-tied
 // concept with no clean standalone equivalent built yet) and for tagging the resulting workout's
 // meso context. Everything about WHAT gets trained and how much is fully independent of it.
-function buildAutoSession(mesoIdx,minutesAvailable){
+const AUTO_ROUTINE_MIN_SESSION_SETS=10; // handover spec §2, 2026-09-05: default-mode floor — a default-mode session below this gets padded if eligible work allows it, or flagged "below floor" (not silently delivered tiny) if it genuinely can't reach it
+function buildAutoSession(mesoIdx,minutesAvailable,setsBudget){
   if(minutesAvailable!=null&&minutesAvailable<=0)minutesAvailable=null; // defensive: a non-positive budget from any future caller means "no real budget," not "build nothing" — confirmAutoSession's own UI path already guards this, this just protects other/future callers
+  if(setsBudget!=null&&setsBudget<=0)setsBudget=null; // same defensive guard, sets-budget side (§3)
+  if(minutesAvailable!=null)setsBudget=null; // mutually exclusive (§3) — the modal only ever lets one field be active; minutes wins if a future caller somehow supplies both
   const activeSet=getAutoRoutineActiveMuscles();
   const allMuscles=Object.keys(state.volumeLandmarks||{});
   const priorityMuscles=allMuscles.filter(mu=>activeSet.has(mu));
   const otherMuscles=allMuscles.filter(mu=>!activeSet.has(mu));
   const orderedMuscles=priorityMuscles.concat(otherMuscles);
-  let needByMuscle={};
-  orderedMuscles.forEach(muscle=>{needByMuscle[muscle]=isAutoRoutineMuscleFullyResting(muscle)?0:getMuscleExposureDose(muscle,activeSet).dose;});
-  // REMOVED 2026-08-29: the old "CONTINUOUS VOLUME MODE weekly budget" scaling step (meso-scoped
-  // m.continuousVolumeMode/m.continuousWeeklySetBudget) that used to sit here. It existed to scale
-  // several muscles' raw needs down to a real weekly budget under the OLD model, where per-muscle
-  // need had no built-in pacing of its own. The new per-exposure scheduler already paces every
-  // muscle via its own minGap/idealGap/tiered cap — an extra budget-scaling layer on top is
-  // redundant now, and tying it to a specific meso's settings would contradict "always use this new
-  // ramp" regardless of whether a meso happens to be active.
-  // Initial deficit-driven build (2026-08-21, now variety-aware throughout — not just during
-  // time-fill below): grows each muscle toward its raw need via growMuscleOneSet, so a large
-  // deficit naturally spreads across a second exercise past the threshold instead of stacking
-  // straight to the muscle's own tiered cap on one movement.
+  // PROGRESSIVE/LIVE dosing (2026-09-05, handover spec §1): used to precompute every muscle's dose
+  // upfront from a stale pre-build snapshot, then grow picks in a second pass — meaning a muscle
+  // processed later in the ordering never saw indirect credit an earlier muscle's exercise in THIS
+  // SAME BUILD already gave it (e.g. Triceps' dose computed before Chest's Bench Press pick existed,
+  // even though that Bench Press is about to hand Triceps real indirect credit). Merged into one
+  // pass — getMuscleExposureDose now takes the current in-progress `picks` array directly, so each
+  // muscle's need reflects everything already added this build, not just history through yesterday.
   let picks=[];
   orderedMuscles.forEach(muscle=>{
-    const need=needByMuscle[muscle];
+    if(isAutoRoutineMuscleFullyResting(muscle))return;
+    const need=getMuscleExposureDose(muscle,activeSet,picks).dose;
     if(!need||need<=0)return;
     const target=Math.min(Math.round(need),getMuscleExposureCap(muscle));
     for(let i=0;i<target;i++){if(!growMuscleOneSet(picks,muscle,activeSet))break;}
   });
-  if(minutesAvailable){
-    const budgetSec=minutesAvailable*60;
-    const estimateTotalSeconds=()=>estimatePicksSeconds(picks);
-    if(estimateTotalSeconds()>budgetSec){
+  const totalSets=()=>picks.reduce((a,p)=>a+p.sets,0);
+  const totalSeconds=()=>estimatePicksSeconds(picks);
+  if(minutesAvailable||setsBudget){
+    // §3 (2026-09-05): sets-budget mode reuses the EXACT same trim/fill shape as the existing
+    // minutes mode — only the metric (set count vs estimated seconds) and the budget value differ.
+    const usingSets=!!setsBudget;
+    const metric=usingSets?totalSets:totalSeconds;
+    const budget=usingSets?setsBudget:minutesAvailable*60;
+    if(metric()>budget){
       // 2026-08-29: collapsed the old two-branch trim (meso continuousVolumeMode readiness-based vs
       // "legacy" flat priority/back-burner) into one — readiness (protectRank) now ALWAYS governs
       // trimming, matching how Auto Routine always works regardless of any meso's own settings. Cut
       // whole exercises lowest-readiness-first until it fits or only one remains, then trim
       // remaining set counts toward a 1-set floor, still lowest-readiness-among-what's-left first.
-      while(estimateTotalSeconds()>budgetSec&&picks.length>1){
+      while(metric()>budget&&picks.length>1){
         picks.sort((a,b)=>a.protectRank-b.protectRank);
         picks=picks.slice(1);
       }
-      while(estimateTotalSeconds()>budgetSec&&picks.some(p=>p.sets>1)){
+      while(metric()>budget&&picks.some(p=>p.sets>1)){
         const trimmable=picks.filter(p=>p.sets>1).sort((a,b)=>a.protectRank-b.protectRank);
         trimmable[0].sets--;
       }
     }else{
-      // TIME-FIRST FILL (2026-08-21): the whole point of giving a time budget is to fill it, not
-      // just have a ceiling to trim against. Step 1: grow muscles already included, best-
-      // readiness/priority first, via growMuscleOneSet — which naturally introduces a second
-      // exercise past the variety threshold instead of stacking one exercise to its cap. Step 2:
-      // once everything included is fully capped (or pool-exhausted) but time remains, pull in
-      // entirely NEW muscles from the pool — even ones with ~0 remaining deficit, since unused
-      // time is better spent training something than sitting idle — ordered by readiness, grown
-      // the same variety-aware way. Stops once the budget's used, the pool's exhausted, or every
-      // muscle is at its own tiered cap.
+      // TIME/SETS-FIRST FILL (2026-08-21, extended to sets-mode 2026-09-05): the whole point of
+      // giving a budget is to fill it, not just have a ceiling to trim against. Step 1: grow muscles
+      // already included, best-readiness/priority first, via growMuscleOneSet — which naturally
+      // introduces a second exercise past the variety threshold instead of stacking one exercise to
+      // its cap. Step 2: once everything included is fully capped (or pool-exhausted) but budget
+      // remains, pull in entirely NEW muscles from the pool — even ones with ~0 remaining deficit,
+      // since unused budget is better spent training something than sitting idle — ordered by
+      // readiness, grown the same variety-aware way. Stops once the budget's used, the pool's
+      // exhausted, or every muscle is at its own tiered cap.
       let progressed=true;
-      while(estimateTotalSeconds()<budgetSec&&progressed){
+      while(metric()<budget&&progressed){
         progressed=false;
         const musclesByRank=[...new Set(picks.map(p=>p.muscle))].sort((a,b)=>getMuscleProtectRank(picks,b)-getMuscleProtectRank(picks,a));
         for(const muscle of musclesByRank){
-          if(estimateTotalSeconds()>=budgetSec)break;
+          if(metric()>=budget)break;
           if(growMuscleOneSet(picks,muscle,activeSet))progressed=true;
         }
       }
-      if(estimateTotalSeconds()<budgetSec){
+      if(metric()<budget){
         const includedMuscles=new Set(picks.map(p=>p.muscle));
         // 2026-08-29: also require getMuscleExposureInfo(...).eligible here — under the new
         // per-exposure scheduler a muscle inside its own minimum recovery gap isn't just "at zero
@@ -9523,12 +9582,44 @@ function buildAutoSession(mesoIdx,minutesAvailable){
         const fillCandidates=orderedMuscles.filter(mu=>!includedMuscles.has(mu)&&!isAutoRoutineMuscleFullyResting(mu)&&getMuscleExposureInfo(mu,activeSet).eligible);
         fillCandidates.sort((a,b)=>getAutoRoutineMuscleReadiness(b)-getAutoRoutineMuscleReadiness(a));
         for(const muscle of fillCandidates){
-          if(estimateTotalSeconds()>=budgetSec)break;
-          while(estimateTotalSeconds()<budgetSec&&growMuscleOneSet(picks,muscle,activeSet)){
-            if(estimateTotalSeconds()>=budgetSec)break;
+          if(metric()>=budget)break;
+          while(metric()<budget&&growMuscleOneSet(picks,muscle,activeSet)){
+            if(metric()>=budget)break;
           }
         }
       }
+    }
+  }else if(totalSets()>0&&totalSets()<AUTO_ROUTINE_MIN_SESSION_SETS){
+    // §2 (handover spec, 2026-09-05): default/blank mode, below the minimum floor — pad using the
+    // identical two-stage fill (same ordering, same eligibility/cap rules) against a set-count
+    // target instead of a budget ceiling. "genuinely eligible work exists, just less than the floor"
+    // is a real, distinct outcome from "nothing due at all" (totalSets()===0, left completely
+    // untouched below) — DECIDED not to silently auto-pad past what's actually eligible, and not to
+    // silently deliver the tiny session either; if maximal padding still can't reach the floor,
+    // flag it so the caller (confirmAutoSession) can surface "No session due" instead.
+    let progressed=true;
+    while(totalSets()<AUTO_ROUTINE_MIN_SESSION_SETS&&progressed){
+      progressed=false;
+      const musclesByRank=[...new Set(picks.map(p=>p.muscle))].sort((a,b)=>getMuscleProtectRank(picks,b)-getMuscleProtectRank(picks,a));
+      for(const muscle of musclesByRank){
+        if(totalSets()>=AUTO_ROUTINE_MIN_SESSION_SETS)break;
+        if(growMuscleOneSet(picks,muscle,activeSet))progressed=true;
+      }
+    }
+    if(totalSets()<AUTO_ROUTINE_MIN_SESSION_SETS){
+      const includedMuscles=new Set(picks.map(p=>p.muscle));
+      const fillCandidates=orderedMuscles.filter(mu=>!includedMuscles.has(mu)&&!isAutoRoutineMuscleFullyResting(mu)&&getMuscleExposureInfo(mu,activeSet).eligible);
+      fillCandidates.sort((a,b)=>getAutoRoutineMuscleReadiness(b)-getAutoRoutineMuscleReadiness(a));
+      for(const muscle of fillCandidates){
+        if(totalSets()>=AUTO_ROUTINE_MIN_SESSION_SETS)break;
+        while(totalSets()<AUTO_ROUTINE_MIN_SESSION_SETS&&growMuscleOneSet(picks,muscle,activeSet)){
+          if(totalSets()>=AUTO_ROUTINE_MIN_SESSION_SETS)break;
+        }
+      }
+    }
+    if(totalSets()<AUTO_ROUTINE_MIN_SESSION_SETS){
+      picks.length=0;
+      picks.autoRoutineBelowFloor=true; // real 3rd state — confirmAutoSession checks this to show "No session due" instead of either a tiny session or the plain "nothing due" message
     }
   }
   return picks;
@@ -9684,7 +9775,151 @@ function launchAutoSessionWithPicks(mesoIdx,picks,sorenessScores){
     // activeWorkout.grantedVolumeProgress, its own store (state.autoRoutineMuscleProgress) and
     // revert function (below) since it isn't meso-scoped the way Continuous Volume Mode's is.
     if(grants.length)activeWorkout.grantedAutoRoutineProgress=grants;
+    // §4 (handover spec, 2026-09-05): remember what budget (if any) this session was actually built
+    // against, so a later mid-session extend raises THAT ceiling rather than guessing from wherever
+    // the session happens to currently sit (see extendActiveAutoSession below).
+    activeWorkout.autoSessionOriginalMinutes=autoSessionOriginalMinutes;
+    activeWorkout.autoSessionOriginalSets=autoSessionOriginalSets;
   }
+}
+// MID-SESSION EXTEND (handover spec §4, 2026-09-05): "I have N more minutes/sets left in me."
+function isActiveAutoRoutineSession(){
+  // Same check already used just above (launchAutoSessionWithPicks's own post-launch soreness
+  // stamp) — an Auto Routine session has no sourceRoutineId and is named exactly this.
+  return!!(activeWorkout&&!activeWorkout.sourceRoutineId&&activeWorkout.name==='Auto Routine');
+}
+// Projects the CURRENTLY ACTIVE workout's real exercises into the same {muscle,exId,sets,...}
+// shape buildAutoSession's own picks use — sets here is a live COUNT (ex.sets.length, seeded or
+// done, matching how a fresh build counts sets before any are performed), not the real set-object
+// array, so growMuscleOneSet can grow it exactly like a fresh build would.
+function getAutoRoutineLivePicksFromActiveWorkout(){
+  if(!activeWorkout||!activeWorkout.exercises)return[];
+  const activeSet=getAutoRoutineActiveMuscles();
+  return activeWorkout.exercises.map(ex=>{
+    const exData=getExercise(ex.exId);
+    if(!exData)return null;
+    return{muscle:exData.muscle,exId:ex.exId,sets:(ex.sets||[]).length,isPriority:activeSet.has(exData.muscle),protectRank:getAutoRoutineMuscleReadiness(exData.muscle)};
+  }).filter(Boolean);
+}
+// Materializes `count` new REAL, auto-targeted sets onto the active workout — appends to an
+// existing exercise card if exId's already in the session, or creates a whole new exercise entry
+// if this is a muscle/exercise the fill step just pulled in fresh. Mirrors
+// launchAutoSessionWithPicks's own set-construction (getSetTarget, autoWeight/autoReps, per-muscle
+// RIR) exactly, just appending mid-session instead of seeding a brand new workout.
+function appendAutoRoutineSets(exId,muscle,count){
+  if(count<=0)return;
+  const exData=getExercise(exId);if(!exData)return;
+  let exIdx=activeWorkout.exercises.findIndex(e=>e.exId===exId);
+  if(exIdx===-1){
+    const repRange=findFallbackRepRange(exId,null)||{min:8,max:12};
+    activeWorkout.exercises.push({exId,sets:[],supersetGroup:null,repRange,useRIR:true});
+    exIdx=activeWorkout.exercises.length-1;
+  }
+  const ex=activeWorkout.exercises[exIdx];
+  const repRange=ex.repRange||findFallbackRepRange(exId,null)||{min:8,max:12};
+  const startSi=ex.sets.length;
+  const m=activeMesoContext?state.mesocycles[activeMesoContext.mesoIdx]:null;
+  const mesoRIRInfo=(function(){try{return getMesoTargetRIR(m,null,false);}catch(e){return null;}})();
+  const rirInfo=resolveTargetRIR(m,mesoRIRInfo,muscle);
+  for(let i=0;i<count;i++){
+    let s=newSet();
+    const target=getSetTarget(exId,{repRange},startSi+i,exData,null);
+    if(target){
+      s={...s,weight:target.weight,reps:target.reps,repsL:target.repsL,repsR:target.repsR};
+      s.autoWeight=true;s.autoReps=true;s.autoRepsL=true;s.autoRepsR=true;
+    }
+    if(rirInfo&&rirInfo.rir!=null)s.rpe=rirInfo.rir;
+    ex.sets.push(s);
+  }
+}
+// The actual extend: re-runs buildAutoSession's own TIME-FIRST FILL shape (grow included muscles
+// first, then pull in entirely new ones — both stages required, spec §4 point 3, or a session that
+// already capped its original muscles could never reach a raised ceiling) against a live snapshot
+// of the CURRENT workout, using §1's live/session-overlap-aware dosing throughout (getMuscleExposureDose
+// already takes a picks array — same mechanism, just seeded from the real workout instead of an
+// empty build). allowExceedCap only ever arrives true from promptExtendActiveAutoSession below,
+// and only after the user has explicitly confirmed — never silently (spec §4 point 1).
+function extendActiveAutoSession(addMinutes,addSets,allowExceedCap){
+  if(!isActiveAutoRoutineSession())return{ok:false,reason:'not_auto_routine_session'};
+  if((addMinutes==null||addMinutes<=0)&&(addSets==null||addSets<=0))return{ok:false,reason:'no_amount'};
+  const activeSet=getAutoRoutineActiveMuscles();
+  const allMuscles=Object.keys(state.volumeLandmarks||{});
+  const priorityMuscles=allMuscles.filter(mu=>activeSet.has(mu));
+  const otherMuscles=allMuscles.filter(mu=>!activeSet.has(mu));
+  const orderedMuscles=priorityMuscles.concat(otherMuscles);
+  let picks=getAutoRoutineLivePicksFromActiveWorkout();
+  const originalCounts={};
+  picks.forEach(p=>{originalCounts[p.exId]=p.sets;});
+  // §4 point 3: raise the ORIGINAL session ceiling to a new total — not "current + N". If there
+  // was no original budget (blank/default-mode session), fall back to current total + N, since
+  // there's no original ceiling to extend from.
+  const usingSets=addSets!=null&&addSets>0;
+  const totalSets=()=>picks.reduce((a,p)=>a+p.sets,0);
+  const totalSeconds=()=>estimatePicksSeconds(picks);
+  const metric=usingSets?totalSets:totalSeconds;
+  let budget;
+  if(usingSets){
+    const base=activeWorkout.autoSessionOriginalSets!=null?activeWorkout.autoSessionOriginalSets:totalSets();
+    budget=base+addSets;
+  }else{
+    const baseMinutes=activeWorkout.autoSessionOriginalMinutes!=null?activeWorkout.autoSessionOriginalMinutes:Math.round(totalSeconds()/60);
+    budget=(baseMinutes+addMinutes)*60;
+  }
+  let progressed=true;
+  while(metric()<budget&&progressed){
+    progressed=false;
+    const musclesByRank=[...new Set(picks.map(p=>p.muscle))].sort((a,b)=>getMuscleProtectRank(picks,b)-getMuscleProtectRank(picks,a));
+    for(const muscle of musclesByRank){
+      if(metric()>=budget)break;
+      if(growMuscleOneSet(picks,muscle,activeSet,allowExceedCap))progressed=true;
+    }
+  }
+  if(metric()<budget){
+    const includedMuscles=new Set(picks.map(p=>p.muscle));
+    const fillCandidates=orderedMuscles.filter(mu=>!includedMuscles.has(mu)&&!isAutoRoutineMuscleFullyResting(mu)&&getMuscleExposureInfo(mu,activeSet).eligible);
+    fillCandidates.sort((a,b)=>getAutoRoutineMuscleReadiness(b)-getAutoRoutineMuscleReadiness(a));
+    for(const muscle of fillCandidates){
+      if(metric()>=budget)break;
+      while(metric()<budget&&growMuscleOneSet(picks,muscle,activeSet,allowExceedCap)){
+        if(metric()>=budget)break;
+      }
+    }
+  }
+  const metGoal=metric()>=budget;
+  let addedAny=false;
+  picks.forEach(p=>{
+    const before=originalCounts[p.exId]||0;
+    const delta=p.sets-before;
+    if(delta>0){appendAutoRoutineSets(p.exId,p.muscle,delta);addedAny=true;}
+  });
+  if(addedAny){save();renderActiveWorkout();}
+  return{ok:true,addedAny,metGoal,newTotalSets:totalSets()};
+}
+// UI entry point: tries a normal (cap-respecting) extend first; only if that couldn't reach the
+// new ceiling does it offer the explicit "push past normal caps?" confirm (spec §4 point 1 — never
+// silent, default fill behavior always respects caps first).
+function promptExtendActiveAutoSession(){
+  if(!isActiveAutoRoutineSession())return;
+  const minInput=document.getElementById('extend-auto-session-minutes');
+  const setsInput=document.getElementById('extend-auto-session-sets');
+  const minVal=minInput?parseInt(minInput.value,10):NaN;
+  const setsVal=setsInput?parseInt(setsInput.value,10):NaN;
+  const addMinutes=(!isNaN(minVal)&&minVal>0)?minVal:null;
+  const addSets=(!isNaN(setsVal)&&setsVal>0)?setsVal:null;
+  if(!addMinutes&&!addSets){alert('Enter how many more minutes or sets you have left.');return;}
+  closeModal('modal-extend-auto-session');
+  const result=extendActiveAutoSession(addMinutes,addSets,false);
+  if(result.ok&&!result.metGoal){
+    if(confirm('Every eligible muscle is already at its own per-session cap — add more anyway, past normal caps?')){
+      extendActiveAutoSession(addMinutes,addSets,true);
+    }
+  }
+}
+function openExtendAutoSessionModal(){
+  if(!isActiveAutoRoutineSession())return;
+  const minInput=document.getElementById('extend-auto-session-minutes');if(minInput)minInput.value='';
+  const setsInput=document.getElementById('extend-auto-session-sets');if(setsInput)setsInput.value='';
+  openModal('modal-extend-auto-session');
 }
 // Auto Routine exercise pool (2026-08-21, user's explicit request — "an array of exercises... 
 // selected by me that it can choose from"): a curated list, separate from what's in any fixed
@@ -9827,6 +10062,7 @@ function openAutoSessionModal(mesoIdx){
   }
   autoSessionMesoIdx=mesoIdx;
   const input=document.getElementById('auto-session-minutes');if(input)input.value='';
+  const setsInput=document.getElementById('auto-session-sets');if(setsInput)setsInput.value='';
   const est=document.getElementById('auto-session-default-estimate');
   if(est)est.textContent='Default if left blank: ~'+getDefaultAutoSessionMinutes()+' min (everything due today, per the scheduler below)';
   openModal('modal-auto-session');
@@ -9847,6 +10083,13 @@ function openAutoRoutineFromHome(){
 }
 let autoSessionMesoIdx=null;
 let autoRoutinePreviewPicks=null;
+// §4 (handover spec, 2026-09-05) — same pending-selection pattern as autoSessionMesoIdx above:
+// whichever budget confirmAutoSession was given (or neither, if left blank) rides along through the
+// soreness-modal/preview flow so launchAutoSessionWithPicks can stash it onto activeWorkout, giving
+// extendActiveAutoSession something to extend FROM later. Reset to null at the top of
+// confirmAutoSession every time, so a stale value from a previous session can never leak forward.
+let autoSessionOriginalMinutes=null;
+let autoSessionOriginalSets=null;
 // Pre-start preview (2026-08-21, biggest gap identified in this system — the user previously had
 // no way to see what Auto Routine actually built before it was already running). Replaces the old
 // separate "long session, continue?" popup with a warning banner integrated directly into the
@@ -9938,12 +10181,26 @@ function getDefaultAutoSessionMinutes(){
 // trimming/time-fill entirely, return exactly what's due). getDefaultAutoSessionMinutes is now used
 // ONLY for the modal's displayed estimate text, never as a real constraint.
 function confirmAutoSession(){
-  const input=document.getElementById('auto-session-minutes');
-  const val=input?parseInt(input.value,10):NaN;
-  const minutes=(!isNaN(val)&&val>0)?val:null;
-  const picks=buildAutoSession(autoSessionMesoIdx,minutes);
+  const minutesInput=document.getElementById('auto-session-minutes');
+  const setsInput=document.getElementById('auto-session-sets');
+  const minVal=minutesInput?parseInt(minutesInput.value,10):NaN;
+  const setsVal=setsInput?parseInt(setsInput.value,10):NaN;
+  const minutes=(!isNaN(minVal)&&minVal>0)?minVal:null;
+  const setsBudget=(!isNaN(setsVal)&&setsVal>0)?setsVal:null;
+  autoSessionOriginalMinutes=minutes;
+  autoSessionOriginalSets=setsBudget;
+  const picks=buildAutoSession(autoSessionMesoIdx,minutes,setsBudget);
   if(!picks||!picks.length){
-    alert('Nothing left to train right now \u2014 every muscle looks covered for this rolling week, or your Auto Routine pool has no exercises for what\'s needed.');
+    // §2 (handover spec, 2026-09-05): "below the 10-set floor, even after maximal padding" is a
+    // real, distinct outcome from "nothing due at all" — surfaced via buildAutoSession's
+    // picks.autoRoutineBelowFloor flag (only ever set in default/blank mode; an explicit Minutes or
+    // Sets budget below 10 is the user's own deliberate choice and is never overridden by the floor
+    // — see buildAutoSession's own comment on that).
+    if(picks&&picks.autoRoutineBelowFloor){
+      alert('There\'s some genuinely-eligible work today, just not enough to fill a normal session (under '+AUTO_ROUTINE_MIN_SESSION_SETS+' sets even after padding). Set a Minutes or Sets budget above if you want a smaller session anyway.');
+    }else{
+      alert('Nothing left to train right now \u2014 every muscle looks covered for this rolling week, or your Auto Routine pool has no exercises for what\'s needed.');
+    }
     return;
   }
   const estMinutes=Math.round(estimatePicksSeconds(picks)/60);
