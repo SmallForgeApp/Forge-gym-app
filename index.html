@@ -675,7 +675,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-05.2</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-05.3</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -9588,6 +9588,34 @@ function buildAutoSession(mesoIdx,minutesAvailable,setsBudget){
           }
         }
       }
+      // STAGE 3 (2026-09-05, user's explicit report): an EXPLICIT Minutes or Sets budget is a
+      // deliberate ask to fill THAT much session — "pulling forward the muscles that are due next"
+      // was the user's own framing. Stages 1+2 above still respect eligibility, and could genuinely
+      // exhaust every option (everything else inside its own recovery gap) while budget remains —
+      // confirmed via simulation: a muscle at its own cap with literally everything else ineligible
+      // left a 10-set ask stuck at 6, and a 100-minute ask stuck at the exact same 6, since nothing
+      // in stage 2's candidate pool ever changes size regardless of budget. Only reachable when an
+      // explicit budget was given (this whole branch is gated on minutesAvailable||setsBudget) — the
+      // default/blank-mode floor in the branch below stays strictly eligibility-gated on purpose
+      // (that one is "what's genuinely due," not an explicit fill request). Orders candidates by
+      // soonest-to-actually-become-due (minGapDays-daysSince ascending; a never-trained muscle's
+      // null daysSince would already have passed the eligible check above, so every candidate here
+      // is a genuine number) rather than readiness, since "pull forward what's due NEXT" is
+      // specifically a recency-based ask, not a volume-headroom one.
+      if(metric()<budget){
+        const includedMuscles=new Set(picks.map(p=>p.muscle));
+        const pullForwardCandidates=orderedMuscles.filter(mu=>!includedMuscles.has(mu)&&!isAutoRoutineMuscleFullyResting(mu));
+        pullForwardCandidates.sort((a,b)=>{
+          const infoA=getMuscleExposureInfo(a,activeSet),infoB=getMuscleExposureInfo(b,activeSet);
+          return(infoA.minGapDays-infoA.daysSince)-(infoB.minGapDays-infoB.daysSince);
+        });
+        for(const muscle of pullForwardCandidates){
+          if(metric()>=budget)break;
+          while(metric()<budget&&growMuscleOneSet(picks,muscle,activeSet)){
+            if(metric()>=budget)break;
+          }
+        }
+      }
     }
   }else if(totalSets()>0&&totalSets()<AUTO_ROUTINE_MIN_SESSION_SETS){
     // §2 (handover spec, 2026-09-05): default/blank mode, below the minimum floor — pad using the
@@ -9879,6 +9907,24 @@ function extendActiveAutoSession(addMinutes,addSets,allowExceedCap){
     const fillCandidates=orderedMuscles.filter(mu=>!includedMuscles.has(mu)&&!isAutoRoutineMuscleFullyResting(mu)&&getMuscleExposureInfo(mu,activeSet).eligible);
     fillCandidates.sort((a,b)=>getAutoRoutineMuscleReadiness(b)-getAutoRoutineMuscleReadiness(a));
     for(const muscle of fillCandidates){
+      if(metric()>=budget)break;
+      while(metric()<budget&&growMuscleOneSet(picks,muscle,activeSet,allowExceedCap)){
+        if(metric()>=budget)break;
+      }
+    }
+  }
+  // STAGE 3 (2026-09-05, same fix as buildAutoSession's budget branch — see its own comment for the
+  // full reasoning): pull forward not-yet-eligible muscles, soonest-due first, if stages 1+2 still
+  // couldn't reach the new ceiling. An explicit "add N more" mid-session is the same kind of
+  // deliberate fill ask as an explicit build-time budget.
+  if(metric()<budget){
+    const includedMuscles=new Set(picks.map(p=>p.muscle));
+    const pullForwardCandidates=orderedMuscles.filter(mu=>!includedMuscles.has(mu)&&!isAutoRoutineMuscleFullyResting(mu));
+    pullForwardCandidates.sort((a,b)=>{
+      const infoA=getMuscleExposureInfo(a,activeSet),infoB=getMuscleExposureInfo(b,activeSet);
+      return(infoA.minGapDays-infoA.daysSince)-(infoB.minGapDays-infoB.daysSince);
+    });
+    for(const muscle of pullForwardCandidates){
       if(metric()>=budget)break;
       while(metric()<budget&&growMuscleOneSet(picks,muscle,activeSet,allowExceedCap)){
         if(metric()>=budget)break;
