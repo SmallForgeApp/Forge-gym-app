@@ -675,7 +675,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-06.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-06.4</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -2047,6 +2047,13 @@ function load(){
   // blank secondary — never overwrites a user's own manual edit (which would no longer be blank).
   state.exercises.forEach(e=>{
     if(e.generated&&!e.secondary)e.secondary=guessSecondaryMuscle(e.muscle,e.name);
+  });
+  // Backfill (2026-09-06, user's explicit request): any Resistance Band exercise created before
+  // the fix above still sitting with bw:'no' — never overwrites bw:'bw' back to 'no' for anything,
+  // only ever moves 'no'->'bw' for band equipment specifically, so a real bodyweight exercise's own
+  // flag is untouched either way.
+  state.exercises.forEach(e=>{
+    if(e.machine==='Resistance Band'&&e.bw!=='bw')e.bw='bw';
   });
   runMigrations();
   if(!state.accentColor)state.accentColor='#D97757';
@@ -3561,7 +3568,16 @@ function resolveExercise(muscle,exName,equipment,position,grip,isUni,modifier,at
     }
     if(existing)return existing;
   }
-  const isBW=equipment==='Bodyweight';
+  // UPDATED 2026-09-06 (user's explicit request): Resistance Band now gets the same reps-only
+  // treatment as Bodyweight — bands don't have a kg weight to progress, they progress by moving to
+  // a harder band color, then by reps within that color. Was equipment==='Bodyweight' only, which
+  // left Resistance Band falling into getEquipmentIncrement's generic 'Other' 2.5kg bucket — a
+  // meaningless "add 2.5kg" suggestion for something with no kg weight at all. This reuses the
+  // already-correct bodyweight reps-only logic (no weight-bump suggestion, weight input hidden,
+  // shorter default rest) rather than duplicating a parallel concept across every place that checks
+  // exData.bw==='bw'. "Moving up a band" is a manual Switch Exercise to that color's own catalogue
+  // entry — see the new Auto Routine Pool sync prompt on switch, same request, just below.
+  const isBW=equipment==='Bodyweight'||equipment==='Resistance Band';
   const ex={id,name:fullName,muscle,secondary:guessSecondaryMuscle(muscle,exName),machine:equipment||'',bw:isBW?'bw':'no',note:'',uni:isUni,modifier,attachment:attachment||'',customValues:customValues||{},settings:settings||{},position:position||'',grip:grip||'',generated:true};
   state.exercises.push(ex);save();
   return ex;
@@ -8919,6 +8935,19 @@ function performExerciseSwitch(exIdx,newExId){
     activeWorkout.exercises[exIdx]={...ex};
     renderActiveWorkout();updateWorkoutEstimate();
   });
+  // AUTO ROUTINE POOL SYNC (2026-09-06, user's explicit request): "if an exercise is altered
+  // slightly during an auto routine we should ask if the exercise should be replaced in the
+  // exercise pool" — a mid-session switch only ever affected TODAY's workout; the pool itself
+  // stayed on the old exercise, so the very next Auto Routine session would just pick the old one
+  // right back. Only prompts when the OLD exercise was actually in the pool (swapping something
+  // that was never pool-sourced has nothing to sync) and this is a genuine Auto Routine session.
+  if(isActiveAutoRoutineSession()&&Array.isArray(state.autoRoutinePool)&&state.autoRoutinePool.includes(ex.exId)){
+    if(confirm('Replace "'+(oldExData?oldExData.name:'this exercise')+'" with "'+newExData.name+'" in your Auto Routine Pool too, so future sessions use the new one?')){
+      state.autoRoutinePool=state.autoRoutinePool.filter(id=>id!==ex.exId);
+      if(!state.autoRoutinePool.includes(newExId))state.autoRoutinePool.push(newExId);
+      save();
+    }
+  }
 }
 
 // ============================================================
@@ -9155,13 +9184,40 @@ function getAutoRoutineMusclePriorityMultiplier(muscle){
   if(priority==='low')return 0.8;
   return 1;
 }
+// UK-GMT CALENDAR-DAY ELIGIBILITY (2026-09-06, user's explicit request): Auto Routine's own
+// "days since trained" now counts DISCRETE calendar days anchored to a fixed 4:30am GMT boundary,
+// not raw 24-hour elapsed time — so a late-night session doesn't tick eligibility over the instant
+// midnight passes; the day only rolls over once there's been a chance to sleep past 4:30am GMT.
+// Deliberately GMT (UTC+0) year-round, not London local/BST-adjusted — a fixed offset, no DST
+// awareness. Operates on raw epoch ms (Date.now()/Date#getTime()), which is always UTC internally
+// regardless of the device's own timezone, so this is correct without needing to know or care what
+// timezone the phone itself is set to.
+// Dedicated to Auto Routine specifically — does NOT touch the shared getDaysSinceMuscleDirectlyTrained
+// above, still used as-is by the real meso's computeVolumeProgressIncrement/getMuscleReadinessScore —
+// same "don't touch a shared function for a system-specific ask" precedent as
+// getAutoRoutineProgressIncrement vs computeVolumeProgressIncrement.
+const AUTO_ROUTINE_DAY_BOUNDARY_HOUR_GMT=4.5; // 4:30am GMT
+function getGMT430DayIndex(ms){
+  return Math.floor((ms-AUTO_ROUTINE_DAY_BOUNDARY_HOUR_GMT*36e5)/864e5);
+}
+function getAutoRoutineDaysSinceMuscleTrained(muscle){
+  for(let i=0;i<state.history.length;i++){
+    const w=state.history[i];
+    const hit=(w.exercises||[]).some(e=>{
+      const exData=getExercise(e.exId);
+      return exData&&exData.muscle===muscle&&!isExerciseInjured(e.exId)&&(e.sets||[]).some(s=>s.done);
+    });
+    if(hit)return getGMT430DayIndex(Date.now())-getGMT430DayIndex(new Date(w.date).getTime());
+  }
+  return null;
+}
 function getAutoRoutineMuscleReadiness(muscle){
   if(isAutoRoutineMuscleStruggling(muscle)||isAutoRoutineMuscleFullyResting(muscle))return 0;
   const lm=getMuscleLandmarks(muscle);
   const progress=getAutoRoutineMuscleProgress(muscle);
   const span=lm.mrv-lm.mev;
   const headroom=span>0?Math.max(0,Math.min(1,(lm.mrv-progress)/span)):0;
-  const daysSince=getDaysSinceMuscleDirectlyTrained(muscle);
+  const daysSince=getAutoRoutineDaysSinceMuscleTrained(muscle);
   const idealGap=getMuscleTier(muscle).idealGapDays;
   const freshness=Math.min(1,(daysSince==null?idealGap:daysSince)/idealGap);
   return(headroom*0.6+freshness*0.4)*getAutoRoutineMuscleTrendMultiplier(muscle)*getAutoRoutineMusclePriorityMultiplier(muscle);
@@ -9321,7 +9377,7 @@ function getAutoRoutineMuscleTargetNow(muscle){
 // instead of assuming exactly one per week. computeVolumeProgressIncrement itself is UNCHANGED and
 // still used exactly as before by the real meso's grantMuscleVolumeProgress.
 function getAutoRoutineProgressIncrement(muscle,activeSet){
-  const days=getDaysSinceMuscleDirectlyTrained(muscle);
+  const days=getAutoRoutineDaysSinceMuscleTrained(muscle);
   if(days==null)return 1; // never trained before — same "treat like a normal week's worth" precedent as computeVolumeProgressIncrement
   const gaps=getMuscleGapDays(muscle,activeSet);
   return Math.max(0,gaps.idealGapDays/7);
@@ -9505,7 +9561,7 @@ function getMuscleGapDays(muscle,activeSet){
 }
 function getMuscleExposureInfo(muscle,activeSet){
   const gaps=getMuscleGapDays(muscle,activeSet||getAutoRoutineActiveMuscles());
-  const daysSince=getDaysSinceMuscleDirectlyTrained(muscle);
+  const daysSince=getAutoRoutineDaysSinceMuscleTrained(muscle);
   const eligible=daysSince==null||daysSince>=gaps.minGapDays;
   return{...gaps,daysSince,eligible};
 }
@@ -11099,9 +11155,24 @@ function saveEditedExercise(){
   wex.repRange=(min||max)?{min:min||max,max:max||min}:null;
   wex.useRIR=!!editExWorkoutMeta.useRIR;
   const s=editExState;if(!s.exDef){closeModal('modal-edit-exercise');renderActiveWorkout();return;}
+  const oldExId=wex.exId; // capture BEFORE reassignment — this is what the pool sync below needs to check
   const resolved=resolveExercise(s.muscle,s.exDef.name,s.equipment,s.position,s.grip,s.isUni,s.modifier,s.attachment,s.customValues,editExSettings());
   wex.exId=resolved.id;
   closeModal('modal-edit-exercise');renderActiveWorkout();
+  // AUTO ROUTINE POOL SYNC (2026-09-06, user's explicit clarification/correction — this is the
+  // mechanism they actually meant: editing an exercise's own properties directly, e.g. equipment
+  // Machine→Band, NOT Switch Exercise. resolveExercise above can resolve to a genuinely brand-new
+  // exercise (one that's never existed before, so it's definitely not in the pool yet) or an
+  // existing different one — either way, only worth asking about if the id actually changed AND the
+  // OLD one was pool-sourced (editing an exercise that was never in the pool has nothing to sync).
+  if(resolved.id!==oldExId&&isActiveAutoRoutineSession()&&Array.isArray(state.autoRoutinePool)&&state.autoRoutinePool.includes(oldExId)){
+    const oldExData=getExercise(oldExId);
+    if(confirm('Replace "'+(oldExData?oldExData.name:'this exercise')+'" with "'+resolved.name+'" in your Auto Routine Pool too, so future sessions use the new one?')){
+      state.autoRoutinePool=state.autoRoutinePool.filter(id=>id!==oldExId);
+      if(!state.autoRoutinePool.includes(resolved.id))state.autoRoutinePool.push(resolved.id);
+      save();
+    }
+  }
 }
 
 // ── EXERCISE REORDER DURING WORKOUT (long-press on an exercise's header to drag the whole card) ──
