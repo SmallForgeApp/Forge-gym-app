@@ -675,7 +675,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-05.3</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-06.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -875,12 +875,26 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
   </div>
 </div>
 
+<!-- Auto Routine Priority Status (2026-09-06) -->
+<div class="modal-overlay" id="modal-auto-routine-priority">
+  <div class="modal"><div class="modal-handle"></div>
+    <div class="modal-title">Priority Status</div>
+    <div class="modal-body" id="auto-routine-priority-body" style="max-height:65vh;overflow-y:auto"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary flex-1" onclick="closeModal('modal-auto-routine-priority')">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- Auto Session (2026-08-21) -->
 <div class="modal-overlay" id="modal-auto-session">
   <div class="modal"><div class="modal-handle"></div>
     <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px 0">
       <div class="modal-title" style="padding:0">Auto Routine</div>
-      <button class="btn btn-ghost btn-sm" onclick="openAutoRoutinePoolModal()">Edit Pool</button>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="openAutoRoutinePriorityModal()">📊 Priority</button>
+        <button class="btn btn-ghost btn-sm" onclick="openAutoRoutinePoolModal()">Edit Pool</button>
+      </div>
     </div>
     <div class="modal-body">
       <div class="small text3 mb8">Builds today's session from your Auto Routine exercise pool — no active mesocycle required. Each muscle only shows up if it's actually due (past its own minimum recovery gap since last trained), and gets a per-exposure dose sized for its own recovery speed, already accounting for any indirect/secondary credit it's picked up elsewhere this week. Up to 2 muscles at a time are auto-selected by readiness and ramp from MEV to MRV over about 4 weeks (hard-capped by 6); everyone else holds at MEV. Leave both fields below blank and it fills a session with everything due today (topped up to at least 10 sets if genuinely-eligible work allows); set Minutes OR Sets and it trims or fills to fit that instead — only one can be active at a time. You'll always get a warning (not a hard block) if the result still looks unusually long.</div>
@@ -9185,6 +9199,7 @@ const AUTO_ROUTINE_ACTIVE_BLOCK_DAYS=42; // UPDATED 2026-09-04: was 28 (4wk) —
 // climbing keeps its slot uninterrupted regardless of what happens to the other one.
 function getAutoRoutineActiveMuscles(){
   if(!state.autoRoutineActiveMuscles||Array.isArray(state.autoRoutineActiveMuscles.muscles))state.autoRoutineActiveMuscles={};
+  if(!state.autoRoutineManualPriority)state.autoRoutineManualPriority=[]; // manual override list (2026-09-06, user's explicit request) — muscle names the user force-picked, separate from the auto-selected `rec` tenure record below
   const rec=state.autoRoutineActiveMuscles;
   const isSlotValid=(mu)=>{
     if(!rec[mu])return false;
@@ -9194,11 +9209,26 @@ function getAutoRoutineActiveMuscles(){
     if(getAutoRoutineMuscleProgress(mu)>=getMuscleLandmarks(mu).mrv)return false;
     return true;
   };
-  let keep=Object.keys(rec).filter(isSlotValid).slice(0,AUTO_ROUTINE_MAX_ACTIVE_MUSCLES);
+  const canForcePriority=(mu)=>!isAutoRoutineMuscleStruggling(mu)&&!isAutoRoutineMuscleFullyResting(mu)&&getAutoRoutineMuscleProgress(mu)<getMuscleLandmarks(mu).mrv;
+  // MANUAL OVERRIDE (2026-09-06): a manually-forced muscle claims a slot before the normal readiness
+  // competition even runs — it's exempt from having to WIN a readiness comparison against another
+  // candidate, but NOT exempt from the same natural exit checks everyone else faces (struggling,
+  // fully resting, already at MRV, or — once it's actually held a slot a while — the age ceiling).
+  // Pruned here each call so a manual pick that naturally exits gets cleanly dropped from the list,
+  // same as it would if it had been auto-selected.
+  state.autoRoutineManualPriority=state.autoRoutineManualPriority.filter(mu=>rec[mu]?isSlotValid(mu):canForcePriority(mu));
+  let keep=state.autoRoutineManualPriority.slice(0,AUTO_ROUTINE_MAX_ACTIVE_MUSCLES);
+  // Existing valid auto-selected slots keep their place too, space permitting — a manual pick always
+  // wins a CONTESTED slot (evicting an auto-selected one to make room, handled implicitly by `keep`
+  // already being full from manual entries above), but an existing non-manual slot that's still
+  // valid isn't evicted just for its own sake once manual picks already have their room.
+  Object.keys(rec).filter(isSlotValid).sort((a,b)=>getAutoRoutineMuscleReadiness(b)-getAutoRoutineMuscleReadiness(a)).forEach(mu=>{
+    if(keep.length<AUTO_ROUTINE_MAX_ACTIVE_MUSCLES&&!keep.includes(mu))keep.push(mu);
+  });
   if(keep.length<AUTO_ROUTINE_MAX_ACTIVE_MUSCLES){
     const allMuscles=Object.keys(state.volumeLandmarks||{});
     const candidates=allMuscles
-      .filter(mu=>!keep.includes(mu)&&!isAutoRoutineMuscleStruggling(mu)&&!isAutoRoutineMuscleFullyResting(mu)&&getAutoRoutineMuscleProgress(mu)<getMuscleLandmarks(mu).mrv)
+      .filter(mu=>!keep.includes(mu)&&canForcePriority(mu))
       .map(mu=>({mu,score:getAutoRoutineMuscleReadiness(mu)}))
       .filter(x=>x.score>0)
       .sort((a,b)=>b.score-a.score);
@@ -9209,6 +9239,35 @@ function getAutoRoutineActiveMuscles(){
   keep.forEach(mu=>{newRec[mu]=rec[mu]||new Date().toISOString();}); // keep an existing slot's real tenure start; stamp a genuinely new slot fresh
   state.autoRoutineActiveMuscles=newRec;
   return new Set(keep);
+}
+// MANUAL PRIORITY OVERRIDE (2026-09-06, user's explicit request — "switch priority muscles manually
+// if needed as an override, or at least skip a priority muscle"):
+// Forces `muscle` into an active slot immediately — evicts the OLDEST manual pick first if the
+// manual list is already full (2), or lets getAutoRoutineActiveMuscles' own logic evict a non-manual
+// auto-selected slot on the next call if that's what's needed to make room. Silently no-ops (returns
+// false) if the muscle itself isn't a legitimate candidate at all (struggling/resting/already at MRV)
+// — a manual override picks WHICH muscle competes, it doesn't waive real recovery/status signals.
+function forceAutoRoutineActiveMuscle(muscle){
+  if(!state.autoRoutineManualPriority)state.autoRoutineManualPriority=[];
+  if(isAutoRoutineMuscleStruggling(muscle)||isAutoRoutineMuscleFullyResting(muscle))return false;
+  if(getAutoRoutineMuscleProgress(muscle)>=getMuscleLandmarks(muscle).mrv)return false;
+  state.autoRoutineManualPriority=state.autoRoutineManualPriority.filter(mu=>mu!==muscle);
+  state.autoRoutineManualPriority.push(muscle);
+  while(state.autoRoutineManualPriority.length>AUTO_ROUTINE_MAX_ACTIVE_MUSCLES)state.autoRoutineManualPriority.shift();
+  getAutoRoutineActiveMuscles(); // re-run selection immediately so the new slot (and any eviction it causes) takes effect right away, not just on the next natural call
+  return true;
+}
+// Removes `muscle` from its active slot right now ("skip a priority muscle") — clears both the
+// manual-pick list (if it was a manual pick) and the tenure record, AND immediately clamps its
+// stored progress down to MEV rather than waiting for the next advance() call to notice it's no
+// longer active, since the whole point of an explicit skip is for it to take effect now.
+function removeAutoRoutineActiveMuscle(muscle){
+  if(state.autoRoutineManualPriority)state.autoRoutineManualPriority=state.autoRoutineManualPriority.filter(mu=>mu!==muscle);
+  if(state.autoRoutineActiveMuscles)delete state.autoRoutineActiveMuscles[muscle];
+  const lm=getMuscleLandmarks(muscle);
+  if(state.autoRoutineMuscleProgress&&state.autoRoutineMuscleProgress[muscle]&&state.autoRoutineMuscleProgress[muscle].current>lm.mev){
+    state.autoRoutineMuscleProgress[muscle].current=lm.mev;
+  }
 }
 // The target Auto Routine's scheduler doses toward — replaces getMesoMuscleVolumeTarget for Auto
 // Routine purposes specifically. That function and its meso-rotation ramp are completely untouched
@@ -10148,6 +10207,64 @@ let autoSessionOriginalSets=null;
 // in one sitting" even when it wasn't). Shows, per muscle in this session: what it'll be at AFTER
 // this session vs its real weekly target — so a genuine partial share is visibly a partial share,
 // and a muscle that's actually fully caught up (e.g. from a skipped day) is visibly that instead.
+// AUTO ROUTINE PRIORITY STATUS (2026-09-06, user's explicit request — "how do I know what auto
+// routine is prioritising and for how many weeks, e.g. chest week 3/6, back week 2/6"): shows the
+// current active (priority/MRV-track) muscles with weeks-in-ramp against the hard cap, everyone
+// else's back-burner status, and manual override controls (force a muscle active, or skip/remove
+// a currently-active one). Week count is CALENDAR-based (matches getAutoRoutineActiveRampTarget's
+// own day-based schedule, not session count) — floor(elapsedDays/7)+1, capped at the display ceiling
+// (AUTO_ROUTINE_RAMP_HARD_CAP_DAYS/7=6) since that's the real forced-completion point.
+function renderAutoRoutinePriorityStatusHtml(){
+  const activeSet=getAutoRoutineActiveMuscles();
+  const hardCapWeeks=Math.round(AUTO_ROUTINE_RAMP_HARD_CAP_DAYS/7);
+  const targetWeeks=Math.round(AUTO_ROUTINE_RAMP_TARGET_DAYS/7);
+  const allMuscles=Object.keys(state.volumeLandmarks||{});
+  const activeRows=[...activeSet].map(muscle=>{
+    const since=state.autoRoutineActiveMuscles&&state.autoRoutineActiveMuscles[muscle];
+    const elapsedDays=since?(Date.now()-new Date(since))/864e5:0;
+    const week=Math.min(hardCapWeeks,Math.floor(elapsedDays/7)+1);
+    const lm=getMuscleLandmarks(muscle);
+    const current=getAutoRoutineMuscleProgress(muscle);
+    const pct=lm.mrv>lm.mev?Math.round(Math.max(0,Math.min(1,(current-lm.mev)/(lm.mrv-lm.mev)))*100):100;
+    const isManual=state.autoRoutineManualPriority&&state.autoRoutineManualPriority.includes(muscle);
+    return'<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 4px;border-bottom:1px solid var(--border)">'
+      +'<div><div class="small" style="font-weight:700">'+escHtml(muscle)+(isManual?' <span class="text3" style="font-weight:400">(manual)</span>':'')+'</div>'
+      +'<div class="small text3">week '+week+'/'+hardCapWeeks+' (target: '+targetWeeks+') \u2014 '+Math.round(current*10)/10+'/'+lm.mrv+' sets ('+pct+'% to MRV)</div></div>'
+      +'<button class="btn btn-ghost btn-sm" onclick="confirmRemoveAutoRoutineActiveMuscle(\''+muscle+'\')">Skip</button>'
+      +'</div>';
+  }).join('')||'<div class="small text3" style="padding:8px 4px">Nothing currently prioritized \u2014 every muscle is holding at MEV.</div>';
+  const backBurnerMuscles=allMuscles.filter(mu=>!activeSet.has(mu));
+  const backBurnerRows=backBurnerMuscles.map(muscle=>{
+    const lm=getMuscleLandmarks(muscle);
+    const current=getAutoRoutineMuscleProgress(muscle);
+    const canForce=!isAutoRoutineMuscleStruggling(muscle)&&!isAutoRoutineMuscleFullyResting(muscle)&&current<lm.mrv;
+    return'<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 4px;border-bottom:1px solid var(--border)">'
+      +'<div class="small">'+escHtml(muscle)+' <span class="text3">('+Math.round(current*10)/10+'/'+lm.mev+' MEV)</span></div>'
+      +(canForce?'<button class="btn btn-ghost btn-sm" onclick="confirmForceAutoRoutineActiveMuscle(\''+muscle+'\')">Make priority</button>':'<span class="small text3">unavailable</span>')
+      +'</div>';
+  }).join('');
+  return'<div class="small text3 mb8">Up to '+AUTO_ROUTINE_MAX_ACTIVE_MUSCLES+' muscles ramp from MEV toward MRV over about '+targetWeeks+' weeks (hard-capped at '+hardCapWeeks+'); everyone else holds at MEV. "Skip" removes a muscle from priority right now (it drops back to MEV immediately); "Make priority" forces a back-burner muscle into an open or contested slot.</div>'
+    +'<div style="font-weight:700;margin-bottom:2px">Currently prioritized</div>'+activeRows
+    +'<div style="font-weight:700;margin:10px 0 2px">Back-burner (held at MEV)</div>'+backBurnerRows;
+}
+function openAutoRoutinePriorityModal(){
+  document.getElementById('auto-routine-priority-body').innerHTML=renderAutoRoutinePriorityStatusHtml();
+  openModal('modal-auto-routine-priority');
+}
+function confirmRemoveAutoRoutineActiveMuscle(muscle){
+  if(!confirm('Remove '+muscle+' from priority now? It drops back to MEV immediately.'))return;
+  removeAutoRoutineActiveMuscle(muscle);
+  document.getElementById('auto-routine-priority-body').innerHTML=renderAutoRoutinePriorityStatusHtml();
+}
+function confirmForceAutoRoutineActiveMuscle(muscle){
+  const activeSet=getAutoRoutineActiveMuscles();
+  const msg=activeSet.size>=AUTO_ROUTINE_MAX_ACTIVE_MUSCLES
+    ?'Make '+muscle+' priority now? This will bump whichever current priority muscle has the lowest readiness to make room.'
+    :'Make '+muscle+' priority now?';
+  if(!confirm(msg))return;
+  forceAutoRoutineActiveMuscle(muscle);
+  document.getElementById('auto-routine-priority-body').innerHTML=renderAutoRoutinePriorityStatusHtml();
+}
 function renderAutoRoutineWeeklyProgressHtml(picks){
   const muscles=[...new Set(picks.map(p=>p.muscle))];
   const rows=muscles.map(muscle=>{
