@@ -675,7 +675,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-06.4</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-06.8</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -968,6 +968,11 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
         <input id="edit-ex-modifier-input" placeholder="e.g. while holding a banana, ankle weights" style="width:100%"/>
       </div>
       <div style="padding:10px;background:var(--bg3);border-radius:8px;font-size:12px;color:var(--accent)" id="edit-ex-preview"></div>
+      <div class="input-label mt12">Secondary Muscles</div><input id="edit-ex-secondary" placeholder="e.g. Triceps, Front Delts"/>
+      <div class="input-label mt12">Indirect Credit Overrides (optional)</div>
+      <input id="edit-ex-secondary-fractions" placeholder="e.g. Biceps:0.4, Forearms:0.2"/>
+      <div class="small text3 mt8" style="line-height:1.5">How much of a normal set each secondary muscle above should count for toward its own weekly volume — 0 to 1. Leave blank to use FORGE's default for that muscle pair.</div>
+      <div id="edit-ex-workout-only-fields">
       <div class="input-label mt12">Target Rep Range (this workout)</div>
       <div style="display:flex;gap:10px;margin-bottom:14px">
         <input type="number" inputmode="numeric" id="edit-ex-rep-min" placeholder="Min"/>
@@ -978,10 +983,11 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
         <button class="sort-chip" id="edit-ex-rpe-btn" style="font-size:13px;padding:7px 14px" onclick="setEditExEffortMode(false)">RPE</button>
         <button class="sort-chip" id="edit-ex-rir-btn" style="font-size:13px;padding:7px 14px" onclick="setEditExEffortMode(true)">RIR</button>
       </div>
+      </div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost flex-1" onclick="closeModal('modal-edit-exercise')">Cancel</button>
-      <button class="btn btn-primary flex-1" onclick="saveEditedExercise()">Update</button>
+      <button class="btn btn-primary flex-1" id="edit-ex-save-btn" onclick="saveEditedExercise()">Update</button>
     </div>
   </div>
 </div>
@@ -3632,6 +3638,50 @@ function renderModifierChips(containerEl,stateObj,onChange){
   containerEl.appendChild(customBtn);
 }
 let editingExIdx=null;
+let editingPoolExId=null;
+function openEditPoolExerciseModal(exId){
+  const exData=getExercise(exId);
+  if(!exData)return;
+  editingPoolExId=exId;
+  editingExIdx=null; // make sure the workout-scoped save path can never accidentally fire while this is open
+  const muscle=exData.muscle||'';
+  const catExercises=EXERCISE_CATALOGUE[muscle]||[];
+  let exDef=catExercises.find(c=>exData.name.startsWith(c.name))||catExercises[0]||null;
+  const modifier=exData.modifier||null;
+  const s=exData.settings||{};
+  editExState={muscle,exDef,equipment:exData.machine||null,position:null,grip:null,isUni:!!exData.uni,modifier,modifierCustomMode:!!(modifier&&!MODIFIER_PRESETS.includes(modifier)),attachment:exData.attachment||null,customValues:Object.assign({},exData.customValues||{}),addingField:null,cablePosition:s.cablePosition||null,benchBack:s.benchBack||null,benchSeat:s.benchSeat||null,showBenchSetup:!!(s.benchBack||s.benchSeat)};
+  document.getElementById('edit-ex-current-name').textContent=exData.name;
+  document.getElementById('edit-ex-secondary').value=exData.secondary||'';
+  document.getElementById('edit-ex-secondary-fractions').value=stringifySecondaryFractions(exData.secondaryFractions);
+  const workoutOnly=document.getElementById('edit-ex-workout-only-fields');if(workoutOnly)workoutOnly.style.display='none';
+  const saveBtn=document.getElementById('edit-ex-save-btn');if(saveBtn)saveBtn.setAttribute('onclick','savePoolExerciseEdit()');
+  renderEditExChips();
+  openModal('modal-edit-exercise');
+}
+function savePoolExerciseEdit(){
+  if(!editingPoolExId)return;
+  const s=editExState;if(!s.exDef){closeModal('modal-edit-exercise');return;}
+  const oldExId=editingPoolExId;
+  const resolved=resolveExercise(s.muscle,s.exDef.name,s.equipment,s.position,s.grip,s.isUni,s.modifier,s.attachment,s.customValues,editExSettings());
+  resolved.secondary=document.getElementById('edit-ex-secondary').value.trim();
+  resolved.secondaryFractions=parseSecondaryFractionsInput(document.getElementById('edit-ex-secondary-fractions').value);
+  // Editing directly from the pool screen already makes the intent explicit — no confirm needed
+  // (unlike the mid-workout version above, where the same edit might be meant for just today).
+  if(resolved.id!==oldExId&&Array.isArray(state.autoRoutinePool)&&state.autoRoutinePool.includes(oldExId)){
+    state.autoRoutinePool=state.autoRoutinePool.filter(id=>id!==oldExId);
+    if(!state.autoRoutinePool.includes(resolved.id))state.autoRoutinePool.push(resolved.id);
+  }
+  // Same orphaned-pin invariant bulkSetAutoRoutinePoolTab already enforces elsewhere — a fixed pin
+  // pointing at an exercise that just got replaced would otherwise silently point at nothing useful.
+  if(resolved.id!==oldExId&&state.autoRoutineFixedExIds&&state.autoRoutineFixedExIds.includes(oldExId)){
+    state.autoRoutineFixedExIds=state.autoRoutineFixedExIds.filter(id=>id!==oldExId);
+    state.autoRoutineFixedExIds.push(resolved.id);
+  }
+  save();
+  editingPoolExId=null;
+  closeModal('modal-edit-exercise');
+  renderAutoRoutinePoolList();
+}
 let editExWorkoutMeta={useRIR:false};
 let editExState={muscle:null,exDef:null,equipment:null,position:null,grip:null,isUni:false,modifier:null,modifierCustomMode:false,attachment:null,customValues:{},addingField:null,cablePosition:null,benchBack:null,benchSeat:null,showBenchSetup:false};
 function populateNewExerciseMuscleSelect(){
@@ -5976,6 +6026,7 @@ function checkEarlyDeloadSignals(m,workoutExercises){
   const scoped=mesoHasActivePriority(m);
   let rirChecked=0,rirHits=0,declineHits=0;
   const declineNames=[];
+  const countedDeclineMuscles=new Set(); // dedupe fix below (2026-09-06, user's explicit correctness fix)
   (workoutExercises||[]).forEach(ex=>{
     const exData=getExercise(ex.exId)||{};
     if(scoped&&!mesoIsPriorityMuscle(m,exData.muscle))return;
@@ -6007,7 +6058,24 @@ function checkEarlyDeloadSignals(m,workoutExercises){
       // triggers a full-body deload by itself; a WIDESPREAD pattern across several muscles still
       // does, since that's real evidence of something the per-muscle patches can't fix alone
       // (accumulated RIR/intensity load, general fatigue, etc).
-      if(down&&!up&&!isMuscleStruggling(exData.muscle)){declineHits++;declineNames.push(exData.name||'an exercise');}
+      // DEDUPE BY MUSCLE (2026-09-06, user's explicit correctness fix): this tally is meant to
+      // measure "a widespread pattern across SEVERAL MUSCLES," per the comment above — but it was
+      // actually counting declining EXERCISES, never checking whether two declines belonged to the
+      // same muscle. Harmless under a fixed routine, where each muscle reliably showed up as the
+      // same 1-2 exercises every time (exercises declining and muscles declining were numerically
+      // the same thing) — but Auto Routine's deliberate exercise variety (see
+      // AUTO_ROUTINE_EXERCISE_VARIETY_THRESHOLD) breaks that coincidence on purpose: a single
+      // genuinely fatigued muscle can now easily surface as 2-3 different exercises in one session,
+      // each independently tallying — meaning one struggling muscle alone could trip this
+      // "systemic, several-muscle" signal, exactly the false positive the isMuscleStruggling
+      // exclusion just above was trying to prevent for the OTHER input to this same tally. Fixed by
+      // deduping on exData.muscle: at most one hit (and one name) per muscle per pass, regardless
+      // of how many of that muscle's exercises show a decline. Not a tunable/cutoff — this makes
+      // the counter measure what its own comment already says it should.
+      if(down&&!up&&!isMuscleStruggling(exData.muscle)&&!countedDeclineMuscles.has(exData.muscle)){
+        declineHits++;declineNames.push(exData.muscle||exData.name||'an exercise');
+        countedDeclineMuscles.add(exData.muscle);
+      }
     }
   });
   const reasons=[];
@@ -6018,7 +6086,7 @@ function checkEarlyDeloadSignals(m,workoutExercises){
   }
   const declineThreshold=m.earlyDeloadDeclineCount||2;
   if(declineHits>=declineThreshold){
-    reasons.push(declineHits+' exercises declined versus their last two sessions ('+declineNames.slice(0,3).join(', ')+(declineNames.length>3?', ...':'')+').');
+    reasons.push(declineHits+' muscles declined versus their last two sessions each ('+declineNames.slice(0,3).join(', ')+(declineNames.length>3?', ...':'')+').');
     declineSignal=true;
   }
   // rirSignal/declineSignal (2026-08-07) let the caller tell "genuinely ahead of schedule" apart
@@ -7889,6 +7957,15 @@ function startRoutineWorkout(i,sorenessScores,volumeMode,efficientVolumeOn){
       reviewNoteEl.style.display='none';
     }
   }
+  // BUG FIX (2026-09-06, user-reported): renderActiveWorkout already ran once inside beginWorkout
+  // above, BEFORE activeWorkout.muscleSoreness got attached a few lines up — so the per-exercise
+  // "moderately/extremely sore" banner (built inside buildExerciseCard, which only ever refreshes
+  // on a full render, unlike the top-level notes just above which get surgical DOM updates here)
+  // rendered with no soreness data and just stayed that way. It only ever appeared once something
+  // unrelated triggered another full render (e.g. opening and closing Edit Exercise). One more
+  // render here, now that muscleSoreness/ramp-due sets/Efficient Volume swaps are all fully
+  // settled, makes it show up immediately instead of needing an unrelated trigger first.
+  if(activeWorkout)renderActiveWorkout();
 }
 function startEmptyWorkout(){beginWorkout('Workout',[],null,[]);}
 function beginWorkout(name,exercises,srcId,origIds){
@@ -9923,6 +10000,11 @@ function launchAutoSessionWithPicks(mesoIdx,picks,sorenessScores){
     // the session happens to currently sit (see extendActiveAutoSession below).
     activeWorkout.autoSessionOriginalMinutes=autoSessionOriginalMinutes;
     activeWorkout.autoSessionOriginalSets=autoSessionOriginalSets;
+    // BUG FIX (2026-09-06, user-reported) — same gap as startRoutineWorkout's own equivalent stamp
+    // above: beginWorkout already rendered once, before muscleSoreness (and everything else in this
+    // block) got attached — so the per-exercise soreness banner rendered with no data and stayed
+    // that way until some unrelated action triggered another render.
+    renderActiveWorkout();
   }
 }
 // MID-SESSION EXTEND (handover spec §4, 2026-09-05): "I have N more minutes/sets left in me."
@@ -10089,10 +10171,10 @@ function openExtendAutoSessionModal(){
 // Tabs (2026-08-21 follow-up, user's explicit request): "In Routines" and "Recently Used" let the
 // user bulk-pull from exercises they've already set up rather than hand-picking from the full
 // database — "instead of picking / making them all from scratch," the user's own words.
-let autoRoutinePoolTab='all';
+let autoRoutinePoolTab='selected';
 function openAutoRoutinePoolModal(){
   if(!state.autoRoutinePool)state.autoRoutinePool=[];
-  autoRoutinePoolTab='all';
+  autoRoutinePoolTab='selected';
   renderAutoRoutinePoolList();
   openModal('modal-auto-routine-pool');
 }
@@ -10148,6 +10230,10 @@ function switchAutoRoutinePoolTab(tab){
   renderAutoRoutinePoolList();
 }
 function getAutoRoutinePoolTabExercises(tab){
+  if(tab==='selected'){
+    const pool=new Set(state.autoRoutinePool||[]);
+    return(state.exercises||[]).filter(ex=>pool.has(ex.id));
+  }
   if(tab==='routines'){
     const ids=new Set();
     (state.routines||[]).forEach(r=>(r.exerciseIds||[]).forEach(id=>ids.add(id)));
@@ -10181,7 +10267,7 @@ function renderAutoRoutinePoolList(){
   const el=document.getElementById('auto-routine-pool-list');if(!el)return;
   const tabsEl=document.getElementById('auto-routine-pool-tabs');
   if(tabsEl){
-    const tabs=[['all','All'],['routines','In Routines'],['recent','Recently Used']];
+    const tabs=[['selected','Selected'],['all','All'],['routines','In Routines'],['recent','Recently Used']];
     tabsEl.innerHTML=tabs.map(([key,label])=>
       '<button class="btn '+(autoRoutinePoolTab===key?'btn-primary':'btn-ghost')+' btn-sm" onclick="switchAutoRoutinePoolTab(\''+key+'\')" style="flex:1">'+label+'</button>'
     ).join('');
@@ -10205,6 +10291,7 @@ function renderAutoRoutinePoolList(){
           +'<input type="checkbox" '+(checked?'checked':'')+' style="width:auto;pointer-events:none;flex-shrink:0"/>'
           +'<div class="small" style="min-width:0">'+escHtml(ex.name)+'</div>'
         +'</div>'
+        +'<button class="btn btn-ghost btn-sm" style="flex-shrink:0;padding:4px 8px" onclick="event.stopPropagation();openEditPoolExerciseModal(\''+ex.id+'\')" title="Edit this exercise">✏️</button>'
         +'<button class="btn btn-ghost btn-sm" style="flex-shrink:0;padding:4px 8px'+(fixed?';color:var(--accent)':'')+'" onclick="event.stopPropagation();toggleAutoRoutineFixed(\''+ex.id+'\')" title="'+(fixed?'Unfix':'Always use this one for '+escHtml(muscle))+'">'+(fixed?'📌 Fixed':'📌')+'</button>'
         +'</div>';
     }).join('');
@@ -11007,6 +11094,10 @@ function openEditExerciseModal(exIdx){
   const s=exData.settings||{};
   editExState={muscle,exDef,equipment:exData.machine||null,position:null,grip:null,isUni:!!exData.uni,modifier,modifierCustomMode:!!(modifier&&!MODIFIER_PRESETS.includes(modifier)),attachment:exData.attachment||null,customValues:Object.assign({},exData.customValues||{}),addingField:null,cablePosition:s.cablePosition||null,benchBack:s.benchBack||null,benchSeat:s.benchSeat||null,showBenchSetup:!!(s.benchBack||s.benchSeat)};
   document.getElementById('edit-ex-current-name').textContent=exData.name;
+  document.getElementById('edit-ex-secondary').value=exData.secondary||'';
+  document.getElementById('edit-ex-secondary-fractions').value=stringifySecondaryFractions(exData.secondaryFractions);
+  const workoutOnly=document.getElementById('edit-ex-workout-only-fields');if(workoutOnly)workoutOnly.style.display='';
+  const saveBtn=document.getElementById('edit-ex-save-btn');if(saveBtn)saveBtn.setAttribute('onclick','saveEditedExercise()');
   document.getElementById('edit-ex-rep-min').value=(ex.repRange&&ex.repRange.min)||'';
   document.getElementById('edit-ex-rep-max').value=(ex.repRange&&ex.repRange.max)||'';
   editExWorkoutMeta.useRIR=!!ex.useRIR;
@@ -11158,6 +11249,13 @@ function saveEditedExercise(){
   const oldExId=wex.exId; // capture BEFORE reassignment — this is what the pool sync below needs to check
   const resolved=resolveExercise(s.muscle,s.exDef.name,s.equipment,s.position,s.grip,s.isUni,s.modifier,s.attachment,s.customValues,editExSettings());
   wex.exId=resolved.id;
+  // Secondary muscle/fraction are plain data fields, not part of resolveExercise's own identity
+  // matching (muscle/equipment/position/grip/etc.) — write them onto whatever it resolved to,
+  // whether that's a brand-new exercise or an existing one, and save explicitly: resolveExercise
+  // only auto-saves on its OWN new-exercise-creation path, not for a field update on an existing one.
+  resolved.secondary=document.getElementById('edit-ex-secondary').value.trim();
+  resolved.secondaryFractions=parseSecondaryFractionsInput(document.getElementById('edit-ex-secondary-fractions').value);
+  save();
   closeModal('modal-edit-exercise');renderActiveWorkout();
   // AUTO ROUTINE POOL SYNC (2026-09-06, user's explicit clarification/correction — this is the
   // mechanism they actually meant: editing an exercise's own properties directly, e.g. equipment
@@ -14580,6 +14678,17 @@ let skipNextPopstate=0;
 function openModal(id){
   const el=document.getElementById(id);
   el.classList.add('open');
+  // STACKING FIX (2026-09-06, user-reported bug): every .modal-overlay shares the same base
+  // z-index (200) in CSS, so with two modals open at once, whichever happened to be declared LATER
+  // in the document always painted on top — regardless of which one the user actually opened most
+  // recently. Fine for a single modal, but broke the moment one modal opens ANOTHER on top of
+  // itself (Auto Session -> Edit Pool, Auto Session -> Priority): both of those sit EARLIER in the
+  // document than Auto Session, so Auto Session kept rendering on top of them, making the modal the
+  // user just opened invisible/unreachable until they dragged Auto Session out of the way. Setting
+  // an explicit, always-increasing z-index at open time (off modalStack's own current depth,
+  // already tracked for the back-button/swipe-dismiss logic below) makes "opened most recently" the
+  // actual rule, independent of DOM order — fixes this report and any future modal-opens-modal case.
+  el.style.zIndex=200+modalStack.length;
   el.addEventListener('click',e=>{if(e.target===el)closeModal(id);},{once:true});
   modalStack.push(id);
   history.pushState({forgeModal:id},'');
@@ -14588,6 +14697,7 @@ function closeModal(id){
   const el=document.getElementById(id);
   if(!el||!el.classList.contains('open'))return;
   el.classList.remove('open');
+  el.style.zIndex=''; // reset — the next open recalculates fresh off modalStack's depth at that time
   const idx=modalStack.lastIndexOf(id);
   if(idx!==-1){
     modalStack.splice(idx,1);
