@@ -675,7 +675,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-06.8</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-06.9</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -968,10 +968,9 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
         <input id="edit-ex-modifier-input" placeholder="e.g. while holding a banana, ankle weights" style="width:100%"/>
       </div>
       <div style="padding:10px;background:var(--bg3);border-radius:8px;font-size:12px;color:var(--accent)" id="edit-ex-preview"></div>
-      <div class="input-label mt12">Secondary Muscles</div><input id="edit-ex-secondary" placeholder="e.g. Triceps, Front Delts"/>
-      <div class="input-label mt12">Indirect Credit Overrides (optional)</div>
-      <input id="edit-ex-secondary-fractions" placeholder="e.g. Biceps:0.4, Forearms:0.2"/>
-      <div class="small text3 mt8" style="line-height:1.5">How much of a normal set each secondary muscle above should count for toward its own weekly volume — 0 to 1. Leave blank to use FORGE's default for that muscle pair.</div>
+      <div class="input-label mt12">Secondary Muscles</div>
+      <div class="small text3 mb8">Tap a muscle to toggle it as a secondary mover for this exercise. Each selected chip shows the fraction of a normal set it's credited for — pulled from FORGE's own muscle-pair data, tap the number to override it.</div>
+      <div id="edit-ex-secondary-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px"></div>
       <div id="edit-ex-workout-only-fields">
       <div class="input-label mt12">Target Rep Range (this workout)</div>
       <div style="display:flex;gap:10px;margin-bottom:14px">
@@ -3639,6 +3638,15 @@ function renderModifierChips(containerEl,stateObj,onChange){
 }
 let editingExIdx=null;
 let editingPoolExId=null;
+// Converts an exercise's stored secondary (comma-separated names) + secondaryFractions (overrides)
+// into the chip-picker's own state shape — shared by both open-modal entry points below. Splits on
+// comma and trims exactly like the credit-calculation code itself does, so a value that's been
+// silently mismatching all along still loads in (visibly, on a chip) rather than vanishing.
+function parseExistingSecondaryState(exData){
+  const secondaryMuscles=(exData.secondary||'').split(',').map(s=>s.trim()).filter(Boolean);
+  const secondaryFractionOverrides=Object.assign({},exData.secondaryFractions||{});
+  return{secondaryMuscles,secondaryFractionOverrides};
+}
 function openEditPoolExerciseModal(exId){
   const exData=getExercise(exId);
   if(!exData)return;
@@ -3649,22 +3657,28 @@ function openEditPoolExerciseModal(exId){
   let exDef=catExercises.find(c=>exData.name.startsWith(c.name))||catExercises[0]||null;
   const modifier=exData.modifier||null;
   const s=exData.settings||{};
-  editExState={muscle,exDef,equipment:exData.machine||null,position:null,grip:null,isUni:!!exData.uni,modifier,modifierCustomMode:!!(modifier&&!MODIFIER_PRESETS.includes(modifier)),attachment:exData.attachment||null,customValues:Object.assign({},exData.customValues||{}),addingField:null,cablePosition:s.cablePosition||null,benchBack:s.benchBack||null,benchSeat:s.benchSeat||null,showBenchSetup:!!(s.benchBack||s.benchSeat)};
+  const secState=parseExistingSecondaryState(exData);
+  editExState={muscle,exDef,equipment:exData.machine||null,position:null,grip:null,isUni:!!exData.uni,modifier,modifierCustomMode:!!(modifier&&!MODIFIER_PRESETS.includes(modifier)),attachment:exData.attachment||null,customValues:Object.assign({},exData.customValues||{}),addingField:null,cablePosition:s.cablePosition||null,benchBack:s.benchBack||null,benchSeat:s.benchSeat||null,showBenchSetup:!!(s.benchBack||s.benchSeat),secondaryMuscles:secState.secondaryMuscles,secondaryFractionOverrides:secState.secondaryFractionOverrides};
   document.getElementById('edit-ex-current-name').textContent=exData.name;
-  document.getElementById('edit-ex-secondary').value=exData.secondary||'';
-  document.getElementById('edit-ex-secondary-fractions').value=stringifySecondaryFractions(exData.secondaryFractions);
   const workoutOnly=document.getElementById('edit-ex-workout-only-fields');if(workoutOnly)workoutOnly.style.display='none';
   const saveBtn=document.getElementById('edit-ex-save-btn');if(saveBtn)saveBtn.setAttribute('onclick','savePoolExerciseEdit()');
   renderEditExChips();
   openModal('modal-edit-exercise');
+}
+// Builds the final secondary/secondaryFractions values to write onto an exercise, from the chip
+// picker's own state — shared by both save paths.
+function buildEditExSecondaryFields(){
+  const s=editExState;
+  return{secondary:s.secondaryMuscles.join(', '),secondaryFractions:Object.assign({},s.secondaryFractionOverrides)};
 }
 function savePoolExerciseEdit(){
   if(!editingPoolExId)return;
   const s=editExState;if(!s.exDef){closeModal('modal-edit-exercise');return;}
   const oldExId=editingPoolExId;
   const resolved=resolveExercise(s.muscle,s.exDef.name,s.equipment,s.position,s.grip,s.isUni,s.modifier,s.attachment,s.customValues,editExSettings());
-  resolved.secondary=document.getElementById('edit-ex-secondary').value.trim();
-  resolved.secondaryFractions=parseSecondaryFractionsInput(document.getElementById('edit-ex-secondary-fractions').value);
+  const secFields=buildEditExSecondaryFields();
+  resolved.secondary=secFields.secondary;
+  resolved.secondaryFractions=secFields.secondaryFractions;
   // Editing directly from the pool screen already makes the intent explicit — no confirm needed
   // (unlike the mid-workout version above, where the same edit might be meant for just today).
   if(resolved.id!==oldExId&&Array.isArray(state.autoRoutinePool)&&state.autoRoutinePool.includes(oldExId)){
@@ -3683,7 +3697,7 @@ function savePoolExerciseEdit(){
   renderAutoRoutinePoolList();
 }
 let editExWorkoutMeta={useRIR:false};
-let editExState={muscle:null,exDef:null,equipment:null,position:null,grip:null,isUni:false,modifier:null,modifierCustomMode:false,attachment:null,customValues:{},addingField:null,cablePosition:null,benchBack:null,benchSeat:null,showBenchSetup:false};
+let editExState={muscle:null,exDef:null,equipment:null,position:null,grip:null,isUni:false,modifier:null,modifierCustomMode:false,attachment:null,customValues:{},addingField:null,cablePosition:null,benchBack:null,benchSeat:null,showBenchSetup:false,secondaryMuscles:[],secondaryFractionOverrides:{}};
 function populateNewExerciseMuscleSelect(){
   const sel=document.getElementById('new-ex-muscle');
   if(!sel)return;
@@ -11092,10 +11106,9 @@ function openEditExerciseModal(exIdx){
   let exDef=catExercises.find(c=>exData.name.startsWith(c.name))||catExercises[0]||null;
   const modifier=exData.modifier||null;
   const s=exData.settings||{};
-  editExState={muscle,exDef,equipment:exData.machine||null,position:null,grip:null,isUni:!!exData.uni,modifier,modifierCustomMode:!!(modifier&&!MODIFIER_PRESETS.includes(modifier)),attachment:exData.attachment||null,customValues:Object.assign({},exData.customValues||{}),addingField:null,cablePosition:s.cablePosition||null,benchBack:s.benchBack||null,benchSeat:s.benchSeat||null,showBenchSetup:!!(s.benchBack||s.benchSeat)};
+  const secState=parseExistingSecondaryState(exData);
+  editExState={muscle,exDef,equipment:exData.machine||null,position:null,grip:null,isUni:!!exData.uni,modifier,modifierCustomMode:!!(modifier&&!MODIFIER_PRESETS.includes(modifier)),attachment:exData.attachment||null,customValues:Object.assign({},exData.customValues||{}),addingField:null,cablePosition:s.cablePosition||null,benchBack:s.benchBack||null,benchSeat:s.benchSeat||null,showBenchSetup:!!(s.benchBack||s.benchSeat),secondaryMuscles:secState.secondaryMuscles,secondaryFractionOverrides:secState.secondaryFractionOverrides};
   document.getElementById('edit-ex-current-name').textContent=exData.name;
-  document.getElementById('edit-ex-secondary').value=exData.secondary||'';
-  document.getElementById('edit-ex-secondary-fractions').value=stringifySecondaryFractions(exData.secondaryFractions);
   const workoutOnly=document.getElementById('edit-ex-workout-only-fields');if(workoutOnly)workoutOnly.style.display='';
   const saveBtn=document.getElementById('edit-ex-save-btn');if(saveBtn)saveBtn.setAttribute('onclick','saveEditedExercise()');
   document.getElementById('edit-ex-rep-min').value=(ex.repRange&&ex.repRange.min)||'';
@@ -11120,7 +11133,7 @@ function renderEditExChips(){
   muscleWrap.innerHTML='';
   Object.keys(EXERCISE_CATALOGUE).forEach(m=>{
     const btn=document.createElement('button');btn.className='sort-chip'+(s.muscle===m?' active':'');btn.textContent=m;
-    btn.onclick=()=>{editExState.muscle=m;editExState.exDef=(EXERCISE_CATALOGUE[m]||[])[0]||null;editExState.equipment=null;editExState.position=null;editExState.grip=null;editExState.modifier=null;editExState.modifierCustomMode=false;editExState.attachment=null;editExState.customValues={};editExState.addingField=null;editExState.cablePosition=null;editExState.benchBack=null;editExState.benchSeat=null;editExState.showBenchSetup=false;renderEditExChips();};
+    btn.onclick=()=>{editExState.muscle=m;editExState.exDef=(EXERCISE_CATALOGUE[m]||[])[0]||null;editExState.equipment=null;editExState.position=null;editExState.grip=null;editExState.modifier=null;editExState.modifierCustomMode=false;editExState.attachment=null;editExState.customValues={};editExState.addingField=null;editExState.cablePosition=null;editExState.benchBack=null;editExState.benchSeat=null;editExState.showBenchSetup=false;editExState.secondaryMuscles=[];editExState.secondaryFractionOverrides={};renderEditExChips();};
     muscleWrap.appendChild(btn);
   });
   const catExercises=EXERCISE_CATALOGUE[s.muscle]||[];
@@ -11226,7 +11239,67 @@ function renderEditExChips(){
   }else{
     modInputWrap.style.display='none';
   }
+  renderEditExSecondaryChips();
   updateEditExPreview();
+}
+// SECONDARY MUSCLE PICKER (2026-09-06, user's explicit request): was a free-text comma-separated
+// input — a typo or name that doesn't exactly match a real tracked muscle silently never matches
+// anywhere the credit logic checks (getMuscleVolume, getMuscleExposureDose, etc. all compare
+// against exact muscle names), so the credit just quietly never applied with no indication why.
+// Chips pull from the same canonical MUSCLE_GROUPS list everything else in the app uses, so a
+// selection can never mismatch. Each selected chip shows its resolved fraction inline — default
+// from SECONDARY_MUSCLE_FRACTION_DEFAULTS for this primary->secondary pair (or the flat 0.5
+// fallback) unless the user has typed an override — directly answering "which muscle, and by how
+// much" in one place instead of two separate free-text fields.
+function renderEditExSecondaryChips(){
+  const wrap=document.getElementById('edit-ex-secondary-chips');
+  if(!wrap)return;
+  const s=editExState;
+  wrap.innerHTML='';
+  MUSCLE_GROUPS.filter(m=>m!=='Full Body'&&m!==s.muscle).forEach(m=>{
+    const selected=s.secondaryMuscles.includes(m);
+    const chip=document.createElement('div');
+    chip.style.cssText='display:flex;align-items:center;gap:6px';
+    const btn=document.createElement('button');
+    btn.className='sort-chip'+(selected?' active':'');
+    btn.textContent=m;
+    btn.onclick=()=>toggleEditExSecondaryMuscle(m);
+    chip.appendChild(btn);
+    if(selected){
+      const fakeExData={muscle:s.muscle,secondaryFractions:s.secondaryFractionOverrides};
+      const resolved=getSecondaryMuscleFraction(fakeExData,m);
+      const isOverride=s.secondaryFractionOverrides[m]!=null;
+      const frac=document.createElement('input');
+      frac.type='number';frac.inputMode='decimal';frac.min='0';frac.max='1';frac.step='0.05';
+      frac.value=resolved;
+      frac.title=isOverride?'Custom override':'FORGE default for '+s.muscle+' \u2192 '+m+' \u2014 edit to override';
+      frac.style.cssText='width:56px;padding:5px 6px;font-size:12px;'+(isOverride?'border-color:var(--accent);color:var(--accent)':'');
+      frac.oninput=()=>setEditExSecondaryFraction(m,frac.value);
+      chip.appendChild(frac);
+    }
+    wrap.appendChild(chip);
+  });
+}
+function toggleEditExSecondaryMuscle(muscle){
+  const s=editExState;
+  if(s.secondaryMuscles.includes(muscle)){
+    s.secondaryMuscles=s.secondaryMuscles.filter(m=>m!==muscle);
+    delete s.secondaryFractionOverrides[muscle];
+  }else{
+    s.secondaryMuscles=s.secondaryMuscles.concat([muscle]);
+  }
+  renderEditExSecondaryChips();
+}
+function setEditExSecondaryFraction(muscle,value){
+  const s=editExState;
+  const num=parseFloat(value);
+  const fakeExData={muscle:s.muscle,secondaryFractions:{}}; // default with no override, to compare against
+  const defaultFrac=getSecondaryMuscleFraction(fakeExData,muscle);
+  if(isNaN(num)||num<0||num>1||num===defaultFrac){
+    delete s.secondaryFractionOverrides[muscle]; // matches the default (or invalid/cleared) — no override needed, falls back to the shared default automatically
+  }else{
+    s.secondaryFractionOverrides[muscle]=num;
+  }
 }
 function editExSettings(){
   const s=editExState;
@@ -11253,8 +11326,9 @@ function saveEditedExercise(){
   // matching (muscle/equipment/position/grip/etc.) — write them onto whatever it resolved to,
   // whether that's a brand-new exercise or an existing one, and save explicitly: resolveExercise
   // only auto-saves on its OWN new-exercise-creation path, not for a field update on an existing one.
-  resolved.secondary=document.getElementById('edit-ex-secondary').value.trim();
-  resolved.secondaryFractions=parseSecondaryFractionsInput(document.getElementById('edit-ex-secondary-fractions').value);
+  const secFields=buildEditExSecondaryFields();
+  resolved.secondary=secFields.secondary;
+  resolved.secondaryFractions=secFields.secondaryFractions;
   save();
   closeModal('modal-edit-exercise');renderActiveWorkout();
   // AUTO ROUTINE POOL SYNC (2026-09-06, user's explicit clarification/correction — this is the
