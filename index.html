@@ -675,7 +675,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-06.9</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-07.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -5127,7 +5127,7 @@ function getRecentNormalTopSets(exId,count){
     const ex=(w.exercises||[]).find(e=>e.exId===exId);
     if(!ex)continue;
     const normalSets=(ex.sets||[]).filter(s=>s.done&&(!s.type||s.type==='normal'));
-    if(normalSets.length)out.push({...normalSets[0],useRIR:!!ex.useRIR});
+    if(normalSets.length)out.push({...normalSets[0],useRIR:!!ex.useRIR,date:w.date});
   }
   return out;
 }
@@ -5299,11 +5299,15 @@ function getMuscleDeclineSignal(muscle){
     const recent=getRecentNormalTopSets(exId,3); // index 0 = most recent
     if(recent.length<2)continue;
     const points=[...recent].reverse(); // oldest -> newest
-    let up=false,down=false;
+    let up=false,down=false,comparedAny=false;
     for(let i=1;i<points.length;i++){
+      const gapDays=(new Date(points[i].date)-new Date(points[i-1].date))/864e5;
+      if(gapDays>AUTO_ROUTINE_BREAK_RECOVERY_WINDOW_DAYS)continue; // not comparable across a real training gap — skip, don't count toward up/down at all
+      comparedAny=true;
       const c=comparePerf(points[i-1],points[i]);
       if(c>0)up=true;if(c<0)down=true;
     }
+    if(!comparedAny)continue; // every pair spanned a break-sized gap — insufficient genuine post-break data, same treatment as recent.length<2 above
     if(down&&!up)return true;
   }
   return false;
@@ -9218,11 +9222,15 @@ function getAutoRoutineMuscleDeclineSignal(muscle){
     const recent=getRecentNormalTopSets(exId,3); // index 0 = most recent
     if(recent.length<2)return; // not enough data on this exercise to have an opinion
     const points=[...recent].reverse(); // oldest -> newest
-    let up=false,down=false;
+    let up=false,down=false,comparedAny=false;
     for(let i=1;i<points.length;i++){
+      const gapDays=(new Date(points[i].date)-new Date(points[i-1].date))/864e5;
+      if(gapDays>AUTO_ROUTINE_BREAK_RECOVERY_WINDOW_DAYS)continue; // not comparable across a real training gap — skip, don't count toward up/down at all
+      comparedAny=true;
       const c=getPerfHopDirection(points[i-1],points[i]);
       if(c>0)up=true;if(c<0)down=true;
     }
+    if(!comparedAny)return; // every pair spanned a break-sized gap — same "not enough data" treatment as recent.length<2 above, doesn't count toward either side of the vote
     if(down&&!up)declining++;else notDeclining++;
   });
   if(declining===0)return false;
