@@ -675,7 +675,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-07.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-08.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -9661,7 +9661,15 @@ function getMuscleGapDays(muscle,activeSet){
 function getMuscleExposureInfo(muscle,activeSet){
   const gaps=getMuscleGapDays(muscle,activeSet||getAutoRoutineActiveMuscles());
   const daysSince=getAutoRoutineDaysSinceMuscleTrained(muscle);
-  const eligible=daysSince==null||daysSince>=gaps.minGapDays;
+  // SAME-DAY LEFTOVER VOLUME (handover, 2026-09-08): daysSince is already
+  // getGMT430DayIndex(now)-getGMT430DayIndex(lastTrained), so daysSince===0 already IS "same
+  // calendar day, 4:30am-GMT-boundary" — no need to re-derive it from a raw timestamp. Without this,
+  // completing even 1 set for a muscle made it fail eligible for the rest of the day regardless of
+  // how much weekly volume was actually left, since minGapDays is always >=1. remaining volume math
+  // (getAutoRoutineDeliveredSoFar/getMuscleExposureDose) was already correct — it's the boolean gate
+  // here that was blocking access to it same-day. Doesn't touch the from-tomorrow-onward rest-gap
+  // rule at all: daysSince>=1 still goes through the normal minGapDays comparison exactly as before.
+  const eligible=daysSince==null||daysSince>=gaps.minGapDays||daysSince===0;
   return{...gaps,daysSince,eligible};
 }
 // Return-from-break handling (spec §6): NOT a bigger catch-up dose — a SMALLER one, scaling back up
