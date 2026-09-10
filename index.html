@@ -270,15 +270,20 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .muscle-group-header{display:flex;align-items:center;justify-content:space-between;padding:9px 0;cursor:pointer;}
 .muscle-bar-track{height:7px;background:var(--bg4);border-radius:4px;overflow:hidden;}
 .muscle-bar-fill{height:100%;border-radius:4px;transition:width 0.6s ease;}
-/* Per-landmark (MEV/MAV/MRV) mini progress bars, three per muscle (2026-09-10, user's explicit
-   request) — each row shows this window's volume as a fraction of that ONE landmark, capped at
-   100% width but with the real vol/target numbers printed alongside so an overshoot is still
-   legible even though the bar itself can't visually exceed full. */
-.lm-bar-row{display:flex;align-items:center;gap:7px;margin-top:3px;}
-.lm-bar-tag{font-size:10px;font-weight:700;color:var(--text3);width:28px;flex-shrink:0;letter-spacing:0.3px;}
-.lm-bar-row .muscle-bar-track{flex:1;}
-.lm-bar-val{font-size:10.5px;color:var(--text3);width:46px;flex-shrink:0;text-align:right;font-variant-numeric:tabular-nums;}
-.lm-bar-val-hit{color:var(--text2);font-weight:600;}
+/* Single per-muscle volume gauge (2026-09-10, replacing the earlier three-separate-bars version
+   per user's explicit feedback — "I keep looking straight at the numbers, that's easier to read
+   than the three bar charts"). One horizontal track is divided into four fixed-meaning colour
+   zones (under MEV / MEV\u2013MAV building / MAV\u2013MRV solid / over MRV) so which zone a muscle sits in
+   reads instantly from colour alone, with a single marker pin showing exactly where this window's
+   volume falls plus its number printed right on the pin \u2014 one glance for the zone, one number for
+   the exact count, instead of three separate bars each needing its own read.*/
+.lm-gauge{position:relative;margin-top:22px;}
+.lm-gauge-track{position:relative;height:14px;border-radius:7px;overflow:hidden;background:var(--bg4);display:flex;}
+.lm-gauge-zone{height:100%;}
+.lm-gauge-divider{position:absolute;top:0;bottom:0;width:1px;background:rgba(0,0,0,0.4);}
+.lm-gauge-marker{position:absolute;top:-3px;bottom:-3px;width:3px;border-radius:2px;background:#fff;box-shadow:0 0 0 2.5px rgba(0,0,0,0.5);transform:translateX(-50%);}
+.lm-gauge-marker-val{position:absolute;top:-19px;transform:translateX(-50%);font-size:12px;font-weight:700;color:var(--text);white-space:nowrap;}
+.lm-gauge-caption{display:flex;justify-content:space-between;margin-top:5px;font-size:10.5px;color:var(--text3);font-variant-numeric:tabular-nums;}
 /* Review window toggle (trailing 7 days vs. calendar-Monday current week) — same visual language
    as the existing .sort-chip segmented controls used elsewhere in the app. */
 .review-window-toggle{display:flex;gap:6px;padding:12px 16px 0;}
@@ -13989,23 +13994,34 @@ function getMuscleGroupVolumesForReview(){
   const ms={};MUSCLE_GROUPS.forEach(m=>{ms[m]=getMuscleVolumeForReview(m);});
   return ms;
 }
-// Three per-landmark mini progress bars for one muscle's Review row (2026-09-10, user's explicit
-// request, replacing the old single relative-to-other-muscles bar): MEV first, then MAV, then MRV,
-// each showing THIS window's volume as its own fraction of that one landmark. Width is capped at
-// 100% (a bar can't visually overshoot) but the printed vol/target numbers still show a real
-// overshoot plainly, and lm-bar-val-hit highlights any landmark that's been reached or passed.
-function landmarkBarsHtml(m,vol,lm){
-  if(!lm)return '';
-  const color=MUSCLE_COLORS[m]||'#aaa';
-  const row=(tag,target)=>{
-    if(!(target>0))return '';
-    const pct=Math.min(100,Math.round(vol/target*100));
-    const hit=vol>=target;
-    return '<div class="lm-bar-row"><span class="lm-bar-tag">'+tag+'</span>'
-      +'<div class="muscle-bar-track"><div class="muscle-bar-fill" style="width:'+pct+'%;background:'+color+'"></div></div>'
-      +'<span class="lm-bar-val'+(hit?' lm-bar-val-hit':'')+'">'+vol+'/'+target+'</span></div>';
-  };
-  return row('MEV',lm.mev)+row('MAV',lm.mav)+row('MRV',lm.mrv);
+// Single-gauge visual for one muscle's Review row (2026-09-10, replacing the earlier three-bars
+// version — see CSS comment on .lm-gauge for why). Four colour zones with fixed meaning across
+// every muscle (under MEV / building MEV\u2013MAV / solid MAV\u2013MRV / over MRV) so the zone a muscle is
+// in reads instantly from colour, plus one marker pin at the actual volume with its number on it.
+// The scale extends a little past whichever is larger of MRV or the current volume, so an
+// over-MRV muscle still shows accurately instead of pinning uselessly at the right edge.
+const LM_ZONE_COLORS={under:'#ff8c0055',building:'#47c8ff55',solid:'#2ed57355',over:'#ff475755'};
+function landmarkGaugeHtml(m,vol,lm){
+  if(!lm||!(lm.mrv>0))return '';
+  const mev=lm.mev||0,mav=Math.max(lm.mav||0,mev),mrv=Math.max(lm.mrv,mav);
+  const scaleMax=Math.max(mrv*1.1,vol*1.05,1);
+  const pct=v=>Math.max(0,Math.min(100,v/scaleMax*100));
+  const zUnder=pct(mev),zBuilding=pct(mav)-pct(mev),zSolid=pct(mrv)-pct(mav),zOver=100-pct(mrv);
+  const markerPos=Math.max(2,Math.min(98,pct(vol)));
+  return '<div class="lm-gauge">'
+    +'<div class="lm-gauge-marker-val" style="left:'+markerPos+'%">'+vol+'</div>'
+    +'<div class="lm-gauge-track">'
+    +'<div class="lm-gauge-zone" style="width:'+zUnder+'%;background:'+LM_ZONE_COLORS.under+'"></div>'
+    +'<div class="lm-gauge-zone" style="width:'+zBuilding+'%;background:'+LM_ZONE_COLORS.building+'"></div>'
+    +'<div class="lm-gauge-zone" style="width:'+zSolid+'%;background:'+LM_ZONE_COLORS.solid+'"></div>'
+    +'<div class="lm-gauge-zone" style="width:'+zOver+'%;background:'+LM_ZONE_COLORS.over+'"></div>'
+    +'<div class="lm-gauge-divider" style="left:'+pct(mev)+'%"></div>'
+    +'<div class="lm-gauge-divider" style="left:'+pct(mav)+'%"></div>'
+    +'<div class="lm-gauge-divider" style="left:'+pct(mrv)+'%"></div>'
+    +'<div class="lm-gauge-marker" style="left:'+markerPos+'%"></div>'
+    +'</div>'
+    +'<div class="lm-gauge-caption"><span>MEV '+lm.mev+'</span><span>MAV '+lm.mav+'</span><span>MRV '+lm.mrv+'</span></div>'
+    +'</div>';
 }
 function renderReview(){
   const c=document.getElementById('review-content');c.innerHTML='';
@@ -14057,7 +14073,7 @@ function renderReview(){
     const needsReason=rec&&rec.status!=='building'&&rec.status!=='mav-to-mrv';
     return '<div class="muscle-bar-wrap"><div class="muscle-bar-label"><span style="font-weight:600">'+m+'</span>'
       +'<span style="display:flex;align-items:center;gap:6px"><span class="text3 small">'+ms[m]+' sets / '+windowLabel+'</span>'+chip+'</span></div>'
-      +landmarkBarsHtml(m,ms[m],lm)
+      +landmarkGaugeHtml(m,ms[m],lm)
       +(needsReason?'<div class="small text2" style="margin-top:5px;line-height:1.4">'+rec.action+'</div>':'')
       +'</div>';
   }).join('');
