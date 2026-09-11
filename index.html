@@ -270,24 +270,6 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .muscle-group-header{display:flex;align-items:center;justify-content:space-between;padding:9px 0;cursor:pointer;}
 .muscle-bar-track{height:7px;background:var(--bg4);border-radius:4px;overflow:hidden;}
 .muscle-bar-fill{height:100%;border-radius:4px;transition:width 0.6s ease;}
-/* Single per-muscle volume gauge (2026-09-10, replacing the earlier three-separate-bars version
-   per user's explicit feedback — "I keep looking straight at the numbers, that's easier to read
-   than the three bar charts"). One horizontal track is divided into four fixed-meaning colour
-   zones (under MEV / MEV\u2013MAV building / MAV\u2013MRV solid / over MRV) so which zone a muscle sits in
-   reads instantly from colour alone, with a single marker pin showing exactly where this window's
-   volume falls plus its number printed right on the pin \u2014 one glance for the zone, one number for
-   the exact count, instead of three separate bars each needing its own read.*/
-.lm-gauge{position:relative;margin-top:22px;}
-.lm-gauge-track{position:relative;height:14px;border-radius:7px;overflow:hidden;background:var(--bg4);display:flex;}
-.lm-gauge-zone{height:100%;}
-.lm-gauge-divider{position:absolute;top:0;bottom:0;width:1px;background:rgba(0,0,0,0.4);}
-.lm-gauge-marker{position:absolute;top:-3px;bottom:-3px;width:3px;border-radius:2px;background:#fff;box-shadow:0 0 0 2.5px rgba(0,0,0,0.5);transform:translateX(-50%);}
-.lm-gauge-marker-val{position:absolute;top:-19px;transform:translateX(-50%);font-size:12px;font-weight:700;color:var(--text);white-space:nowrap;}
-.lm-gauge-caption{display:flex;justify-content:space-between;margin-top:5px;font-size:10.5px;color:var(--text3);font-variant-numeric:tabular-nums;}
-/* Review window toggle (trailing 7 days vs. calendar-Monday current week) — same visual language
-   as the existing .sort-chip segmented controls used elsewhere in the app. */
-.review-window-toggle{display:flex;gap:6px;padding:12px 16px 0;}
-.review-window-toggle .sort-chip{flex:1;text-align:center;}
 .review-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px;box-shadow:var(--shadow);}
 .suggestion-item{padding:9px 0;border-bottom:1px solid var(--border);font-size:13px;line-height:1.5;}
 .suggestion-item:last-child{border-bottom:none;}
@@ -693,7 +675,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-09.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-09.2</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -2255,6 +2237,16 @@ function load(){
     if(state.autoRoutineActiveMuscles){delete state.autoRoutineActiveMuscles['Glutes'];delete state.autoRoutineActiveMuscles['Core'];}
     delete state.musclePriority['Glutes'];delete state.musclePriority['Core'];
     state.glutesCoreVolumeTrackingExcluded=true;
+  }
+  // ONE-TIME switch (2026-09-09.2, user's explicit request): MRV track off, MAV auto-stagger on —
+  // "I want MEV to MRV to be switched off for now" / "I want all of it to be automated." A one-time
+  // transition, not a standing rule — gated so it only ever fires once and never fights a later
+  // manual toggle in either direction (e.g. turning MRV back on next month doesn't get silently
+  // reverted by this migration running again).
+  if(!state.autoRoutineMavStaggerMigrationApplied){
+    state.autoRoutineMrvTrackEnabled=false;
+    state.autoRoutineMavStaggerEnabled=true;
+    state.autoRoutineMavStaggerMigrationApplied=true;
   }
   // Existing installs from before Tibialis was split out as its own tracked muscle (see v3
   // migration above) won't have this key yet — backfill so it isn't silently missing a landmark
@@ -9370,7 +9362,25 @@ const AUTO_ROUTINE_ACTIVE_BLOCK_DAYS=42; // UPDATED 2026-09-04: was 28 (4wk) —
 // (state.autoRoutineActiveMuscles is now {muscle: sinceISOString}, not one shared array+timestamp)
 // — each slot is evaluated and, if needed, refilled independently, so a muscle that's still
 // climbing keeps its slot uninterrupted regardless of what happens to the other one.
+// Non-recursive raw membership check (2026-09-09.2) — used by each pool to exclude muscles the
+// OTHER pool currently holds, without calling the other pool's full getter, which would recurse
+// back here now that BOTH pools need to check each other (MRV excludes MAV members; MAV's own
+// auto-stagger excludes MRV members). Slightly stale by one tick in a rare edge case (checking
+// before the other pool's own validity/eviction pass runs) — self-correcting, harmless.
+function getAutoRoutineRawPoolMuscles(recKey){
+  return new Set(Object.keys(state[recKey]||{}));
+}
 function getAutoRoutineMrvActiveMuscles(){
+  // MRV TRACK ON/OFF (2026-09-09, user's explicit request): "switch MEV to MRV off for now" — a
+  // simple kill switch rather than deleting the whole track, so it's a one-tap toggle to bring back
+  // later rather than something only I can re-enable. When off, returns empty immediately and clears
+  // any lingering state so a stale entry can't quietly reappear if the toggle flips back on later
+  // without a fresh, deliberate selection.
+  if(state.autoRoutineMrvTrackEnabled===false){
+    state.autoRoutineActiveMuscles={};
+    state.autoRoutineManualPriority=[];
+    return new Set();
+  }
   if(!state.autoRoutineActiveMuscles||Array.isArray(state.autoRoutineActiveMuscles.muscles))state.autoRoutineActiveMuscles={};
   if(!state.autoRoutineManualPriority)state.autoRoutineManualPriority=[]; // manual override list (2026-09-06, user's explicit request) — muscle names the user force-picked, separate from the auto-selected `rec` tenure record below
   const rec=state.autoRoutineActiveMuscles;
@@ -9378,7 +9388,7 @@ function getAutoRoutineMrvActiveMuscles(){
   // kept here — without this, MRV's own automatic readiness-based fill could silently re-claim a
   // muscle the user deliberately placed on the MAV track the moment it's evicted from state once,
   // since nothing previously stopped it being auto-selected again on a later call.
-  const mavMuscles=getAutoRoutineMavActiveMuscles();
+  const mavMuscles=getAutoRoutineRawPoolMuscles('autoRoutineMavActiveMuscles');
   const isSlotValid=(mu)=>{
     if(!rec[mu])return false;
     if(mavMuscles.has(mu))return false;
@@ -9422,13 +9432,14 @@ function getAutoRoutineMrvActiveMuscles(){
 // MAV-TRACK POOL (2026-09-09 handover — staggered MEV->MAV specialization): a SECOND, independent
 // priority pool for a deliberate multi-muscle program (e.g. two staggered 2-muscle pairs both
 // ramping toward MAV rather than MRV) — distinct from the MRV-track pool above, which stays
-// unchanged and still means "specialize 1-2 muscles all the way to MRV." Unlike the MRV pool, this
-// one has NO automatic readiness-based backfill — it only ever holds what the user explicitly puts
-// there via forceAutoRoutineMavActiveMuscle, since a staggered block like this is a deliberate
-// program the user is directing (which pair, and when the second one starts), not something that
-// should spontaneously self-populate. A muscle can only be in ONE pool at a time — see the
-// mutual-exclusion guards in both force functions below.
-const AUTO_ROUTINE_MAX_MAV_ACTIVE_MUSCLES=4; // 2026-09-09 handover's own explicit requirement: the 2+2 staggered design needs 4 muscles active AT ONCE during the overlap window (pair 1 still ramping when pair 2 starts 3 weeks later) — capping at 2 would wrongly evict pair 1 the instant pair 2 is added, defeating the entire point of staggering
+// unchanged and still means "specialize 1-2 muscles all the way to MRV." A muscle can only be in ONE
+// pool at a time — see the mutual-exclusion guards in both force functions below.
+const AUTO_ROUTINE_MAX_MAV_ACTIVE_MUSCLES=8; // 2026-09-09.2 raised from 4: with the auto-stagger below running INDEFINITELY (pair 3, pair 4, ... "etc" per the user's own request), a fixed pair count can't be assumed — this is a generous safety ceiling (4 pairs' worth of overlap), not an expected steady-state count. Under normal timing, an earlier pair completes its MAV ramp and evicts well before enough staggering intervals pass to need this much room at once.
+const AUTO_ROUTINE_MAV_PAIR_SIZE=2;
+const AUTO_ROUTINE_MAV_STAGGER_DAYS_DEFAULT=21; // 3 weeks, per the user's explicit request
+function getAutoRoutineMavStaggerDays(){
+  return(state.autoRoutineMavStaggerDays>0)?state.autoRoutineMavStaggerDays:AUTO_ROUTINE_MAV_STAGGER_DAYS_DEFAULT;
+}
 function getAutoRoutineMavActiveMuscles(){
   if(!state.autoRoutineMavActiveMuscles)state.autoRoutineMavActiveMuscles={};
   if(!state.autoRoutineMavManualPriority)state.autoRoutineMavManualPriority=[];
@@ -9442,7 +9453,47 @@ function getAutoRoutineMavActiveMuscles(){
     return true;
   };
   state.autoRoutineMavManualPriority=state.autoRoutineMavManualPriority.filter(mu=>isSlotValid(mu));
-  const keep=state.autoRoutineMavManualPriority.slice(0,AUTO_ROUTINE_MAX_MAV_ACTIVE_MUSCLES);
+  let keep=state.autoRoutineMavManualPriority.slice(0,AUTO_ROUTINE_MAX_MAV_ACTIVE_MUSCLES);
+  // BUG FIX (2026-09-09.2, found while testing the auto-stagger below): existing valid rec entries
+  // weren't retained unless they also happened to be in the manual-priority list — but an
+  // auto-staggered pair is written straight into `rec`, never into autoRoutineMavManualPriority, so
+  // without this retention step an auto-started pair would vanish the very next time this function
+  // ran (keep would reset to empty, ignoring the still-valid rec entry) and then get "re-started"
+  // days later once another stagger tick happened to line up, instead of persisting continuously.
+  // Mirrors the MRV pool's own existing-slot-retention pattern.
+  Object.keys(rec).filter(isSlotValid).forEach(mu=>{
+    if(keep.length<AUTO_ROUTINE_MAX_MAV_ACTIVE_MUSCLES&&!keep.includes(mu))keep.push(mu);
+  });
+  // AUTO-STAGGER (2026-09-09.2, user's explicit request — fully automated, not manually triggered
+  // per pair): "pair one starts, pair two starts 3 weeks after pair one, pair three 3 weeks after
+  // pair two, etc." Defaults ON once built, since that's the user's stated current intent. Checked
+  // on every call rather than at an exact instant — if a slot happens to still be occupied when a
+  // tick is due, the next pair just waits and starts as soon as room actually opens up, rather than
+  // being skipped or erroring. Only ever adds a FULL pair (AUTO_ROUTINE_MAV_PAIR_SIZE) at once — a
+  // tick with fewer than that many eligible candidates left waits rather than starting a partial one.
+  if(state.autoRoutineMavStaggerEnabled!==false){
+    const last=state.autoRoutineMavStaggerLastPairStart;
+    const dueDays=getAutoRoutineMavStaggerDays();
+    const due=!last||((Date.now()-new Date(last))/864e5)>=dueDays;
+    if(due&&keep.length+AUTO_ROUTINE_MAV_PAIR_SIZE<=AUTO_ROUTINE_MAX_MAV_ACTIVE_MUSCLES){
+      const mrvMuscles=getAutoRoutineRawPoolMuscles('autoRoutineActiveMuscles');
+      const allMuscles=Object.keys(state.volumeLandmarks||{});
+      const candidates=allMuscles
+        .filter(mu=>!keep.includes(mu)&&!mrvMuscles.has(mu)&&!isAutoRoutineMuscleStruggling(mu)&&!isAutoRoutineMuscleFullyResting(mu)&&getAutoRoutineMuscleProgress(mu)<getMuscleLandmarks(mu).mav)
+        .map(mu=>({mu,score:getAutoRoutineMuscleReadiness(mu)}))
+        .filter(x=>x.score>0)
+        .sort((a,b)=>b.score-a.score);
+      if(candidates.length>=AUTO_ROUTINE_MAV_PAIR_SIZE){
+        const nextPair=candidates.slice(0,AUTO_ROUTINE_MAV_PAIR_SIZE).map(x=>x.mu);
+        const nowISO=new Date().toISOString();
+        nextPair.forEach(mu=>{rec[mu]=nowISO;});
+        keep=keep.concat(nextPair);
+        state.autoRoutineMavStaggerLastPairStart=nowISO;
+      }
+      // else: not enough eligible candidates for a full pair right now — wait, try again next call,
+      // still counts as "due" until it actually succeeds (lastPairStart only updates on success).
+    }
+  }
   const newRec={};
   keep.forEach(mu=>{newRec[mu]=rec[mu];});
   state.autoRoutineMavActiveMuscles=newRec;
@@ -10532,10 +10583,37 @@ function renderAutoRoutinePriorityStatusHtml(){
       +(!canForceMav&&!canForceMrv?'<span class="small text3">unavailable</span>':'')
       +'</div></div>';
   }).join('');
-  return'<div class="small text3 mb8">Two independent tracks: up to '+AUTO_ROUTINE_MAX_ACTIVE_MUSCLES+' muscles ramp MEV\u2192MRV (full specialization), and up to '+AUTO_ROUTINE_MAX_MAV_ACTIVE_MUSCLES+' more ramp MEV\u2192MAV (a staggered, all-round block) \u2014 both over about '+targetWeeks+' weeks, hard-capped at '+hardCapWeeks+'. A muscle can only be on one track at a time. Everyone else holds at MEV. "Skip" removes a muscle right now (drops to MEV immediately, though it can be naturally re-selected if it\'s still the best MRV-track candidate). The MAV track only ever holds what you put there \u2014 no automatic selection \u2014 so you can stagger a second pair in deliberately.</div>'
+  const mrvOn=state.autoRoutineMrvTrackEnabled!==false;
+  const staggerOn=state.autoRoutineMavStaggerEnabled!==false;
+  const staggerDays=getAutoRoutineMavStaggerDays();
+  return'<div class="small text3 mb8">Two independent tracks: up to '+AUTO_ROUTINE_MAX_ACTIVE_MUSCLES+' muscles ramp MEV\u2192MRV (full specialization), and MAV-track pairs ramp MEV\u2192MAV instead \u2014 both over about '+targetWeeks+' weeks per muscle, hard-capped at '+hardCapWeeks+'. A muscle can only be on one track at a time. Everyone else holds at MEV. "Skip" removes a muscle right now (drops to MEV immediately, though it can be naturally re-selected if it\'s still the best candidate for its track).</div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 4px;border-bottom:1px solid var(--border)">'
+    +'<div class="small" style="font-weight:700">MRV track</div>'
+    +'<button class="btn btn-ghost btn-sm" onclick="toggleAutoRoutineMrvTrack()">'+(mrvOn?'On \u2014 tap to turn off':'Off \u2014 tap to turn on')+'</button>'
+    +'</div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 4px;border-bottom:1px solid var(--border)">'
+    +'<div class="small" style="font-weight:700">MAV auto-stagger</div>'
+    +'<button class="btn btn-ghost btn-sm" onclick="toggleAutoRoutineMavStagger()">'+(staggerOn?'On \u2014 tap to turn off':'Off \u2014 tap to turn on')+'</button>'
+    +'</div>'
+    +(staggerOn?'<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 4px 10px"><div class="small text3">New pair every</div><div><input type="number" inputmode="numeric" min="1" value="'+staggerDays+'" style="width:56px;padding:5px 6px;font-size:13px;text-align:center" onchange="setAutoRoutineMavStaggerDays(this.value)"/><span class="small text3"> days</span></div></div>':'')
     +'<div style="font-weight:700;margin-bottom:2px">MRV-track (specialization)</div>'+mrvRows
-    +'<div style="font-weight:700;margin:10px 0 2px">MAV-track (staggered block)</div>'+mavRows
+    +'<div style="font-weight:700;margin:10px 0 2px">MAV-track (staggered block'+(staggerOn?' \u2014 auto':'')+')</div>'+mavRows
     +'<div style="font-weight:700;margin:10px 0 2px">Back-burner (held at MEV)</div>'+backBurnerRows;
+}
+function toggleAutoRoutineMrvTrack(){
+  state.autoRoutineMrvTrackEnabled=!(state.autoRoutineMrvTrackEnabled!==false);
+  save();
+  document.getElementById('auto-routine-priority-body').innerHTML=renderAutoRoutinePriorityStatusHtml();
+}
+function toggleAutoRoutineMavStagger(){
+  state.autoRoutineMavStaggerEnabled=!(state.autoRoutineMavStaggerEnabled!==false);
+  save();
+  document.getElementById('auto-routine-priority-body').innerHTML=renderAutoRoutinePriorityStatusHtml();
+}
+function setAutoRoutineMavStaggerDays(value){
+  const num=parseInt(value,10);
+  if(!isNaN(num)&&num>0)state.autoRoutineMavStaggerDays=num;
+  save();
 }
 function openAutoRoutinePriorityModal(){
   document.getElementById('auto-routine-priority-body').innerHTML=renderAutoRoutinePriorityStatusHtml();
@@ -13563,11 +13641,9 @@ function exportHistory(){
 // effort reflects real training volume/progress) per primary muscle, plus half-credit toward
 // secondary muscles. Used by both the Review tab's display and getVolumeRecommendation() below,
 // so the two stay consistent.
-// UPDATED (2026-09-10, user's explicit request): now takes a windowStart Date directly instead of
-// a day-count, so its one caller (renderReview) can feed it either the rolling-7-day cutoff or the
-// calendar-Monday "current week" start, per the Review tab's new toggle — see getReviewWindowStart.
-function getWeeklyMuscleVolume(windowStart){
-  const wa=windowStart;
+function getWeeklyMuscleVolume(windowDays){
+  windowDays=windowDays||7;
+  const now=new Date();const wa=new Date(now-windowDays*864e5);
   const ww=(state.history||[]).filter(w=>w&&new Date(w.date)>=wa);
   const ms={};MUSCLE_GROUPS.forEach(m=>ms[m]=0);
   ww.forEach(w=>(w.exercises||[]).forEach(ex=>{
@@ -13884,11 +13960,9 @@ function getPriorityImbalanceNotes(){
   return notes;
 }
 // Average sessions/week during the CURRENT pass of a mesocycle (from its first workout to its
-function getVolumeRecommendation(muscle,volOverride,windowDaysOverride){
+function getVolumeRecommendation(muscle,volOverride){
   const lm=getMuscleLandmarks(muscle);
-  const{sets:vol,windowDays}=volOverride!=null
-    ?{sets:volOverride,windowDays:windowDaysOverride!=null?windowDaysOverride:MUSCLE_VOLUME_WINDOW_DAYS}
-    :getMuscleVolume(muscle);
+  const{sets:vol,windowDays}=volOverride!=null?{sets:volOverride,windowDays:MUSCLE_VOLUME_WINDOW_DAYS}:getMuscleVolume(muscle);
   const sfr=getMuscleSFRSignal(muscle);
   let status,action;
   if(sfr.maxJointPain!=null&&sfr.maxJointPain>=2){
@@ -13937,113 +14011,21 @@ function getDaysSinceLastTrained(muscle){
   });
   return latest?Math.round((Date.now()-latest)/864e5):null;
 }
-// REVIEW WINDOW TOGGLE (2026-09-10, user's explicit request): lets the Review tab display either
-// the existing rolling-trailing-7-days window (the same convention MUSCLE_VOLUME_WINDOW_DAYS uses
-// everywhere else in the app — Auto Session dosing, ramp targets, getVolumeRecommendation, etc.)
-// or a calendar-Monday-aligned "current week" window (same Monday convention as getWeekBuckets /
-// Home's Weekly Consistency chart). This ONLY changes what the Review tab displays — it does NOT
-// touch MUSCLE_VOLUME_WINDOW_DAYS, getMuscleVolume, or getVolumeRecommendation's own default
-// window, so every other real training decision in the app keeps rolling from right now exactly
-// as before (per the explicit design intent noted on MUSCLE_VOLUME_WINDOW_DAYS/getWeekBuckets).
-function getReviewWindowStart(){
-  const now=new Date();
-  if(state.reviewWindowMode==='calendar'){
-    const day=now.getDay();
-    const diffToMonday=(day===0?-6:1-day);
-    return new Date(now.getFullYear(),now.getMonth(),now.getDate()+diffToMonday);
-  }
-  return new Date(now-7*864e5);
-}
-// How many days the current Review window actually spans, for display/copy purposes (e.g. "3/8
-// sets over the last 3 days" early in a calendar week, rather than misleadingly saying 7).
-function getReviewWindowDays(){
-  if(state.reviewWindowMode==='calendar'){
-    const day=new Date().getDay();
-    return day===0?7:day; // Monday=1 day in, ... Sunday=7 (full week elapsed)
-  }
-  return 7;
-}
-function getReviewWindowLabel(short){
-  return state.reviewWindowMode==='calendar'?(short?'this wk':'this week'):(short?'7d':'last 7 days');
-}
-function setReviewWindowMode(mode){
-  if(state.reviewWindowMode===mode)return;
-  state.reviewWindowMode=mode;
-  save();
-  renderReview();
-}
-// Muscle-volume tally for the Review tab specifically, using getReviewWindowStart() instead of the
-// fixed rolling MUSCLE_VOLUME_WINDOW_DAYS cutoff every other volume reader in the app uses — same
-// per-set crediting (getExerciseVolumeCredit + secondary-muscle fraction) as getMuscleVolume, just
-// windowed differently so the toggle above can drive it. Deliberately a separate function (not a
-// refactor of getMuscleVolume) so Auto Session, ramps, and every other existing caller of
-// getMuscleVolume/getMuscleGroupVolumes are completely unaffected by this toggle.
-function getMuscleVolumeForReview(muscle){
-  const wa=getReviewWindowStart();
-  let sets=0;
-  (state.history||[]).filter(w=>w&&new Date(w.date)>=wa).forEach(w=>(w.exercises||[]).forEach(ex=>{
-    if(!ex)return;
-    const exData=getExercise(ex.exId);if(!exData)return;
-    const credit=getExerciseVolumeCredit(ex);
-    if(exData.muscle===muscle)sets+=credit;
-    else if(exData.secondary&&exData.secondary.split(',').some(s=>s.trim()===muscle))sets+=credit*getSecondaryMuscleFraction(exData,muscle);
-  }));
-  return Math.round(sets*10)/10;
-}
-function getMuscleGroupVolumesForReview(){
-  const ms={};MUSCLE_GROUPS.forEach(m=>{ms[m]=getMuscleVolumeForReview(m);});
-  return ms;
-}
-// Single-gauge visual for one muscle's Review row (2026-09-10, replacing the earlier three-bars
-// version — see CSS comment on .lm-gauge for why). Four colour zones with fixed meaning across
-// every muscle (under MEV / building MEV\u2013MAV / solid MAV\u2013MRV / over MRV) so the zone a muscle is
-// in reads instantly from colour, plus one marker pin at the actual volume with its number on it.
-// The scale extends a little past whichever is larger of MRV or the current volume, so an
-// over-MRV muscle still shows accurately instead of pinning uselessly at the right edge.
-const LM_ZONE_COLORS={under:'#ff8c0055',building:'#47c8ff55',solid:'#2ed57355',over:'#ff475755'};
-function landmarkGaugeHtml(m,vol,lm){
-  if(!lm||!(lm.mrv>0))return '';
-  const mev=lm.mev||0,mav=Math.max(lm.mav||0,mev),mrv=Math.max(lm.mrv,mav);
-  const scaleMax=Math.max(mrv*1.1,vol*1.05,1);
-  const pct=v=>Math.max(0,Math.min(100,v/scaleMax*100));
-  const zUnder=pct(mev),zBuilding=pct(mav)-pct(mev),zSolid=pct(mrv)-pct(mav),zOver=100-pct(mrv);
-  const markerPos=Math.max(2,Math.min(98,pct(vol)));
-  return '<div class="lm-gauge">'
-    +'<div class="lm-gauge-marker-val" style="left:'+markerPos+'%">'+vol+'</div>'
-    +'<div class="lm-gauge-track">'
-    +'<div class="lm-gauge-zone" style="width:'+zUnder+'%;background:'+LM_ZONE_COLORS.under+'"></div>'
-    +'<div class="lm-gauge-zone" style="width:'+zBuilding+'%;background:'+LM_ZONE_COLORS.building+'"></div>'
-    +'<div class="lm-gauge-zone" style="width:'+zSolid+'%;background:'+LM_ZONE_COLORS.solid+'"></div>'
-    +'<div class="lm-gauge-zone" style="width:'+zOver+'%;background:'+LM_ZONE_COLORS.over+'"></div>'
-    +'<div class="lm-gauge-divider" style="left:'+pct(mev)+'%"></div>'
-    +'<div class="lm-gauge-divider" style="left:'+pct(mav)+'%"></div>'
-    +'<div class="lm-gauge-divider" style="left:'+pct(mrv)+'%"></div>'
-    +'<div class="lm-gauge-marker" style="left:'+markerPos+'%"></div>'
-    +'</div>'
-    +'<div class="lm-gauge-caption"><span>MEV '+lm.mev+'</span><span>MAV '+lm.mav+'</span><span>MRV '+lm.mrv+'</span></div>'
-    +'</div>';
-}
 function renderReview(){
   const c=document.getElementById('review-content');c.innerHTML='';
-  const windowStart=getReviewWindowStart();
-  const windowDays=getReviewWindowDays();
-  const windowLabel=getReviewWindowLabel();
-  const{ww}=getWeeklyMuscleVolume(windowStart); // top stats (workout count, total volume, RPE, streak) — trailing-7-days by default, or calendar-Monday "current week" when the toggle below is set. The Home page's Weekly Consistency chart (getWeekBuckets) remains the one thing in FORGE that's ALWAYS calendar/Monday-aligned regardless of this toggle, per the user's explicit preference there.
-  const ms=getMuscleGroupVolumesForReview(); // muscle-vs-landmark comparisons, windowed the same way as the toggle above (see getMuscleVolumeForReview) — separate from getMuscleGroupVolumes/getMuscleVolume, which stay on the fixed rolling MUSCLE_VOLUME_WINDOW_DAYS and keep driving Auto Session/ramp decisions untouched by this toggle.
+  const{ww}=getWeeklyMuscleVolume(7); // rolling last-7-days stats below (workout count, total volume, RPE, streak) — NOT calendar-Monday-aligned, despite what an earlier version of this comment claimed; corrected 2026-08-09 after that mischaracterization caused real confusion. The Home page's Weekly Consistency chart (getWeekBuckets) is the one genuinely calendar/Monday-aligned thing in the app, and stays that way per user's explicit preference — every other window in FORGE (this one included) rolls from right now.
+  const ms=getMuscleGroupVolumes(); // muscle-vs-landmark comparisons: flat rolling 7 days (see MUSCLE_VOLUME_WINDOW_DAYS/getMuscleVolume)
   const now=new Date();
   let vol=0,sets=0,rpeAll=[];const days=new Set();let consec=0;
   ww.forEach(w=>{if(!w)return;days.add(new Date(w.date).toDateString());(w.exercises||[]).forEach(ex=>{if(!ex)return;const useRIR=!!ex.useRIR;(ex.sets||[]).forEach(s=>{if(s&&s.done&&s.type!=='partials'){sets++;vol+=(s.weight||0)*(s.reps||0);if(s.rpe!=null)rpeAll.push(useRIR?(10-s.rpe):s.rpe);}});});});
   for(let i=0;i<7;i++){const d=new Date(now-i*864e5);if(days.has(d.toDateString()))consec++;else break;}
   const avgRPE=rpeAll.length?(rpeAll.reduce((a,b)=>a+b,0)/rpeAll.length).toFixed(1):'—';
-  const toggleHtml='<div class="review-window-toggle">'
-    +'<div class="sort-chip'+(state.reviewWindowMode!=='calendar'?' active':'')+'" onclick="setReviewWindowMode(\'trailing\')">Trailing 7 Days</div>'
-    +'<div class="sort-chip'+(state.reviewWindowMode==='calendar'?' active':'')+'" onclick="setReviewWindowMode(\'calendar\')">Current Week</div>'
-    +'</div>';
-  const statsHtml=toggleHtml+'<div class="week-stat-row" style="padding:14px 16px 0">'
+  const statsHtml='<div class="week-stat-row" style="padding:14px 16px 0">'
     +'<div class="week-stat"><div class="week-stat-val">'+ww.length+'</div><div class="week-stat-lbl">Workouts</div></div>'
     +'<div class="week-stat"><div class="week-stat-val">'+sets+'</div><div class="week-stat-lbl">Sets</div></div>'
     +'<div class="week-stat"><div class="week-stat-val">'+(vol/1000).toFixed(1)+'t</div><div class="week-stat-lbl">Volume</div></div>'
     +'<div class="week-stat"><div class="week-stat-val" style="color:var(--orange)">'+avgRPE+'</div><div class="week-stat-lbl">Avg Effort</div></div></div>';
+  const maxS=Math.max(...Object.values(ms),1);
   // Redesign (2026-08-07): each trained muscle's volume-recommendation status now renders as a
   // chip right on its own bar row (sorted attention-first — pain/at-MRV/high-fatigue/below-MEV
   // ahead of building/solid) instead of ALSO repeating as a full sentence in the Suggestions list
@@ -14056,11 +14038,7 @@ function renderReview(){
   // would've kept showing a bar for Glutes/Core (no chip/caption, just a naked number) even after
   // excluding them from landmark tracking below. Requiring state.volumeLandmarks[m] up front hides
   // them from Review entirely, consistent with Auto Routine (which already keys off the same dict).
-  // UPDATED (2026-09-10, user's explicit request): rec is now computed off THIS window's volume
-  // (ms[m]/windowDays via the volOverride/windowDaysOverride params) so the status chip/reason text
-  // stays consistent with whichever window the toggle above has selected, instead of always reading
-  // the fixed rolling-7-day volume regardless of what the bars themselves are showing.
-  const trainedWithRec=MUSCLE_GROUPS.filter(m=>ms[m]>0&&state.volumeLandmarks[m]).map(m=>({m,rec:getVolumeRecommendation(m,ms[m],windowDays)}));
+  const trainedWithRec=MUSCLE_GROUPS.filter(m=>ms[m]>0&&state.volumeLandmarks[m]).map(m=>({m,rec:getVolumeRecommendation(m)}));
   trainedWithRec.sort((a,b)=>{
     const ai=a.rec?VOLUME_STATUS_ORDER.indexOf(a.rec.status):999;
     const bi=b.rec?VOLUME_STATUS_ORDER.indexOf(b.rec.status):999;
@@ -14068,13 +14046,15 @@ function renderReview(){
   });
   const barsHtml=trainedWithRec.map(({m,rec})=>{
     const lm=state.volumeLandmarks[m];
+    const lmCaption=lm?'MEV '+lm.mev+' \u00b7 MAV '+lm.mav+' \u00b7 MRV '+lm.mrv:'';
     const meta=rec?VOLUME_STATUS_META[rec.status]:null;
     const chip=meta?statusChipHtml(meta.icon,meta.label,meta.color):'';
     const needsReason=rec&&rec.status!=='building'&&rec.status!=='mav-to-mrv';
     return '<div class="muscle-bar-wrap"><div class="muscle-bar-label"><span style="font-weight:600">'+m+'</span>'
-      +'<span style="display:flex;align-items:center;gap:6px"><span class="text3 small">'+ms[m]+' sets / '+windowLabel+'</span>'+chip+'</span></div>'
-      +landmarkGaugeHtml(m,ms[m],lm)
-      +(needsReason?'<div class="small text2" style="margin-top:5px;line-height:1.4">'+rec.action+'</div>':'')
+      +'<span style="display:flex;align-items:center;gap:6px"><span class="text3 small">'+ms[m]+' sets / 7d</span>'+chip+'</span></div>'
+      +'<div class="muscle-bar-track"><div class="muscle-bar-fill" style="width:'+Math.round(ms[m]/maxS*100)+'%;background:'+(MUSCLE_COLORS[m]||'#aaa')+'"></div></div>'
+      +(lmCaption?'<div class="text3 small" style="text-align:right;margin-top:2px">'+lmCaption+'</div>':'')
+      +(needsReason?'<div class="small text2" style="margin-top:3px;line-height:1.4">'+rec.action+'</div>':'')
       +'</div>';
   }).join('');
   const zeroVolMuscles=MUSCLE_GROUPS.filter(m=>!ms[m]&&m!=='Full Body');
@@ -14124,12 +14104,12 @@ function renderReview(){
     if(!sugg.length)sugg.push({i:'🏆',t:'Excellent week! Great muscle balance and consistent frequency. Keep it up.'});
   }
   c.innerHTML=statsHtml
-    +'<div class="section-label">Muscle Volume ('+windowLabel+')</div>'
+    +'<div class="section-label">Muscle Volume (last 7 days)</div>'
     +'<div class="review-card" style="margin:0 16px 10px">'
     +(!ww.length?'<div class="small text2" style="text-align:center;padding:14px 0">Complete workouts to see your breakdown</div>':'')
     +barsHtml
     +(neverTrained.length&&ww.length?'<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)"><div class="small text3" style="margin-bottom:5px">NOT TRAINED YET</div>'+neverTrained.map(m=>'<span class="muscle-tag">'+m+'</span>').join('')+'</div>':'')
-    +(outsideCadence.length&&ww.length?'<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)"><div class="small text3" style="margin-bottom:5px">NOT TRAINED '+(state.reviewWindowMode==='calendar'?'THIS WEEK':'IN THE LAST 7 DAYS')+'</div>'+outsideCadence.map(m=>{const d=getDaysSinceLastTrained(m);return '<span class="muscle-tag">'+m+(d!=null?' · '+d+'d ago':'')+'</span>';}).join('')+'</div>':'')
+    +(outsideCadence.length&&ww.length?'<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)"><div class="small text3" style="margin-bottom:5px">NOT TRAINED IN THE LAST 7 DAYS</div>'+outsideCadence.map(m=>{const d=getDaysSinceLastTrained(m);return '<span class="muscle-tag">'+m+(d!=null?' · '+d+'d ago':'')+'</span>';}).join('')+'</div>':'')
     +(restingMuscles.length&&ww.length?'<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)"><div class="small text3" style="margin-bottom:5px">🩹 RESTING — EXERCISES MARKED INJURED</div>'+restingMuscles.map(m=>'<span class="muscle-tag">'+m+'</span>').join('')+'</div>':'')
     +'</div>'
     +'<div class="section-label">Personal Records</div>'
