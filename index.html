@@ -259,6 +259,24 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .sort-options::-webkit-scrollbar{display:none;}
 .sort-chip{padding:5px 13px;border-radius:20px;font-size:12px;font-weight:600;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;white-space:nowrap;transition:all 0.15s;}
 .sort-chip.active{background:var(--accent);color:#0a0a0f;border-color:var(--accent);}
+/* Single per-muscle volume gauge (2026-09-10, replacing the earlier three-separate-bars version
+per user's explicit feedback — "I keep looking straight at the numbers, that's easier to read
+than the three bar charts"). One horizontal track is divided into four fixed-meaning colour
+zones (under MEV / MEV\u2013MAV building / MAV\u2013MRV solid / over MRV) so which zone a muscle sits in
+reads instantly from colour alone, with a single marker pin showing exactly where this window's
+volume falls plus its number printed right on the pin \u2014 one glance for the zone, one number for
+the exact count, instead of three separate bars each needing its own read.*/
+.lm-gauge{position:relative;margin-top:22px;}
+.lm-gauge-track{position:relative;height:14px;border-radius:7px;overflow:hidden;background:var(--bg4);display:flex;}
+.lm-gauge-zone{height:100%;}
+.lm-gauge-divider{position:absolute;top:0;bottom:0;width:1px;background:rgba(0,0,0,0.4);}
+.lm-gauge-marker{position:absolute;top:-3px;bottom:-3px;width:3px;border-radius:2px;background:#fff;box-shadow:0 0 0 2.5px rgba(0,0,0,0.5);transform:translateX(-50%);}
+.lm-gauge-marker-val{position:absolute;top:-19px;transform:translateX(-50%);font-size:12px;font-weight:700;color:var(--text);white-space:nowrap;}
+.lm-gauge-caption{display:flex;justify-content:space-between;margin-top:5px;font-size:10.5px;color:var(--text3);font-variant-numeric:tabular-nums;}
+/* Review window toggle (trailing 7 days vs. calendar-Monday current week) — same visual language
+as the existing .sort-chip segmented controls used elsewhere in the app. */
+.review-window-toggle{display:flex;gap:6px;padding:12px 16px 0;}
+.review-window-toggle .sort-chip{flex:1;text-align:center;}
 .muscle-bar-wrap{padding:5px 0;}.muscle-bar-label{display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px;}
 .status-chip{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:10px;font-size:10.5px;font-weight:700;white-space:nowrap;flex-shrink:0;}
 .priority-pill{padding:8px 14px;border-radius:14px;border:1px solid var(--border);background:var(--bg);color:var(--text2);font-size:13px;font-weight:600;}
@@ -675,7 +693,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-09.2</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-10.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -13641,9 +13659,11 @@ function exportHistory(){
 // effort reflects real training volume/progress) per primary muscle, plus half-credit toward
 // secondary muscles. Used by both the Review tab's display and getVolumeRecommendation() below,
 // so the two stay consistent.
-function getWeeklyMuscleVolume(windowDays){
-  windowDays=windowDays||7;
-  const now=new Date();const wa=new Date(now-windowDays*864e5);
+// UPDATED (2026-09-10, user's explicit request): now takes a windowStart Date directly instead of
+// a day-count, so its one caller (renderReview) can feed it either the rolling-7-day cutoff or the
+// calendar-Monday "current week" start, per the Review tab's new toggle — see getReviewWindowStart.
+function getWeeklyMuscleVolume(windowStart){
+  const wa=windowStart;
   const ww=(state.history||[]).filter(w=>w&&new Date(w.date)>=wa);
   const ms={};MUSCLE_GROUPS.forEach(m=>ms[m]=0);
   ww.forEach(w=>(w.exercises||[]).forEach(ex=>{
@@ -13960,9 +13980,11 @@ function getPriorityImbalanceNotes(){
   return notes;
 }
 // Average sessions/week during the CURRENT pass of a mesocycle (from its first workout to its
-function getVolumeRecommendation(muscle,volOverride){
+function getVolumeRecommendation(muscle,volOverride,windowDaysOverride){
   const lm=getMuscleLandmarks(muscle);
-  const{sets:vol,windowDays}=volOverride!=null?{sets:volOverride,windowDays:MUSCLE_VOLUME_WINDOW_DAYS}:getMuscleVolume(muscle);
+  const{sets:vol,windowDays}=volOverride!=null
+    ?{sets:volOverride,windowDays:windowDaysOverride!=null?windowDaysOverride:MUSCLE_VOLUME_WINDOW_DAYS}
+    :getMuscleVolume(muscle);
   const sfr=getMuscleSFRSignal(muscle);
   let status,action;
   if(sfr.maxJointPain!=null&&sfr.maxJointPain>=2){
@@ -14011,21 +14033,113 @@ function getDaysSinceLastTrained(muscle){
   });
   return latest?Math.round((Date.now()-latest)/864e5):null;
 }
+// REVIEW WINDOW TOGGLE (2026-09-10, user's explicit request): lets the Review tab display either
+// the existing rolling-trailing-7-days window (the same convention MUSCLE_VOLUME_WINDOW_DAYS uses
+// everywhere else in the app — Auto Session dosing, ramp targets, getVolumeRecommendation, etc.)
+// or a calendar-Monday-aligned "current week" window (same Monday convention as getWeekBuckets /
+// Home's Weekly Consistency chart). This ONLY changes what the Review tab displays — it does NOT
+// touch MUSCLE_VOLUME_WINDOW_DAYS, getMuscleVolume, or getVolumeRecommendation's own default
+// window, so every other real training decision in the app keeps rolling from right now exactly
+// as before (per the explicit design intent noted on MUSCLE_VOLUME_WINDOW_DAYS/getWeekBuckets).
+function getReviewWindowStart(){
+  const now=new Date();
+  if(state.reviewWindowMode==='calendar'){
+    const day=now.getDay();
+    const diffToMonday=(day===0?-6:1-day);
+    return new Date(now.getFullYear(),now.getMonth(),now.getDate()+diffToMonday);
+  }
+  return new Date(now-7*864e5);
+}
+// How many days the current Review window actually spans, for display/copy purposes (e.g. "3/8
+// sets over the last 3 days" early in a calendar week, rather than misleadingly saying 7).
+function getReviewWindowDays(){
+  if(state.reviewWindowMode==='calendar'){
+    const day=new Date().getDay();
+    return day===0?7:day; // Monday=1 day in, ... Sunday=7 (full week elapsed)
+  }
+  return 7;
+}
+function getReviewWindowLabel(short){
+  return state.reviewWindowMode==='calendar'?(short?'this wk':'this week'):(short?'7d':'last 7 days');
+}
+function setReviewWindowMode(mode){
+  if(state.reviewWindowMode===mode)return;
+  state.reviewWindowMode=mode;
+  save();
+  renderReview();
+}
+// Muscle-volume tally for the Review tab specifically, using getReviewWindowStart() instead of the
+// fixed rolling MUSCLE_VOLUME_WINDOW_DAYS cutoff every other volume reader in the app uses — same
+// per-set crediting (getExerciseVolumeCredit + secondary-muscle fraction) as getMuscleVolume, just
+// windowed differently so the toggle above can drive it. Deliberately a separate function (not a
+// refactor of getMuscleVolume) so Auto Session, ramps, and every other existing caller of
+// getMuscleVolume/getMuscleGroupVolumes are completely unaffected by this toggle.
+function getMuscleVolumeForReview(muscle){
+  const wa=getReviewWindowStart();
+  let sets=0;
+  (state.history||[]).filter(w=>w&&new Date(w.date)>=wa).forEach(w=>(w.exercises||[]).forEach(ex=>{
+    if(!ex)return;
+    const exData=getExercise(ex.exId);if(!exData)return;
+    const credit=getExerciseVolumeCredit(ex);
+    if(exData.muscle===muscle)sets+=credit;
+    else if(exData.secondary&&exData.secondary.split(',').some(s=>s.trim()===muscle))sets+=credit*getSecondaryMuscleFraction(exData,muscle);
+  }));
+  return Math.round(sets*10)/10;
+}
+function getMuscleGroupVolumesForReview(){
+  const ms={};MUSCLE_GROUPS.forEach(m=>{ms[m]=getMuscleVolumeForReview(m);});
+  return ms;
+}
+// Single-gauge visual for one muscle's Review row (2026-09-10, replacing the earlier three-bars
+// version — see CSS comment on .lm-gauge for why). Four colour zones with fixed meaning across
+// every muscle (under MEV / building MEV\u2013MAV / solid MAV\u2013MRV / over MRV) so the zone a muscle is
+// in reads instantly from colour, plus one marker pin at the actual volume with its number on it.
+// The scale extends a little past whichever is larger of MRV or the current volume, so an
+// over-MRV muscle still shows accurately instead of pinning uselessly at the right edge.
+const LM_ZONE_COLORS={under:'#ff8c0055',building:'#47c8ff55',solid:'#2ed57355',over:'#ff475755'};
+function landmarkGaugeHtml(m,vol,lm){
+  if(!lm||!(lm.mrv>0))return '';
+  const mev=lm.mev||0,mav=Math.max(lm.mav||0,mev),mrv=Math.max(lm.mrv,mav);
+  const scaleMax=Math.max(mrv*1.1,vol*1.05,1);
+  const pct=v=>Math.max(0,Math.min(100,v/scaleMax*100));
+  const zUnder=pct(mev),zBuilding=pct(mav)-pct(mev),zSolid=pct(mrv)-pct(mav),zOver=100-pct(mrv);
+  const markerPos=Math.max(2,Math.min(98,pct(vol)));
+  return '<div class="lm-gauge">'
+    +'<div class="lm-gauge-marker-val" style="left:'+markerPos+'%">'+vol+'</div>'
+    +'<div class="lm-gauge-track">'
+    +'<div class="lm-gauge-zone" style="width:'+zUnder+'%;background:'+LM_ZONE_COLORS.under+'"></div>'
+    +'<div class="lm-gauge-zone" style="width:'+zBuilding+'%;background:'+LM_ZONE_COLORS.building+'"></div>'
+    +'<div class="lm-gauge-zone" style="width:'+zSolid+'%;background:'+LM_ZONE_COLORS.solid+'"></div>'
+    +'<div class="lm-gauge-zone" style="width:'+zOver+'%;background:'+LM_ZONE_COLORS.over+'"></div>'
+    +'<div class="lm-gauge-divider" style="left:'+pct(mev)+'%"></div>'
+    +'<div class="lm-gauge-divider" style="left:'+pct(mav)+'%"></div>'
+    +'<div class="lm-gauge-divider" style="left:'+pct(mrv)+'%"></div>'
+    +'<div class="lm-gauge-marker" style="left:'+markerPos+'%"></div>'
+    +'</div>'
+    +'<div class="lm-gauge-caption"><span>MEV '+lm.mev+'</span><span>MAV '+lm.mav+'</span><span>MRV '+lm.mrv+'</span></div>'
+    +'</div>';
+}
 function renderReview(){
   const c=document.getElementById('review-content');c.innerHTML='';
-  const{ww}=getWeeklyMuscleVolume(7); // rolling last-7-days stats below (workout count, total volume, RPE, streak) — NOT calendar-Monday-aligned, despite what an earlier version of this comment claimed; corrected 2026-08-09 after that mischaracterization caused real confusion. The Home page's Weekly Consistency chart (getWeekBuckets) is the one genuinely calendar/Monday-aligned thing in the app, and stays that way per user's explicit preference — every other window in FORGE (this one included) rolls from right now.
-  const ms=getMuscleGroupVolumes(); // muscle-vs-landmark comparisons: flat rolling 7 days (see MUSCLE_VOLUME_WINDOW_DAYS/getMuscleVolume)
+  const windowStart=getReviewWindowStart();
+  const windowDays=getReviewWindowDays();
+  const windowLabel=getReviewWindowLabel();
+  const{ww}=getWeeklyMuscleVolume(windowStart); // top stats (workout count, total volume, RPE, streak) — trailing-7-days by default, or calendar-Monday "current week" when the toggle below is set. The Home page's Weekly Consistency chart (getWeekBuckets) remains the one thing in FORGE that's ALWAYS calendar/Monday-aligned regardless of this toggle, per the user's explicit preference there.
+  const ms=getMuscleGroupVolumesForReview(); // muscle-vs-landmark comparisons, windowed the same way as the toggle above (see getMuscleVolumeForReview) — separate from getMuscleGroupVolumes/getMuscleVolume, which stay on the fixed rolling MUSCLE_VOLUME_WINDOW_DAYS and keep driving Auto Session/ramp decisions untouched by this toggle.
   const now=new Date();
   let vol=0,sets=0,rpeAll=[];const days=new Set();let consec=0;
   ww.forEach(w=>{if(!w)return;days.add(new Date(w.date).toDateString());(w.exercises||[]).forEach(ex=>{if(!ex)return;const useRIR=!!ex.useRIR;(ex.sets||[]).forEach(s=>{if(s&&s.done&&s.type!=='partials'){sets++;vol+=(s.weight||0)*(s.reps||0);if(s.rpe!=null)rpeAll.push(useRIR?(10-s.rpe):s.rpe);}});});});
   for(let i=0;i<7;i++){const d=new Date(now-i*864e5);if(days.has(d.toDateString()))consec++;else break;}
   const avgRPE=rpeAll.length?(rpeAll.reduce((a,b)=>a+b,0)/rpeAll.length).toFixed(1):'—';
-  const statsHtml='<div class="week-stat-row" style="padding:14px 16px 0">'
+  const toggleHtml='<div class="review-window-toggle">'
+    +'<div class="sort-chip'+(state.reviewWindowMode!=='calendar'?' active':'')+'" onclick="setReviewWindowMode(\'trailing\')">Trailing 7 Days</div>'
+    +'<div class="sort-chip'+(state.reviewWindowMode==='calendar'?' active':'')+'" onclick="setReviewWindowMode(\'calendar\')">Current Week</div>'
+    +'</div>';
+  const statsHtml=toggleHtml+'<div class="week-stat-row" style="padding:14px 16px 0">'
     +'<div class="week-stat"><div class="week-stat-val">'+ww.length+'</div><div class="week-stat-lbl">Workouts</div></div>'
     +'<div class="week-stat"><div class="week-stat-val">'+sets+'</div><div class="week-stat-lbl">Sets</div></div>'
     +'<div class="week-stat"><div class="week-stat-val">'+(vol/1000).toFixed(1)+'t</div><div class="week-stat-lbl">Volume</div></div>'
     +'<div class="week-stat"><div class="week-stat-val" style="color:var(--orange)">'+avgRPE+'</div><div class="week-stat-lbl">Avg Effort</div></div></div>';
-  const maxS=Math.max(...Object.values(ms),1);
   // Redesign (2026-08-07): each trained muscle's volume-recommendation status now renders as a
   // chip right on its own bar row (sorted attention-first — pain/at-MRV/high-fatigue/below-MEV
   // ahead of building/solid) instead of ALSO repeating as a full sentence in the Suggestions list
@@ -14038,7 +14152,11 @@ function renderReview(){
   // would've kept showing a bar for Glutes/Core (no chip/caption, just a naked number) even after
   // excluding them from landmark tracking below. Requiring state.volumeLandmarks[m] up front hides
   // them from Review entirely, consistent with Auto Routine (which already keys off the same dict).
-  const trainedWithRec=MUSCLE_GROUPS.filter(m=>ms[m]>0&&state.volumeLandmarks[m]).map(m=>({m,rec:getVolumeRecommendation(m)}));
+  // UPDATED (2026-09-10, user's explicit request): rec is now computed off THIS window's volume
+  // (ms[m]/windowDays via the volOverride/windowDaysOverride params) so the status chip/reason text
+  // stays consistent with whichever window the toggle above has selected, instead of always reading
+  // the fixed rolling-7-day volume regardless of what the bars themselves are showing.
+  const trainedWithRec=MUSCLE_GROUPS.filter(m=>ms[m]>0&&state.volumeLandmarks[m]).map(m=>({m,rec:getVolumeRecommendation(m,ms[m],windowDays)}));
   trainedWithRec.sort((a,b)=>{
     const ai=a.rec?VOLUME_STATUS_ORDER.indexOf(a.rec.status):999;
     const bi=b.rec?VOLUME_STATUS_ORDER.indexOf(b.rec.status):999;
@@ -14046,15 +14164,13 @@ function renderReview(){
   });
   const barsHtml=trainedWithRec.map(({m,rec})=>{
     const lm=state.volumeLandmarks[m];
-    const lmCaption=lm?'MEV '+lm.mev+' \u00b7 MAV '+lm.mav+' \u00b7 MRV '+lm.mrv:'';
     const meta=rec?VOLUME_STATUS_META[rec.status]:null;
     const chip=meta?statusChipHtml(meta.icon,meta.label,meta.color):'';
     const needsReason=rec&&rec.status!=='building'&&rec.status!=='mav-to-mrv';
     return '<div class="muscle-bar-wrap"><div class="muscle-bar-label"><span style="font-weight:600">'+m+'</span>'
-      +'<span style="display:flex;align-items:center;gap:6px"><span class="text3 small">'+ms[m]+' sets / 7d</span>'+chip+'</span></div>'
-      +'<div class="muscle-bar-track"><div class="muscle-bar-fill" style="width:'+Math.round(ms[m]/maxS*100)+'%;background:'+(MUSCLE_COLORS[m]||'#aaa')+'"></div></div>'
-      +(lmCaption?'<div class="text3 small" style="text-align:right;margin-top:2px">'+lmCaption+'</div>':'')
-      +(needsReason?'<div class="small text2" style="margin-top:3px;line-height:1.4">'+rec.action+'</div>':'')
+      +'<span style="display:flex;align-items:center;gap:6px"><span class="text3 small">'+ms[m]+' sets / '+windowLabel+'</span>'+chip+'</span></div>'
+      +landmarkGaugeHtml(m,ms[m],lm)
+      +(needsReason?'<div class="small text2" style="margin-top:5px;line-height:1.4">'+rec.action+'</div>':'')
       +'</div>';
   }).join('');
   const zeroVolMuscles=MUSCLE_GROUPS.filter(m=>!ms[m]&&m!=='Full Body');
@@ -14104,12 +14220,12 @@ function renderReview(){
     if(!sugg.length)sugg.push({i:'🏆',t:'Excellent week! Great muscle balance and consistent frequency. Keep it up.'});
   }
   c.innerHTML=statsHtml
-    +'<div class="section-label">Muscle Volume (last 7 days)</div>'
+    +'<div class="section-label">Muscle Volume ('+windowLabel+')</div>'
     +'<div class="review-card" style="margin:0 16px 10px">'
     +(!ww.length?'<div class="small text2" style="text-align:center;padding:14px 0">Complete workouts to see your breakdown</div>':'')
     +barsHtml
     +(neverTrained.length&&ww.length?'<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)"><div class="small text3" style="margin-bottom:5px">NOT TRAINED YET</div>'+neverTrained.map(m=>'<span class="muscle-tag">'+m+'</span>').join('')+'</div>':'')
-    +(outsideCadence.length&&ww.length?'<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)"><div class="small text3" style="margin-bottom:5px">NOT TRAINED IN THE LAST 7 DAYS</div>'+outsideCadence.map(m=>{const d=getDaysSinceLastTrained(m);return '<span class="muscle-tag">'+m+(d!=null?' · '+d+'d ago':'')+'</span>';}).join('')+'</div>':'')
+    +(outsideCadence.length&&ww.length?'<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)"><div class="small text3" style="margin-bottom:5px">NOT TRAINED '+(state.reviewWindowMode==='calendar'?'THIS WEEK':'IN THE LAST 7 DAYS')+'</div>'+outsideCadence.map(m=>{const d=getDaysSinceLastTrained(m);return '<span class="muscle-tag">'+m+(d!=null?' · '+d+'d ago':'')+'</span>';}).join('')+'</div>':'')
     +(restingMuscles.length&&ww.length?'<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)"><div class="small text3" style="margin-bottom:5px">🩹 RESTING — EXERCISES MARKED INJURED</div>'+restingMuscles.map(m=>'<span class="muscle-tag">'+m+'</span>').join('')+'</div>':'')
     +'</div>'
     +'<div class="section-label">Personal Records</div>'
