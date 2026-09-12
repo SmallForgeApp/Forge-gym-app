@@ -693,7 +693,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-12.4</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-12.5</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -10850,7 +10850,7 @@ function openAutoSessionModal(mesoIdx){
   const input=document.getElementById('auto-session-minutes');if(input)input.value='';
   const setsInput=document.getElementById('auto-session-sets');if(setsInput)setsInput.value='';
   const est=document.getElementById('auto-session-default-estimate');
-  if(est)est.textContent='Default if left blank: ~'+getDefaultAutoSessionMinutes()+' min (everything due today, per the scheduler below)';
+  if(est)est.textContent='Default if left blank: ~'+getDefaultAutoSessionMinutes()+' min (everything due today, per the explanation above)';
   openModal('modal-auto-session');
 }
 // Home screen entry point (2026-08-21, user's explicit request for a dedicated home-screen
@@ -11084,17 +11084,24 @@ function startPreviewedAutoRoutine(){
 // own — no further ÷4 assumption needed on top of it. Left blank now means "everything due today,"
 // which is the more honest default given the new model actually knows what's due and what isn't.
 // No longer takes mesoIdx — Auto Routine's own scheduler needs no meso at all now.
-function getAutoRoutineTotalDueNow(){
-  const activeSet=getAutoRoutineActiveMuscles();
-  return Object.keys(state.volumeLandmarks||{}).reduce((sum,muscle)=>{
-    if(isAutoRoutineMuscleFullyResting(muscle))return sum;
-    return sum+getMuscleExposureDose(muscle,activeSet).dose;
-  },0);
-}
+// getAutoRoutineTotalDueNow (the per-muscle-dose-summing helper that used to live here) was removed
+// 2026-09-12 — its only remaining caller (getDefaultAutoSessionMinutes, below) now runs the real
+// buildAutoSession(null,null,null) directly instead, so the modal's displayed estimate can never
+// drift from what actually gets built (see that function's own comment).
+// BUG FIX (2026-09-12, user-reported — "the time doesn't match the proposed routine"): this used to
+// estimate via totalDue*ISOLATION_SET_SECONDS — a flat isolation-only rate applied to a raw total
+// SET COUNT summed across muscles, with no idea which specific exercises would actually be picked
+// (compound vs isolation) or any superset-adjusted overhead. The real preview (see estMinutes below)
+// has always used the accurate per-exercise, compound-aware estimatePicksSeconds on the REAL picks —
+// so the two numbers could genuinely diverge (confirmed: this modal showed ~28 min for a session
+// that built out to ~39 min once compounds like Bench Press and Romanian Deadlift were actually
+// selected). Fixed by just running the real blank-mode build and feeding its real picks through the
+// exact same estimatePicksSeconds the preview uses — same numbers, calculated the same way, because
+// it's now literally the same code path instead of two parallel approximations that could disagree.
 function getDefaultAutoSessionMinutes(){
-  const totalDue=getAutoRoutineTotalDueNow();
-  if(totalDue<=0)return 30; // nothing currently owed anywhere — short floor rather than 0
-  return Math.max(20,Math.round(totalDue*ISOLATION_SET_SECONDS/60));
+  const picks=buildAutoSession(null,null,null);
+  if(!picks||!picks.length)return 30; // nothing currently owed anywhere — short floor rather than 0
+  return Math.max(20,Math.round(estimatePicksSeconds(picks)/60));
 }
 // BUG FIX (found via external test handover, same day): this used to synthesize a numeric budget
 // even when the field was left blank (falling back to getDefaultAutoSessionMinutes()) and pass
