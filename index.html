@@ -693,7 +693,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-11.3</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-11.6</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -3726,6 +3726,13 @@ function savePoolExerciseEdit(){
     state.autoRoutineFixedExIds=state.autoRoutineFixedExIds.filter(id=>id!==oldExId);
     state.autoRoutineFixedExIds.push(resolved.id);
   }
+  // Same transfer for tracker (2026-09-11) — an exercise being tracked shouldn't lose that just
+  // because it got edited/replaced with a new id.
+  if(resolved.id!==oldExId&&state.autoRoutineMuscleTracker){
+    Object.keys(state.autoRoutineMuscleTracker).forEach(mu=>{
+      if(state.autoRoutineMuscleTracker[mu]===oldExId)state.autoRoutineMuscleTracker[mu]=resolved.id;
+    });
+  }
   save();
   editingPoolExId=null;
   closeModal('modal-edit-exercise');
@@ -5163,6 +5170,50 @@ function getRecentNormalTopSets(exId,count){
     if(!ex)continue;
     const normalSets=(ex.sets||[]).filter(s=>s.done&&(!s.type||s.type==='normal'));
     if(normalSets.length)out.push({...normalSets[0],useRIR:!!ex.useRIR,date:w.date});
+  }
+  return out;
+}
+// Was `exId` actually FRESH for `muscle` in workout `w` — i.e. did it go before every OTHER
+// exercise hitting the same muscle that session, rather than after one or more of them already
+// put in real work? Order within w.exercises reflects performed order (exercises are appended as
+// they're started/added during a session — nothing in FORGE reorders this array after the fact).
+function wasExerciseFreshForMuscleInWorkout(w,exId,muscle){
+  for(const ex of(w.exercises||[])){
+    if(ex.exId===exId)return true; // reached this exercise without another same-muscle exercise landing real work first
+    const exData=getExercise(ex.exId);
+    if(exData&&exData.muscle===muscle&&(ex.sets||[]).some(s=>s.done))return false;
+  }
+  return true;
+}
+// FRESH-ONLY variant of getRecentNormalTopSets (2026-09-11, user's explicit report): "this
+// exercise's set 1 this week vs its set 1 last week" is only a fair strength comparison if the
+// exercise actually WENT FIRST for its muscle both times. Auto Routine doesn't lock exercise order
+// for a muscle session to session — the same exercise can land 1st (fresh) one week and 3rd (after
+// two other exercises already fatigued the same muscle) the next, purely from how that session
+// happened to get built, with zero real strength change behind it. Comparing those two "set 1"s
+// as if they were equivalent data points reads as a decline that isn't one. Used only by the
+// struggle/decline signal and the trend multiplier below — NOT a general-purpose replacement for
+// getRecentNormalTopSets, which other callers (progression prefill, PR checks, etc.) correctly want
+// as "whatever actually happened last time," fatigue context and all.
+// UPDATED (2026-09-11, user's explicit request): compares each session's BEST/heaviest logged set
+// for the exercise, not just whichever set was logged first — same "top set" convention
+// getMesoReviewData already uses, for the same reason (a first-array-entry ramp/warm-up set
+// shouldn't be able to make real progress read as flat or declining).
+function getRecentFreshNormalTopSets(exId,muscle,count){
+  const exDataForSkip=getExercise(exId);
+  const muscleForSkip=exDataForSkip&&exDataForSkip.muscle;
+  const out=[];
+  for(let i=0;i<state.history.length&&out.length<count;i++){
+    const w=state.history[i];
+    if(muscleForSkip&&w.sorenessImpact&&w.sorenessImpact[muscleForSkip]===2)continue;
+    const ex=(w.exercises||[]).find(e=>e.exId===exId);
+    if(!ex)continue;
+    if(!wasExerciseFreshForMuscleInWorkout(w,exId,muscle))continue; // fatigued by an earlier same-muscle exercise that session — not a fair comparison point, skip it entirely rather than let it masquerade as a fresh reading
+    const normalSets=(ex.sets||[]).filter(s=>s.done&&(!s.type||s.type==='normal'));
+    if(normalSets.length){
+      const top=normalSets.reduce((a,b)=>(b.weight||0)>(a.weight||0)?b:a,normalSets[0]);
+      out.push({...top,useRIR:!!ex.useRIR,date:w.date});
+    }
   }
   return out;
 }
@@ -8968,6 +9019,26 @@ function getDaysSinceExerciseTrained(exId){
 function isAutoRoutineFixed(exId){
   return!!(state.autoRoutineFixedExIds&&state.autoRoutineFixedExIds.includes(exId));
 }
+// TRACKING EXERCISE PER MUSCLE (2026-09-11, user's explicit request — deliberately NOT the same as
+// "pin"/isAutoRoutineFixed above): pinning forces an exercise to the front of the pool ranking so
+// it's first EVERY session its muscle trains. A tracker does nothing to ranking at all — it goes
+// through the exact same freshness round-robin as every other pool exercise, and only becomes
+// "first for its muscle" whenever that's genuinely its natural turn. Its only effect is on which
+// data getAutoRoutineMuscleDeclineSignal reads (see there): if a muscle has a designated tracker,
+// the struggling check watches ONLY that exercise's fresh top-set history instead of running a
+// majority vote across the whole pool — one consistent, deliberately-chosen exercise accumulating
+// real data on its own natural cadence, rather than needing several exercises to each independently
+// build up enough. One tracker per muscle; picking a new one replaces whichever was set before.
+function isAutoRoutineTracker(exId,muscle){
+  return!!(state.autoRoutineMuscleTracker&&state.autoRoutineMuscleTracker[muscle]===exId);
+}
+function toggleAutoRoutineTracker(exId,muscle){
+  if(!state.autoRoutineMuscleTracker)state.autoRoutineMuscleTracker={};
+  if(state.autoRoutineMuscleTracker[muscle]===exId)delete state.autoRoutineMuscleTracker[muscle];
+  else state.autoRoutineMuscleTracker[muscle]=exId;
+  save();
+  renderAutoRoutinePoolList();
+}
 function rankCandidatesForMuscle(muscle,excludeExId){
   const candidateIds=new Set();
   if(state.autoRoutinePool&&state.autoRoutinePool.length){
@@ -9254,23 +9325,42 @@ function getPerfHopDirection(a,b){
   if(c<0&&(b.weight||0)>(a.weight||0))return 0; // weight went UP — never a regression, even if e1RM dipped from a bigger proportional rep reset
   return c;
 }
+// Shared hop-comparison core (2026-09-11): does ONE exercise's fresh top-set history show a
+// decline? true = declining, false = not declining, null = not enough comparable data yet. Used
+// both by the tracker-only path and the whole-pool fallback below, so the actual up/down logic
+// lives in exactly one place.
+function getExerciseFreshDeclineVerdict(exId,muscle){
+  const recent=getRecentFreshNormalTopSets(exId,muscle,3); // index 0 = most recent
+  if(recent.length<2)return null; // not enough data on this exercise to have an opinion
+  const points=[...recent].reverse(); // oldest -> newest
+  let up=false,down=false,comparedAny=false;
+  for(let i=1;i<points.length;i++){
+    const gapDays=(new Date(points[i].date)-new Date(points[i-1].date))/864e5;
+    if(gapDays>AUTO_ROUTINE_BREAK_RECOVERY_WINDOW_DAYS)continue; // not comparable across a real training gap — skip, don't count toward up/down at all
+    comparedAny=true;
+    const c=getPerfHopDirection(points[i-1],points[i]);
+    if(c>0)up=true;if(c<0)down=true;
+  }
+  if(!comparedAny)return null; // every pair spanned a break-sized gap — same "not enough data" treatment as recent.length<2 above
+  return down&&!up;
+}
+// UPDATED (2026-09-11, user's explicit request/design): if this muscle has a designated tracking
+// exercise (state.autoRoutineMuscleTracker — set via the 🎯 button in Edit Pool, distinct from 📌
+// pin), the struggling check watches ONLY that exercise — no majority vote needed, since there's a
+// single deliberately-chosen source of truth instead of needing several exercises to each build up
+// enough independent data. Falls back to the original whole-pool majority vote for any muscle
+// without a designated tracker, so nothing changes for muscles the user hasn't set one up for yet.
 function getAutoRoutineMuscleDeclineSignal(muscle){
+  const trackerExId=state.autoRoutineMuscleTracker&&state.autoRoutineMuscleTracker[muscle];
+  if(trackerExId&&!isExerciseInjured(trackerExId)){
+    return getExerciseFreshDeclineVerdict(trackerExId,muscle)===true;
+  }
   const exIds=getAutoRoutineCandidateExIds(muscle).filter(id=>!isExerciseInjured(id));
   let declining=0,notDeclining=0;
   exIds.forEach(exId=>{
-    const recent=getRecentNormalTopSets(exId,3); // index 0 = most recent
-    if(recent.length<2)return; // not enough data on this exercise to have an opinion
-    const points=[...recent].reverse(); // oldest -> newest
-    let up=false,down=false,comparedAny=false;
-    for(let i=1;i<points.length;i++){
-      const gapDays=(new Date(points[i].date)-new Date(points[i-1].date))/864e5;
-      if(gapDays>AUTO_ROUTINE_BREAK_RECOVERY_WINDOW_DAYS)continue; // not comparable across a real training gap — skip, don't count toward up/down at all
-      comparedAny=true;
-      const c=getPerfHopDirection(points[i-1],points[i]);
-      if(c>0)up=true;if(c<0)down=true;
-    }
-    if(!comparedAny)return; // every pair spanned a break-sized gap — same "not enough data" treatment as recent.length<2 above, doesn't count toward either side of the vote
-    if(down&&!up)declining++;else notDeclining++;
+    const verdict=getExerciseFreshDeclineVerdict(exId,muscle);
+    if(verdict===null)return; // not enough data on this exercise to have an opinion
+    if(verdict)declining++;else notDeclining++;
   });
   if(declining===0)return false;
   return declining>notDeclining; // majority of the muscle's own exercises must agree, not just one
@@ -9283,7 +9373,7 @@ function getAutoRoutineMuscleTrendMultiplier(muscle){
   const exIds=getAutoRoutineCandidateExIds(muscle).filter(id=>!isExerciseInjured(id));
   let up=0,down=0;
   exIds.forEach(exId=>{
-    const recent=getRecentNormalTopSets(exId,3);
+    const recent=getRecentFreshNormalTopSets(exId,muscle,3); // fresh-only (2026-09-11), same reasoning as the decline signal above
     if(recent.length<2)return;
     const points=[...recent].reverse();
     let sawUp=false,sawDown=false;
@@ -9427,12 +9517,25 @@ function getAutoRoutineMrvActiveMuscles(){
   // not an eligibility gate) and deliberately does NOT feed into the plain AUTOMATIC backfill
   // further down — override only ever applies to a muscle the user personally chose.
   const overrideSet=state.autoRoutineForceOverride||{};
+  // SELF-EXPIRING (2026-09-11, user's explicit follow-up concern — "will it go all the way through
+  // to hardcap since the deload data has sort of been overridden?"): yes, previously, permanently —
+  // override was a one-way switch with no way back on. Now it only holds while the ORIGINAL block
+  // is still true; the instant this muscle would pass the normal check on its own again (pain/
+  // fatigue/decline cleared, or it's no longer resting), the override is dropped so a genuinely NEW
+  // struggle signal later can still evict it like any other muscle. "Already at target" is the one
+  // reason that typically never self-resolves this way (more volume just pushes progress further
+  // past target) — which is expected: overriding that reason means "keep pushing past the ceiling
+  // on purpose," and it should stay in effect for as long as that's still what's happening.
   const isSlotValid=(mu)=>{
     if(!rec[mu])return false;
     if(mavMuscles.has(mu))return false;
     const ageDays=Math.round((Date.now()-new Date(rec[mu]))/864e5);
     if(ageDays>=AUTO_ROUTINE_ACTIVE_BLOCK_DAYS)return false;
-    if(overrideSet[mu])return true;
+    if(overrideSet[mu]){
+      const stillBlocked=isAutoRoutineMuscleStruggling(mu)||isAutoRoutineMuscleFullyResting(mu)||getAutoRoutineMuscleProgress(mu)>=getMuscleLandmarks(mu).mrv;
+      if(!stillBlocked)delete overrideSet[mu];
+      return true;
+    }
     if(isAutoRoutineMuscleStruggling(mu)||isAutoRoutineMuscleFullyResting(mu))return false;
     if(getAutoRoutineMuscleProgress(mu)>=getMuscleLandmarks(mu).mrv)return false;
     return true;
@@ -9495,7 +9598,11 @@ function getAutoRoutineMavActiveMuscles(){
     if(!rec[mu])return false;
     const ageDays=Math.round((Date.now()-new Date(rec[mu]))/864e5);
     if(ageDays>=AUTO_ROUTINE_ACTIVE_BLOCK_DAYS)return false; // same tenure ceiling as the MRV pool — target-agnostic by design (handover's own note)
-    if(overrideSet[mu])return true; // manual override (2026-09-11) — see MRV pool's matching comment
+    if(overrideSet[mu]){ // self-expiring override (2026-09-11) — see MRV pool's matching comment
+      const stillBlocked=isAutoRoutineMuscleStruggling(mu)||isAutoRoutineMuscleFullyResting(mu)||getAutoRoutineMuscleProgress(mu)>=getMuscleLandmarks(mu).mav;
+      if(!stillBlocked)delete overrideSet[mu];
+      return true;
+    }
     if(isAutoRoutineMuscleStruggling(mu)||isAutoRoutineMuscleFullyResting(mu))return false;
     if(getAutoRoutineMuscleProgress(mu)>=getMuscleLandmarks(mu).mav)return false; // evicts once it reaches ITS target (MAV), not MRV
     return true;
@@ -9956,6 +10063,37 @@ function getMuscleExposureDose(muscle,activeSet,picks){
 // concept with no clean standalone equivalent built yet) and for tagging the resulting workout's
 // meso context. Everything about WHAT gets trained and how much is fully independent of it.
 const AUTO_ROUTINE_MIN_SESSION_SETS=10; // handover spec §2, 2026-09-05: default-mode floor — a default-mode session below this gets padded if eligible work allows it, or flagged "below floor" (not silently delivered tiny) if it genuinely can't reach it
+// TRACKER ORDERING (2026-09-11, user's explicit correction of my first attempt): pin forces an
+// exercise to the FRONT of selection every session; a tracker must do NOTHING to selection at all
+// — the exact same round-robin decides which exercises get picked and how many sets each gets,
+// completely untouched. This ONLY runs after that's already decided, and only reorders: if the
+// muscle's designated tracker (state.autoRoutineMuscleTracker) ended up among this session's picks
+// for its muscle — however it got there, on whatever normal turn of the rotation — it's swapped to
+// occupy that muscle's earliest slot, so it's the first exercise trained for its muscle whenever it
+// shows up at all, not only on the session where round-robin would've put it first anyway. A pure
+// position swap between two entries — never adds, removes, or changes the set count of anything —
+// so wasExerciseFreshForMuscleInWorkout (which only looks at each same-muscle entry's RELATIVE
+// order, ignoring other muscles' entries in between) sees the tracked exercise as fresh whenever
+// it's present, without the fresh-data outcome depending on which specific session happened to
+// rank it first.
+function applyMuscleTrackerOrdering(picks){
+  const tracker=state.autoRoutineMuscleTracker;
+  if(!tracker)return picks;
+  const firstIndexForMuscle={};
+  picks.forEach((p,i)=>{if(firstIndexForMuscle[p.muscle]===undefined)firstIndexForMuscle[p.muscle]=i;});
+  Object.keys(firstIndexForMuscle).forEach(mu=>{
+    const trackedExId=tracker[mu];
+    if(!trackedExId)return;
+    const earliestIdx=firstIndexForMuscle[mu];
+    if(picks[earliestIdx].exId===trackedExId)return; // already first for its muscle this session — nothing to do
+    const trackedIdx=picks.findIndex(p=>p.muscle===mu&&p.exId===trackedExId);
+    if(trackedIdx===-1)return; // tracked exercise wasn't selected for this muscle at all this session — selection is untouched, so nothing to reorder
+    const tmp=picks[earliestIdx];
+    picks[earliestIdx]=picks[trackedIdx];
+    picks[trackedIdx]=tmp;
+  });
+  return picks;
+}
 function buildAutoSession(mesoIdx,minutesAvailable,setsBudget){
   if(minutesAvailable!=null&&minutesAvailable<=0)minutesAvailable=null; // defensive: a non-positive budget from any future caller means "no real budget," not "build nothing" — confirmAutoSession's own UI path already guards this, this just protects other/future callers
   if(setsBudget!=null&&setsBudget<=0)setsBudget=null; // same defensive guard, sets-budget side (§3)
@@ -10115,7 +10253,7 @@ function buildAutoSession(mesoIdx,minutesAvailable,setsBudget){
       picks.autoRoutineBelowFloor=true; // real 3rd state — confirmAutoSession checks this to show "No session due" instead of either a tiny session or the plain "nothing due" message
     }
   }
-  return picks;
+  return applyMuscleTrackerOrdering(picks);
 }
 const WARN_SESSION_MINUTES_THRESHOLD=120; // 2026-08-21, user's explicit ask: warn (never hard-block) once a built session is unusually long, regardless of whether that length matches what was actually requested — a real 3-hour ask should still get the warning, per the user's own description; they just override it.
 // Known-superset auto-linking (2026-08-21, user's explicit request — "is there a way of it
@@ -10483,6 +10621,12 @@ function toggleAutoRoutinePoolExercise(exId){
       const fi=state.autoRoutineFixedExIds.indexOf(exId);
       if(fi>=0)state.autoRoutineFixedExIds.splice(fi,1);
     }
+    // Same invariant for tracker (2026-09-11) — can't track an exercise that's no longer a candidate.
+    if(state.autoRoutineMuscleTracker){
+      Object.keys(state.autoRoutineMuscleTracker).forEach(mu=>{
+        if(state.autoRoutineMuscleTracker[mu]===exId)delete state.autoRoutineMuscleTracker[mu];
+      });
+    }
   }else{
     state.autoRoutinePool.push(exId);
   }
@@ -10540,6 +10684,12 @@ function bulkSetAutoRoutinePoolTab(add){
   if(!add&&state.autoRoutineFixedExIds&&state.autoRoutineFixedExIds.length){
     state.autoRoutineFixedExIds=state.autoRoutineFixedExIds.filter(id=>pool.has(id));
   }
+  // Same invariant for tracker (2026-09-11) — see toggleAutoRoutinePoolExercise's comment.
+  if(!add&&state.autoRoutineMuscleTracker){
+    Object.keys(state.autoRoutineMuscleTracker).forEach(mu=>{
+      if(!pool.has(state.autoRoutineMuscleTracker[mu]))delete state.autoRoutineMuscleTracker[mu];
+    });
+  }
   save();
   renderAutoRoutinePoolList();
 }
@@ -10566,6 +10716,7 @@ function renderAutoRoutinePoolList(){
     const items=byMuscle[muscle].map(ex=>{
       const checked=pool.has(ex.id);
       const fixed=isAutoRoutineFixed(ex.id);
+      const tracked=isAutoRoutineTracker(ex.id,muscle);
       return'<div style="display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid var(--border)">'
         +'<div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0" onclick="toggleAutoRoutinePoolExercise(\''+ex.id+'\')">'
           +'<input type="checkbox" '+(checked?'checked':'')+' style="width:auto;pointer-events:none;flex-shrink:0"/>'
@@ -10573,6 +10724,7 @@ function renderAutoRoutinePoolList(){
         +'</div>'
         +'<button class="btn btn-ghost btn-sm" style="flex-shrink:0;padding:4px 8px" onclick="event.stopPropagation();openEditPoolExerciseModal(\''+ex.id+'\')" title="Edit this exercise">✏️</button>'
         +'<button class="btn btn-ghost btn-sm" style="flex-shrink:0;padding:4px 8px'+(fixed?';color:var(--accent)':'')+'" onclick="event.stopPropagation();toggleAutoRoutineFixed(\''+ex.id+'\')" title="'+(fixed?'Unfix':'Always use this one for '+escHtml(muscle))+'">'+(fixed?'📌 Fixed':'📌')+'</button>'
+        +'<button class="btn btn-ghost btn-sm" style="flex-shrink:0;padding:4px 8px'+(tracked?';color:var(--accent)':'')+'" onclick="event.stopPropagation();toggleAutoRoutineTracker(\''+ex.id+'\',\''+muscle+'\')" title="'+(tracked?'Stop tracking':'Track this one\u2019s progress for '+escHtml(muscle)+'\u2019s struggling check (no ranking change, just what data gets compared)')+'">'+(tracked?'🎯 Tracking':'🎯')+'</button>'
         +'</div>';
     }).join('');
     return'<div style="margin-top:12px"><div class="small text3" style="font-weight:700;text-transform:uppercase;letter-spacing:0.5px">'+escHtml(muscle)+'</div>'+items+'</div>';
