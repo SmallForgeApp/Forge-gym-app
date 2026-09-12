@@ -693,7 +693,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-12.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-12.3</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -3956,6 +3956,18 @@ function checkPriorityReorderAfterEdit(routineId){
 // STANDING RULE going forward: nothing added to this unconditional startup path may be allowed to
 // throw uncaught, since the failure mode isn't local to the feature that broke — it cascades and
 // kills unrelated parts of the app that happen to be defined later in the file.
+// BUG FOUND & FIXED (2026-09-12, audit pass): LM_ZONE_COLORS used to be declared with `const`
+// down near landmarkGaugeHtml (~line 14438 in the old layout), but renderReview() below is called
+// unconditionally at startup — hundreds of lines before that declaration would run. Every single
+// load threw a ReferenceError here (calling something before its `const` initializes), silently
+// swallowed by this exact try/catch, so the Review tab never actually rendered on first load — it
+// sat blank until manually tapped into (landmarkGaugeHtml works fine on every call AFTER this
+// point, once the const has genuinely initialized further down the script). Moved the declaration
+// up here, before anything can call it.
+// Same TDZ-before-startup bug as LM_ZONE_COLORS above: renderReview -> renderReviewPRBody
+// references this before its original `let` declaration (further down the file) would have run.
+let reviewPRsOpenMuscles=new Set();
+const LM_ZONE_COLORS={under:'#ff8c0055',building:'#47c8ff55',solid:'#2ed57355',over:'#ff475755'};
 [renderRoutinesList,renderExerciseDB,renderHistory,renderReview].forEach(fn=>{
   try{fn();}catch(e){console.error(fn.name+' failed during startup:',e);}
 });
@@ -6510,7 +6522,7 @@ function getMesoReviewData(m){
   return{exerciseSummaries,muscleSummaries};
 }
 let mesoReviewOpenMuscles=new Set();
-let reviewPRsOpenMuscles=new Set();
+// reviewPRsOpenMuscles moved up near the startup render list (2026-09-12 audit fix).
 function renderReviewPRBody(){
   const body=document.getElementById('review-prs-body');if(!body)return;
   let byMuscle;
@@ -10010,33 +10022,46 @@ function getMuscleExposureInfo(muscle,activeSet){
 // Floor prevents scaling all the way to a token near-zero dose after a very long layoff.
 const AUTO_ROUTINE_BREAK_RECOVERY_WINDOW_DAYS=14;
 const AUTO_ROUTINE_BREAK_SCALE_FLOOR=0.5;
-// LOOK-AHEAD ROLL-OFF SMOOTHING (2026-09-12, user's explicit request): getMuscleExposureDose only
-// ever compared today's rolling-7-day delivered volume against target — a muscle that got one big
-// session on day 0 reads "target met" for the next ~7 days, then the instant that session's sets
-// age out of the window, remaining jumps back to the full weekly figure in one step and the
-// scheduler wants another equally-big session immediately. That's a boom-bust cycle, not a smooth
-// one, and it's structural: the trailing window has no way to see its own future contents.
-// AUTO_ROUTINE_LOOKAHEAD_DAYS looks forward that many days and asks "how much of what's currently
-// counted as delivered is about to fall out of the window regardless of anything trained between
-// now and then?" — that's real, already-known information (it's just today's history, re-read from
-// a future vantage point), not a prediction. AUTO_ROUTINE_LOOKAHEAD_PULL_FACTOR governs how much of
-// that soon-to-reappear deficit gets pulled into TODAY's dose rather than left for the day it
-// actually opens up: 0 = today's original purely-reactive behaviour, 1 = fully close the gap now.
-// Deliberately left under 1 by default — closing the whole future gap today would just move the
-// same boom-bust cliff two days earlier rather than removing it, plus every pulled-forward set only
-// ever gets added on top of a muscle that's already eligible today (see getMuscleExposureDose) and
-// still capped at exposureCap, so this can reduce how choppy the ramp toward that cap is but can
-// never make a session skip the muscle's own minimum recovery gate or exceed its per-exposure safety
-// ceiling — the two guardrails that actually bound overshoot risk.
-const AUTO_ROUTINE_LOOKAHEAD_DAYS=2;
-const AUTO_ROUTINE_LOOKAHEAD_PULL_FACTOR=0.5;
+// LOOK-AHEAD ROLL-OFF HANDLING (2026-09-12, user's explicit request, revised same day after two
+// follow-up catches — see history below): getMuscleExposureDose only ever compared today's
+// rolling-7-day delivered volume against target — a muscle that got one big session on day 0 reads
+// "target met" for the next ~7 days, then the instant that session's sets age out of the window,
+// remaining jumps back to the full weekly figure in one step and the scheduler wants another
+// equally-big session immediately. Boom-bust, not smooth, and structural: the trailing window has
+// no way to see its own future contents.
+//
+// REVISION 1 (abandoned): a fixed AUTO_ROUTINE_LOOKAHEAD_DAYS=2 horizon with a damped
+// AUTO_ROUTINE_LOOKAHEAD_PULL_FACTOR=0.5 pulled half of the soon-to-expire deficit into today's
+// dose, leaving "the rest" for a session later in that 2-day window. Two problems, both caught by
+// the user before this shipped further: (a) for any muscle whose own minGapDays is >= the horizon
+// (Chest, Quads, Hamstrings all sit at minGapDays=2 here), training today to pull volume forward
+// makes the muscle ineligible again before that 2-day window closes — the "half left for later" has
+// nowhere to land, so the framing of spreading delivery across the next two days was never actually
+// achievable for those muscles; and (b) simulating many consecutive daily checks showed the fixed
+// horizon/fraction never actually re-converges on target — the same aging block of history can get
+// flagged as "about to expire" on more than one check-day in a row with no memory of volume already
+// pulled forward for it, so the rolling total settles into a standing ~15-35%+ overshoot rather than
+// a one-off smoothing bump.
+//
+// REVISION 2 (current): the horizon is each muscle's own minGapDays, not a fixed constant — i.e.
+// "how much of what's delivered will expire before I could possibly be trained a second time." If
+// that's non-zero, there IS no second chance to split it with, so the full amount is pulled forward
+// (bounded by exposureCap) rather than a guessed fraction. Simulation showed this alone still
+// converges to a stable but elevated cycle (~25-33% over target) because ordinary daily reactive
+// top-ups stack on top of the periodic pulled-forward one. AUTO_ROUTINE_LOOKAHEAD_ROLLING_CEILING
+// is the backstop that actually holds it at target: it caps the muscle's real rolling-7-day total
+// (the same figure Review/MRV checks read), not just this session's contribution, so no combination
+// of reactive + pulled-forward dosing — however often checked — can push it past that ceiling.
+// Simulated result at 1.1: holds flat at ~9 sets against an 8-set target, indefinitely, no drift.
+const AUTO_ROUTINE_LOOKAHEAD_ROLLING_CEILING=1.1;
 // Same walk/credit logic as getMuscleVolume, restricted to the slice of the CURRENT rolling window
 // that will fall out of it within the next `horizonDays` — i.e. sets old enough today that they'll
 // no longer count toward `getMuscleVolume`'s cutoff once `horizonDays` pass, with nothing new
 // trained in between. `directOnly` mirrors getAutoRoutineDeliveredSoFar's own priority/back-burner
 // split (priority muscles are judged on direct volume alone — see that function's comment) so the
 // look-ahead reads "what's expiring" in exactly the same terms as "what's delivered" for this
-// muscle, rather than silently mixing the two definitions.
+// muscle, rather than silently mixing the two definitions. Callers pass the muscle's own minGapDays
+// as horizonDays (see getMuscleExposureDose) rather than a fixed constant — see REVISION 2 above.
 function getMuscleExpiringVolume(muscle,horizonDays,directOnly){
   const windowDays=MUSCLE_VOLUME_WINDOW_DAYS;
   const nowCutoff=new Date(Date.now()-windowDays*864e5);
@@ -10088,26 +10113,41 @@ function getMuscleExposureDose(muscle,activeSet,picks){
   // automatically — no special-casing "first session" needed or wanted here.
   const delivered=getAutoRoutineDeliveredSoFar(muscle,activeSet,picks);
   const remaining=Math.max(0,weeklyTargetNow-delivered);
-  // LOOK-AHEAD (see AUTO_ROUTINE_LOOKAHEAD_DAYS comment above): how much of `delivered` is about to
-  // expire out of the rolling window within the look-ahead horizon, purely from the calendar moving
-  // forward — nothing assumed about future training. isPriority mirrors getAutoRoutineDeliveredSoFar's
-  // own direct-only-for-priority split so "expiring" and "delivered" are counted the same way.
+  // LOOK-AHEAD (see REVISION 2 in the comment above getMuscleExpiringVolume): the horizon is this
+  // muscle's OWN minGapDays — how much of `delivered` will expire before a second session could
+  // possibly happen at all — not a fixed constant. If that's non-zero there is no session to split
+  // it with, so the full amount is what's pulled forward (still bounded below by the rolling
+  // ceiling, and by exposureCap same as the reactive path). isPriority mirrors
+  // getAutoRoutineDeliveredSoFar's own direct-only-for-priority split so "expiring" and "delivered"
+  // are counted in the same terms.
   const isPriority=activeSet.has(muscle);
-  const expiring=getMuscleExpiringVolume(muscle,AUTO_ROUTINE_LOOKAHEAD_DAYS,isPriority);
+  const expiring=getMuscleExpiringVolume(muscle,info.minGapDays,isPriority);
   const projectedRemaining=Math.max(0,weeklyTargetNow-(delivered-expiring));
-  const lookAheadNeed=Math.max(0,projectedRemaining-remaining);
-  const pullForward=Math.round(lookAheadNeed*AUTO_ROUTINE_LOOKAHEAD_PULL_FACTOR);
-  if(remaining<=0&&pullForward<=0)return{...info,weeklyTargetNow,dose:0}; // genuinely nothing needed now OR about to be needed soon
+  const unrecoverableNeed=Math.max(0,projectedRemaining-remaining);
+  // ROLLING CEILING BACKSTOP: cap against the muscle's actual rolling-7-day total (the same figure
+  // Review/MRV checks read), not just this session's contribution — this is what actually holds the
+  // line at target across repeated daily checks; the feasibility-anchored horizon alone still let
+  // ordinary daily reactive top-ups stack with the periodic pulled-forward one (confirmed via
+  // simulation: ~25-35% standing overshoot without this line, flat ~1.1x WITH it).
+  const currentRolling=getMuscleVolume(muscle).sets;
+  const rollingCeiling=weeklyTargetNow*AUTO_ROUTINE_LOOKAHEAD_ROLLING_CEILING;
+  const maxAllowedAdd=Math.max(0,Math.round(rollingCeiling-currentRolling));
+  const pullForward=Math.min(Math.round(unrecoverableNeed),maxAllowedAdd);
+  if(remaining<=0&&pullForward<=0)return{...info,weeklyTargetNow,dose:0}; // genuinely nothing needed now, nothing unrecoverable, or the ceiling's already full
   const idealSessionsPerWeek=7/info.idealGapDays;
   const baseDose=Math.min(info.exposureCap,remaining/idealSessionsPerWeek);
   let scaleFactor=1;
   if(info.daysSince!=null&&info.daysSince>info.idealGapDays){
     scaleFactor=Math.max(AUTO_ROUTINE_BREAK_SCALE_FLOOR,Math.min(1,1-(info.daysSince-info.idealGapDays)/AUTO_ROUTINE_BREAK_RECOVERY_WINDOW_DAYS));
   }
-  const reactiveDose=remaining>0?Math.max(1,Math.round(baseDose*scaleFactor)):0;
-  // Same exposureCap ceiling as the purely-reactive path above — pulling volume forward can smooth
-  // the ramp but can never push a single session past this muscle's per-exposure safety limit.
-  const dose=Math.min(info.exposureCap,reactiveDose+pullForward);
+  const reactiveDoseRaw=remaining>0?Math.max(1,Math.round(baseDose*scaleFactor)):0;
+  // The reactive dose is also subject to the same rolling ceiling — this is the piece that was
+  // missing before: without it, a normal reactive session logged right after a pulled-forward one
+  // could still push the total past the ceiling.
+  const reactiveDose=Math.min(reactiveDoseRaw,maxAllowedAdd);
+  // Same exposureCap ceiling as before — pulling volume forward can smooth the ramp but can never
+  // push a single session past this muscle's per-exposure safety limit.
+  const dose=Math.min(info.exposureCap,Math.min(reactiveDose+pullForward,maxAllowedAdd));
   return{...info,weeklyTargetNow,dose,pulledForward:Math.max(0,dose-reactiveDose)};
 }
 // 2026-08-29: mesoIdx is now OPTIONAL (nullable) — Auto Routine no longer needs an active meso for
@@ -14407,7 +14447,8 @@ function getMuscleGroupVolumesForReview(){
 // in reads instantly from colour, plus one marker pin at the actual volume with its number on it.
 // The scale extends a little past whichever is larger of MRV or the current volume, so an
 // over-MRV muscle still shows accurately instead of pinning uselessly at the right edge.
-const LM_ZONE_COLORS={under:'#ff8c0055',building:'#47c8ff55',solid:'#2ed57355',over:'#ff475755'};
+// LM_ZONE_COLORS moved up near the startup render list (2026-09-12 audit fix) — renderReview() is
+// called unconditionally at startup, before this point in the file would otherwise have run.
 function landmarkGaugeHtml(m,vol,lm){
   if(!lm||!(lm.mrv>0))return '';
   const mev=lm.mev||0,mav=Math.max(lm.mav||0,mev),mrv=Math.max(lm.mrv,mav);
