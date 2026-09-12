@@ -693,7 +693,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-10.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-11.3</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -2563,7 +2563,14 @@ function getLastSets(exId,routineId){
     const w=state.history[i];
     if(muscleForSkip&&w.sorenessImpact&&w.sorenessImpact[muscleForSkip]===2)continue;
     const ex=(w.exercises||[]).find(e=>e.exId===exId);
-    if(ex&&ex.sets&&ex.sets.length){
+    // BUG FIX (2026-09-11, user-reported): used to be ex.sets.length>0, which counts an exercise
+    // that was SEEDED into a workout but never actually touched (an Auto Session exercise the user
+    // ran out of time for — every set still done:false) as a real "last session" for it. That
+    // planted a phantom 0kg/0-set entry as the most recent match, so the very next time this
+    // exercise came up, PREV/target prefill read "last time: nothing" instead of skipping past the
+    // untouched session to the real last time it was actually trained. Now requires at least one
+    // done set before a workout counts as this exercise's last real session.
+    if(ex&&ex.sets&&ex.sets.some(s=>s.done)){
       const mapped=ex.sets.map(s=>({...s,useRIR:!!ex.useRIR}));
       if(routineId&&w.routineId===routineId)return mapped;
       if(!fallback)fallback=mapped;
@@ -8264,7 +8271,10 @@ function getNormalSetAtSessionsAgo(exId,normalIdx,n,routineId){
     if(routineId&&w.routineId!==routineId)continue;
     if(muscle&&w.sorenessImpact&&w.sorenessImpact[muscle]===2)continue;
     const ex=(w.exercises||[]).find(e=>e.exId===exId);
-    if(ex&&ex.sets&&ex.sets.length){
+    // Same fix as getLastSets (2026-09-11, user-reported) — an exercise seeded but never actually
+    // done this session (all sets done:false) must not count as a real "session ago" for this
+    // exercise, or a skipped/ran-out-of-time exercise silently shifts every later lookback by one.
+    if(ex&&ex.sets&&ex.sets.some(s=>s.done)){
       if(count===n){
         const normal=ex.sets.filter(s=>!s.type||s.type==='normal');
         const s=normal[normalIdx]||normal[normal.length-1];
@@ -8321,7 +8331,8 @@ function getSetAtSessionsAgo(exId,setIdx,n,routineId){
     if(routineId&&w.routineId!==routineId)continue;
     if(muscle&&w.sorenessImpact&&w.sorenessImpact[muscle]===2)continue;
     const ex=(w.exercises||[]).find(e=>e.exId===exId);
-    if(ex&&ex.sets&&ex.sets.length){
+    // Same fix as getLastSets (2026-09-11, user-reported) — see its comment.
+    if(ex&&ex.sets&&ex.sets.some(s=>s.done)){
       if(count===n){
         const s=ex.sets[setIdx]||ex.sets[ex.sets.length-1];
         return s?{...s,useRIR:!!ex.useRIR}:null;
@@ -9407,16 +9418,30 @@ function getAutoRoutineMrvActiveMuscles(){
   // muscle the user deliberately placed on the MAV track the moment it's evicted from state once,
   // since nothing previously stopped it being auto-selected again on a later call.
   const mavMuscles=getAutoRoutineRawPoolMuscles('autoRoutineMavActiveMuscles');
+  // MANUAL OVERRIDE OF UNAVAILABLE (2026-09-11, user's explicit request — "override an unavailable
+  // priority muscle"): a muscle the user explicitly force-picked DESPITE it being struggling/
+  // resting/already-at-target is tracked here (shared between both tracks, since a muscle is only
+  // ever on one at a time) so it doesn't get silently evicted again the very next time this
+  // function runs — which is what "safety" checks alone would otherwise do to it immediately.
+  // Deliberately does NOT bypass the hard tenure age-ceiling below (that's a forced-completion cap,
+  // not an eligibility gate) and deliberately does NOT feed into the plain AUTOMATIC backfill
+  // further down — override only ever applies to a muscle the user personally chose.
+  const overrideSet=state.autoRoutineForceOverride||{};
   const isSlotValid=(mu)=>{
     if(!rec[mu])return false;
     if(mavMuscles.has(mu))return false;
     const ageDays=Math.round((Date.now()-new Date(rec[mu]))/864e5);
     if(ageDays>=AUTO_ROUTINE_ACTIVE_BLOCK_DAYS)return false;
+    if(overrideSet[mu])return true;
     if(isAutoRoutineMuscleStruggling(mu)||isAutoRoutineMuscleFullyResting(mu))return false;
     if(getAutoRoutineMuscleProgress(mu)>=getMuscleLandmarks(mu).mrv)return false;
     return true;
   };
-  const canForcePriority=(mu)=>!mavMuscles.has(mu)&&!isAutoRoutineMuscleStruggling(mu)&&!isAutoRoutineMuscleFullyResting(mu)&&getAutoRoutineMuscleProgress(mu)<getMuscleLandmarks(mu).mrv;
+  const canForcePriority=(mu)=>{
+    if(mavMuscles.has(mu))return false;
+    if(overrideSet[mu])return true;
+    return!isAutoRoutineMuscleStruggling(mu)&&!isAutoRoutineMuscleFullyResting(mu)&&getAutoRoutineMuscleProgress(mu)<getMuscleLandmarks(mu).mrv;
+  };
   // MANUAL OVERRIDE (2026-09-06): a manually-forced muscle claims a slot before the normal readiness
   // competition even runs — it's exempt from having to WIN a readiness comparison against another
   // candidate, but NOT exempt from the same natural exit checks everyone else faces (struggling,
@@ -9434,8 +9459,11 @@ function getAutoRoutineMrvActiveMuscles(){
   });
   if(keep.length<AUTO_ROUTINE_MAX_ACTIVE_MUSCLES){
     const allMuscles=Object.keys(state.volumeLandmarks||{});
+    // Deliberately NOT canForcePriority here — plain automatic backfill must never pick up an
+    // override-only muscle on its own; override only ever applies to a muscle the user personally
+    // force-picked, never to something the system selects for itself.
     const candidates=allMuscles
-      .filter(mu=>!keep.includes(mu)&&canForcePriority(mu))
+      .filter(mu=>!keep.includes(mu)&&!mavMuscles.has(mu)&&!isAutoRoutineMuscleStruggling(mu)&&!isAutoRoutineMuscleFullyResting(mu)&&getAutoRoutineMuscleProgress(mu)<getMuscleLandmarks(mu).mrv)
       .map(mu=>({mu,score:getAutoRoutineMuscleReadiness(mu)}))
       .filter(x=>x.score>0)
       .sort((a,b)=>b.score-a.score);
@@ -9462,10 +9490,12 @@ function getAutoRoutineMavActiveMuscles(){
   if(!state.autoRoutineMavActiveMuscles)state.autoRoutineMavActiveMuscles={};
   if(!state.autoRoutineMavManualPriority)state.autoRoutineMavManualPriority=[];
   const rec=state.autoRoutineMavActiveMuscles;
+  const overrideSet=state.autoRoutineForceOverride||{};
   const isSlotValid=(mu)=>{
     if(!rec[mu])return false;
     const ageDays=Math.round((Date.now()-new Date(rec[mu]))/864e5);
     if(ageDays>=AUTO_ROUTINE_ACTIVE_BLOCK_DAYS)return false; // same tenure ceiling as the MRV pool — target-agnostic by design (handover's own note)
+    if(overrideSet[mu])return true; // manual override (2026-09-11) — see MRV pool's matching comment
     if(isAutoRoutineMuscleStruggling(mu)||isAutoRoutineMuscleFullyResting(mu))return false;
     if(getAutoRoutineMuscleProgress(mu)>=getMuscleLandmarks(mu).mav)return false; // evicts once it reaches ITS target (MAV), not MRV
     return true;
@@ -9541,11 +9571,15 @@ function getAutoRoutineMuscleRampMode(muscle){
 // manual list is already full (2), or lets getAutoRoutineActiveMuscles' own logic evict a non-manual
 // auto-selected slot on the next call if that's what's needed to make room. Silently no-ops (returns
 // false) if the muscle itself isn't a legitimate candidate at all (struggling/resting/already at MRV)
-// — a manual override picks WHICH muscle competes, it doesn't waive real recovery/status signals.
-function forceAutoRoutineActiveMuscle(muscle){
+// UNLESS override is explicitly true (2026-09-11, user's explicit request — "override an unavailable
+// priority muscle"), in which case it's force-added anyway and marked so it doesn't get silently
+// evicted again the very next time selection runs (see getAutoRoutineMrvActiveMuscles' overrideSet).
+function forceAutoRoutineActiveMuscle(muscle,override){
   if(!state.autoRoutineManualPriority)state.autoRoutineManualPriority=[];
-  if(isAutoRoutineMuscleStruggling(muscle)||isAutoRoutineMuscleFullyResting(muscle))return false;
-  if(getAutoRoutineMuscleProgress(muscle)>=getMuscleLandmarks(muscle).mrv)return false;
+  if(!state.autoRoutineForceOverride)state.autoRoutineForceOverride={};
+  const ineligible=isAutoRoutineMuscleStruggling(muscle)||isAutoRoutineMuscleFullyResting(muscle)||getAutoRoutineMuscleProgress(muscle)>=getMuscleLandmarks(muscle).mrv;
+  if(ineligible&&!override)return false;
+  if(override)state.autoRoutineForceOverride[muscle]=true;else delete state.autoRoutineForceOverride[muscle];
   removeAutoRoutineMavActiveMuscle(muscle); // mutual exclusion — a muscle can only be in one pool at a time (2026-09-09 handover)
   state.autoRoutineManualPriority=state.autoRoutineManualPriority.filter(mu=>mu!==muscle);
   state.autoRoutineManualPriority.push(muscle);
@@ -9554,24 +9588,42 @@ function forceAutoRoutineActiveMuscle(muscle){
   return true;
 }
 // MAV-TRACK manual force/remove (2026-09-09 handover) — same shape as the MRV pair above, just
-// targeting getMuscleLandmarks(muscle).mav instead of .mrv, and always manual (no auto-fill to
-// re-select after a removal, since this pool never auto-fills in the first place).
-function forceAutoRoutineMavActiveMuscle(muscle){
+// targeting getMuscleLandmarks(muscle).mav instead of .mrv. override works the same way as the MRV
+// version above (2026-09-11).
+// BUG FIX (2026-09-11, user-reported — "MAV priority picks don't stick, they get auto-picked back to
+// what they were"): state.autoRoutineMavStaggerLastPairStart only ever got set INSIDE the auto-
+// stagger's own success branch in getAutoRoutineMavActiveMuscles — so if the user's current MAV pool
+// was ever built or edited manually (which is exactly what force/remove are for), that timestamp
+// could stay unset (or stale) indefinitely, leaving the stagger's `due` check permanently true. The
+// very next time ANYTHING called getAutoRoutineMavActiveMuscles (which happens constantly — Home
+// render, dosing, opening this same modal) the auto-stagger saw "due + room" and immediately added
+// another pair on top of/into the slot the user just hand-picked, often re-selecting the very muscle
+// just removed (its progress was just reset to MEV by removeAutoRoutineMavActiveMuscle, which makes
+// it look like a fresh, needy, high-readiness candidate again). Fixed: both force and remove now
+// stamp autoRoutineMavStaggerLastPairStart to now, so any manual edit restarts the stagger clock —
+// the automatic system won't try to add a new pair for a full interval after the user last touched
+// the pool by hand, giving their choice room to actually stick.
+function forceAutoRoutineMavActiveMuscle(muscle,override){
   if(!state.autoRoutineMavManualPriority)state.autoRoutineMavManualPriority=[];
-  if(isAutoRoutineMuscleStruggling(muscle)||isAutoRoutineMuscleFullyResting(muscle))return false;
-  if(getAutoRoutineMuscleProgress(muscle)>=getMuscleLandmarks(muscle).mav)return false;
+  if(!state.autoRoutineForceOverride)state.autoRoutineForceOverride={};
+  const ineligible=isAutoRoutineMuscleStruggling(muscle)||isAutoRoutineMuscleFullyResting(muscle)||getAutoRoutineMuscleProgress(muscle)>=getMuscleLandmarks(muscle).mav;
+  if(ineligible&&!override)return false;
+  if(override)state.autoRoutineForceOverride[muscle]=true;else delete state.autoRoutineForceOverride[muscle];
   removeAutoRoutineActiveMuscle(muscle); // mutual exclusion — pull it out of the MRV pool first if it was there
   state.autoRoutineMavManualPriority=state.autoRoutineMavManualPriority.filter(mu=>mu!==muscle);
   state.autoRoutineMavManualPriority.push(muscle);
   while(state.autoRoutineMavManualPriority.length>AUTO_ROUTINE_MAX_MAV_ACTIVE_MUSCLES)state.autoRoutineMavManualPriority.shift();
   if(!state.autoRoutineMavActiveMuscles)state.autoRoutineMavActiveMuscles={};
   if(!state.autoRoutineMavActiveMuscles[muscle])state.autoRoutineMavActiveMuscles[muscle]=new Date().toISOString();
+  state.autoRoutineMavStaggerLastPairStart=new Date().toISOString();
   getAutoRoutineMavActiveMuscles();
   return true;
 }
 function removeAutoRoutineMavActiveMuscle(muscle){
   if(state.autoRoutineMavManualPriority)state.autoRoutineMavManualPriority=state.autoRoutineMavManualPriority.filter(mu=>mu!==muscle);
   if(state.autoRoutineMavActiveMuscles)delete state.autoRoutineMavActiveMuscles[muscle];
+  if(state.autoRoutineForceOverride)delete state.autoRoutineForceOverride[muscle];
+  state.autoRoutineMavStaggerLastPairStart=new Date().toISOString(); // see forceAutoRoutineMavActiveMuscle's comment — a manual removal is just as much a deliberate edit as a force-pick, and must delay the next automatic pair the same way
   const lm=getMuscleLandmarks(muscle);
   if(state.autoRoutineMuscleProgress&&state.autoRoutineMuscleProgress[muscle]&&state.autoRoutineMuscleProgress[muscle].current>lm.mev){
     state.autoRoutineMuscleProgress[muscle].current=lm.mev;
@@ -9584,6 +9636,7 @@ function removeAutoRoutineMavActiveMuscle(muscle){
 function removeAutoRoutineActiveMuscle(muscle){
   if(state.autoRoutineManualPriority)state.autoRoutineManualPriority=state.autoRoutineManualPriority.filter(mu=>mu!==muscle);
   if(state.autoRoutineActiveMuscles)delete state.autoRoutineActiveMuscles[muscle];
+  if(state.autoRoutineForceOverride)delete state.autoRoutineForceOverride[muscle];
   const lm=getMuscleLandmarks(muscle);
   if(state.autoRoutineMuscleProgress&&state.autoRoutineMuscleProgress[muscle]&&state.autoRoutineMuscleProgress[muscle].current>lm.mev){
     state.autoRoutineMuscleProgress[muscle].current=lm.mev;
@@ -9976,10 +10029,19 @@ function buildAutoSession(mesoIdx,minutesAvailable,setsBudget){
         // training it anyway would silently defeat the whole point of having a minimum gap.
         const fillCandidates=orderedMuscles.filter(mu=>!includedMuscles.has(mu)&&!isAutoRoutineMuscleFullyResting(mu)&&getMuscleExposureInfo(mu,activeSet).eligible);
         fillCandidates.sort((a,b)=>getAutoRoutineMuscleReadiness(b)-getAutoRoutineMuscleReadiness(a));
-        for(const muscle of fillCandidates){
-          if(metric()>=budget)break;
-          while(metric()<budget&&growMuscleOneSet(picks,muscle,activeSet)){
+        // ROUND-ROBIN (2026-09-11, user's explicit request): when there's nothing genuinely due and
+        // this fill stage is what's actually building the whole session, one set per candidate per
+        // pass ("top up everything a bit") reads as a real full-body session — the previous
+        // max-one-muscle-out-then-move-on order could spend an entire budget on just 1-2 muscles
+        // before ever touching a third. Stage 1 above (growing muscles ALREADY due) is untouched —
+        // this only changes how brand-new, not-actually-due muscles get added when padding a session
+        // that would otherwise have nothing in it.
+        let progressed2=true;
+        while(metric()<budget&&progressed2&&fillCandidates.length){
+          progressed2=false;
+          for(const muscle of fillCandidates){
             if(metric()>=budget)break;
+            if(growMuscleOneSet(picks,muscle,activeSet))progressed2=true;
           }
         }
       }
@@ -10004,10 +10066,14 @@ function buildAutoSession(mesoIdx,minutesAvailable,setsBudget){
           const infoA=getMuscleExposureInfo(a,activeSet),infoB=getMuscleExposureInfo(b,activeSet);
           return(infoA.minGapDays-infoA.daysSince)-(infoB.minGapDays-infoB.daysSince);
         });
-        for(const muscle of pullForwardCandidates){
-          if(metric()>=budget)break;
-          while(metric()<budget&&growMuscleOneSet(picks,muscle,activeSet)){
+        // ROUND-ROBIN here too (2026-09-11, same request/reasoning as Stage 2 above) — pull-forward
+        // candidates get topped up one set at a time in soonest-due order, not maxed one at a time.
+        let progressed3=true;
+        while(metric()<budget&&progressed3&&pullForwardCandidates.length){
+          progressed3=false;
+          for(const muscle of pullForwardCandidates){
             if(metric()>=budget)break;
+            if(growMuscleOneSet(picks,muscle,activeSet))progressed3=true;
           }
         }
       }
@@ -10033,10 +10099,14 @@ function buildAutoSession(mesoIdx,minutesAvailable,setsBudget){
       const includedMuscles=new Set(picks.map(p=>p.muscle));
       const fillCandidates=orderedMuscles.filter(mu=>!includedMuscles.has(mu)&&!isAutoRoutineMuscleFullyResting(mu)&&getMuscleExposureInfo(mu,activeSet).eligible);
       fillCandidates.sort((a,b)=>getAutoRoutineMuscleReadiness(b)-getAutoRoutineMuscleReadiness(a));
-      for(const muscle of fillCandidates){
-        if(totalSets()>=AUTO_ROUTINE_MIN_SESSION_SETS)break;
-        while(totalSets()<AUTO_ROUTINE_MIN_SESSION_SETS&&growMuscleOneSet(picks,muscle,activeSet)){
+      // ROUND-ROBIN (2026-09-11, same request/reasoning as the explicit-budget branch above) — top
+      // up one set per candidate per pass rather than maxing each in turn.
+      let progressed2=true;
+      while(totalSets()<AUTO_ROUTINE_MIN_SESSION_SETS&&progressed2&&fillCandidates.length){
+        progressed2=false;
+        for(const muscle of fillCandidates){
           if(totalSets()>=AUTO_ROUTINE_MIN_SESSION_SETS)break;
+          if(growMuscleOneSet(picks,muscle,activeSet))progressed2=true;
         }
       }
     }
@@ -10306,10 +10376,14 @@ function extendActiveAutoSession(addMinutes,addSets,allowExceedCap){
     const includedMuscles=new Set(picks.map(p=>p.muscle));
     const fillCandidates=orderedMuscles.filter(mu=>!includedMuscles.has(mu)&&!isAutoRoutineMuscleFullyResting(mu)&&getMuscleExposureInfo(mu,activeSet).eligible);
     fillCandidates.sort((a,b)=>getAutoRoutineMuscleReadiness(b)-getAutoRoutineMuscleReadiness(a));
-    for(const muscle of fillCandidates){
-      if(metric()>=budget)break;
-      while(metric()<budget&&growMuscleOneSet(picks,muscle,activeSet,allowExceedCap)){
+    // ROUND-ROBIN (2026-09-11, same request/reasoning as buildAutoSession's matching stage) — one
+    // set per candidate per pass, not maxed one muscle at a time.
+    let progressed2=true;
+    while(metric()<budget&&progressed2&&fillCandidates.length){
+      progressed2=false;
+      for(const muscle of fillCandidates){
         if(metric()>=budget)break;
+        if(growMuscleOneSet(picks,muscle,activeSet,allowExceedCap))progressed2=true;
       }
     }
   }
@@ -10324,10 +10398,13 @@ function extendActiveAutoSession(addMinutes,addSets,allowExceedCap){
       const infoA=getMuscleExposureInfo(a,activeSet),infoB=getMuscleExposureInfo(b,activeSet);
       return(infoA.minGapDays-infoA.daysSince)-(infoB.minGapDays-infoB.daysSince);
     });
-    for(const muscle of pullForwardCandidates){
-      if(metric()>=budget)break;
-      while(metric()<budget&&growMuscleOneSet(picks,muscle,activeSet,allowExceedCap)){
+    // ROUND-ROBIN here too, same reasoning.
+    let progressed3=true;
+    while(metric()<budget&&progressed3&&pullForwardCandidates.length){
+      progressed3=false;
+      for(const muscle of pullForwardCandidates){
         if(metric()>=budget)break;
+        if(growMuscleOneSet(picks,muscle,activeSet,allowExceedCap))progressed3=true;
       }
     }
   }
@@ -10560,12 +10637,25 @@ let autoSessionOriginalSets=null;
 // a currently-active one). Week count is CALENDAR-based (matches getAutoRoutineActiveRampTarget's
 // own day-based schedule, not session count) — floor(elapsedDays/7)+1, capped at the display ceiling
 // (AUTO_ROUTINE_RAMP_HARD_CAP_DAYS/7=6) since that's the real forced-completion point.
+// UNAVAILABLE REASON (2026-09-11, user's explicit request — "override an unavailable priority
+// muscle"): explains WHY a muscle currently fails the normal MRV/MAV eligibility check, so the
+// override confirm() below can tell the user what they're overriding rather than a bare "are you
+// sure?". Returns null when the muscle is actually eligible (no override needed).
+function getAutoRoutineMuscleUnavailableReason(muscle,mode){
+  if(isAutoRoutineMuscleFullyResting(muscle))return muscle+'\u2019s exercises are all currently marked injured/resting';
+  if(isAutoRoutineMuscleStruggling(muscle))return muscle+' is currently flagged as struggling (pain, high fatigue, or a real decline signal)';
+  const lm=getMuscleLandmarks(muscle);
+  const target=mode==='mav'?lm.mav:lm.mrv;
+  if(getAutoRoutineMuscleProgress(muscle)>=target)return muscle+' has already reached its '+(mode==='mav'?'MAV':'MRV')+' target';
+  return null;
+}
 function renderAutoRoutinePriorityStatusHtml(){
   const mrvSet=getAutoRoutineMrvActiveMuscles();
   const mavSet=getAutoRoutineMavActiveMuscles();
   const hardCapWeeks=Math.round(AUTO_ROUTINE_RAMP_HARD_CAP_DAYS/7);
   const targetWeeks=Math.round(AUTO_ROUTINE_RAMP_TARGET_DAYS/7);
   const allMuscles=Object.keys(state.volumeLandmarks||{});
+  const overrideSet=state.autoRoutineForceOverride||{};
   function renderTrackRows(muscleSet,tenureRecKey,manualListKey,landmarkKey,skipFn,unit){
     return[...muscleSet].map(muscle=>{
       const tenureRec=state[tenureRecKey];
@@ -10577,8 +10667,9 @@ function renderAutoRoutinePriorityStatusHtml(){
       const current=getAutoRoutineMuscleProgress(muscle);
       const pct=target>lm.mev?Math.round(Math.max(0,Math.min(1,(current-lm.mev)/(target-lm.mev)))*100):100;
       const isManual=state[manualListKey]&&state[manualListKey].includes(muscle);
+      const isOverride=!!overrideSet[muscle];
       return'<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 4px;border-bottom:1px solid var(--border)">'
-        +'<div><div class="small" style="font-weight:700">'+escHtml(muscle)+(isManual?' <span class="text3" style="font-weight:400">(manual)</span>':'')+'</div>'
+        +'<div><div class="small" style="font-weight:700">'+escHtml(muscle)+(isManual?' <span class="text3" style="font-weight:400">(manual)</span>':'')+(isOverride?' <span class="text3" style="font-weight:400">(overridden)</span>':'')+'</div>'
         +'<div class="small text3">week '+week+'/'+hardCapWeeks+' (target: '+targetWeeks+') \u2014 '+Math.round(current*10)/10+'/'+target+' sets ('+pct+'% to '+unit+')</div></div>'
         +'<button class="btn btn-ghost btn-sm" onclick="'+skipFn+'(\''+muscle+'\')">Skip</button>'
         +'</div>';
@@ -10588,17 +10679,20 @@ function renderAutoRoutinePriorityStatusHtml(){
   const mavRows=renderTrackRows(mavSet,'autoRoutineMavActiveMuscles','autoRoutineMavManualPriority','mav','confirmRemoveAutoRoutineMavActiveMuscle','MAV');
   const prioritized=new Set([...mrvSet,...mavSet]);
   const backBurnerMuscles=allMuscles.filter(mu=>!prioritized.has(mu));
+  // UPDATED (2026-09-11, user's explicit request — "override an unavailable priority muscle"): both
+  // buttons now ALWAYS render, even when the muscle currently fails the normal eligibility check —
+  // labeled with a \u26a0\ufe0f so it's clear tapping it will ask to override rather than silently no-op
+  // (the old behavior hid the button entirely and showed a dead-end "unavailable" label instead).
   const backBurnerRows=backBurnerMuscles.map(muscle=>{
     const lm=getMuscleLandmarks(muscle);
     const current=getAutoRoutineMuscleProgress(muscle);
-    const canForceMrv=!isAutoRoutineMuscleStruggling(muscle)&&!isAutoRoutineMuscleFullyResting(muscle)&&current<lm.mrv;
-    const canForceMav=!isAutoRoutineMuscleStruggling(muscle)&&!isAutoRoutineMuscleFullyResting(muscle)&&current<lm.mav;
+    const mavReason=getAutoRoutineMuscleUnavailableReason(muscle,'mav');
+    const mrvReason=getAutoRoutineMuscleUnavailableReason(muscle,'mrv');
     return'<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 4px;border-bottom:1px solid var(--border)">'
       +'<div class="small">'+escHtml(muscle)+' <span class="text3">('+Math.round(current*10)/10+'/'+lm.mev+' MEV)</span></div>'
       +'<div style="display:flex;gap:4px">'
-      +(canForceMav?'<button class="btn btn-ghost btn-sm" onclick="confirmForceAutoRoutineMavActiveMuscle(\''+muscle+'\')">MAV priority</button>':'')
-      +(canForceMrv?'<button class="btn btn-ghost btn-sm" onclick="confirmForceAutoRoutineActiveMuscle(\''+muscle+'\')">MRV priority</button>':'')
-      +(!canForceMav&&!canForceMrv?'<span class="small text3">unavailable</span>':'')
+      +'<button class="btn btn-ghost btn-sm" onclick="confirmForceAutoRoutineMavActiveMuscle(\''+muscle+'\')">MAV priority'+(mavReason?' \u26a0\ufe0f':'')+'</button>'
+      +'<button class="btn btn-ghost btn-sm" onclick="confirmForceAutoRoutineActiveMuscle(\''+muscle+'\')">MRV priority'+(mrvReason?' \u26a0\ufe0f':'')+'</button>'
       +'</div></div>';
   }).join('');
   const mrvOn=state.autoRoutineMrvTrackEnabled!==false;
@@ -10648,21 +10742,33 @@ function confirmRemoveAutoRoutineMavActiveMuscle(muscle){
   document.getElementById('auto-routine-priority-body').innerHTML=renderAutoRoutinePriorityStatusHtml();
 }
 function confirmForceAutoRoutineActiveMuscle(muscle){
-  const mrvSet=getAutoRoutineMrvActiveMuscles();
-  const msg=mrvSet.size>=AUTO_ROUTINE_MAX_ACTIVE_MUSCLES
-    ?'Make '+muscle+' priority now? This will bump whichever current priority muscle has the lowest readiness to make room.'
-    :'Make '+muscle+' priority now?';
+  const reason=getAutoRoutineMuscleUnavailableReason(muscle,'mrv');
+  let msg;
+  if(reason){
+    msg='Heads up: '+reason+'. Override and make it MRV priority anyway?';
+  }else{
+    const mrvSet=getAutoRoutineMrvActiveMuscles();
+    msg=mrvSet.size>=AUTO_ROUTINE_MAX_ACTIVE_MUSCLES
+      ?'Make '+muscle+' priority now? This will bump whichever current priority muscle has the lowest readiness to make room.'
+      :'Make '+muscle+' priority now?';
+  }
   if(!confirm(msg))return;
-  forceAutoRoutineActiveMuscle(muscle);
+  forceAutoRoutineActiveMuscle(muscle,!!reason);
   document.getElementById('auto-routine-priority-body').innerHTML=renderAutoRoutinePriorityStatusHtml();
 }
 function confirmForceAutoRoutineMavActiveMuscle(muscle){
-  const mavSet=getAutoRoutineMavActiveMuscles();
-  const msg=mavSet.size>=AUTO_ROUTINE_MAX_MAV_ACTIVE_MUSCLES
-    ?'Add '+muscle+' to the MAV track now? This will bump the oldest MAV-track muscle to make room.'
-    :'Add '+muscle+' to the MAV track now?';
+  const reason=getAutoRoutineMuscleUnavailableReason(muscle,'mav');
+  let msg;
+  if(reason){
+    msg='Heads up: '+reason+'. Override and add it to the MAV track anyway?';
+  }else{
+    const mavSet=getAutoRoutineMavActiveMuscles();
+    msg=mavSet.size>=AUTO_ROUTINE_MAX_MAV_ACTIVE_MUSCLES
+      ?'Add '+muscle+' to the MAV track now? This will bump the oldest MAV-track muscle to make room.'
+      :'Add '+muscle+' to the MAV track now?';
+  }
   if(!confirm(msg))return;
-  forceAutoRoutineMavActiveMuscle(muscle);
+  forceAutoRoutineMavActiveMuscle(muscle,!!reason);
   document.getElementById('auto-routine-priority-body').innerHTML=renderAutoRoutinePriorityStatusHtml();
 }
 function renderAutoRoutineWeeklyProgressHtml(picks){
