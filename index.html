@@ -693,7 +693,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-12.3</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-12.4</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -10124,15 +10124,26 @@ function getMuscleExposureDose(muscle,activeSet,picks){
   const expiring=getMuscleExpiringVolume(muscle,info.minGapDays,isPriority);
   const projectedRemaining=Math.max(0,weeklyTargetNow-(delivered-expiring));
   const unrecoverableNeed=Math.max(0,projectedRemaining-remaining);
-  // ROLLING CEILING BACKSTOP: cap against the muscle's actual rolling-7-day total (the same figure
-  // Review/MRV checks read), not just this session's contribution — this is what actually holds the
-  // line at target across repeated daily checks; the feasibility-anchored horizon alone still let
-  // ordinary daily reactive top-ups stack with the periodic pulled-forward one (confirmed via
-  // simulation: ~25-35% standing overshoot without this line, flat ~1.1x WITH it).
-  const currentRolling=getMuscleVolume(muscle).sets;
+  // ROLLING CEILING BACKSTOP — TWO separate references (2026-09-12, revised after the first attempt
+  // at this fix caused Biceps to diverge to ~1.6x in re-simulation rather than converging): reactive
+  // top-up and pull-forward need DIFFERENT ceiling references, not one shared number.
+  // - Reactive dosing is genuinely NEW volume stacked on top of what's really there right now
+  //   (including today's own live in-session credit — see getAutoRoutineDeliveredSoFar) — so it must
+  //   be capped against the REAL current total (`delivered`), or it keeps adding on top of an
+  //   already-inflated total. This is what the first attempt broke: subtracting `expiring` from the
+  //   reactive-side reference made the ceiling systematically looser on ordinary days too (there's
+  //   always SOME volume "about to expire" in steady-state training), not just on genuine look-ahead
+  //   days — confirmed via simulation: Biceps climbed to ~1.6x and kept climbing, never settling.
+  // - Pull-forward exists specifically to REPLACE volume that's about to disappear, so ITS ceiling
+  //   should be judged against the total AFTER that volume actually falls off (`delivered-expiring`)
+  //   — otherwise (the original bug, confirmed with real user data) a muscle whose current total is
+  //   mostly made of soon-to-expire sets reads as "already at the ceiling" and a genuine pull-forward
+  //   need gets silently zeroed out (Chest: 8.5/8 sets, 5.5 about to expire, a real 5-set need, but
+  //   the old shared reference left ~0.3 sets of headroom and killed the dose entirely).
   const rollingCeiling=weeklyTargetNow*AUTO_ROUTINE_LOOKAHEAD_ROLLING_CEILING;
-  const maxAllowedAdd=Math.max(0,Math.round(rollingCeiling-currentRolling));
-  const pullForward=Math.min(Math.round(unrecoverableNeed),maxAllowedAdd);
+  const maxAllowedReactive=Math.max(0,Math.round(rollingCeiling-delivered));
+  const maxAllowedTotal=Math.max(0,Math.round(rollingCeiling-(delivered-expiring)));
+  const pullForward=Math.min(Math.round(unrecoverableNeed),maxAllowedTotal);
   if(remaining<=0&&pullForward<=0)return{...info,weeklyTargetNow,dose:0}; // genuinely nothing needed now, nothing unrecoverable, or the ceiling's already full
   const idealSessionsPerWeek=7/info.idealGapDays;
   const baseDose=Math.min(info.exposureCap,remaining/idealSessionsPerWeek);
@@ -10141,13 +10152,15 @@ function getMuscleExposureDose(muscle,activeSet,picks){
     scaleFactor=Math.max(AUTO_ROUTINE_BREAK_SCALE_FLOOR,Math.min(1,1-(info.daysSince-info.idealGapDays)/AUTO_ROUTINE_BREAK_RECOVERY_WINDOW_DAYS));
   }
   const reactiveDoseRaw=remaining>0?Math.max(1,Math.round(baseDose*scaleFactor)):0;
-  // The reactive dose is also subject to the same rolling ceiling — this is the piece that was
-  // missing before: without it, a normal reactive session logged right after a pulled-forward one
-  // could still push the total past the ceiling.
-  const reactiveDose=Math.min(reactiveDoseRaw,maxAllowedAdd);
+  // Reactive dosing gets the STRICTER reference (maxAllowedReactive, against the real current
+  // total) — this is the piece that fixes the overshoot: it can't push a total that's already at or
+  // past the ceiling any higher, regardless of pull-forward.
+  const reactiveDose=Math.min(reactiveDoseRaw,maxAllowedReactive);
   // Same exposureCap ceiling as before — pulling volume forward can smooth the ramp but can never
-  // push a single session past this muscle's per-exposure safety limit.
-  const dose=Math.min(info.exposureCap,Math.min(reactiveDose+pullForward,maxAllowedAdd));
+  // push a single session past this muscle's per-exposure safety limit. The COMBINED total is capped
+  // against maxAllowedTotal (the projected-after-expiry reference) since that's the number that
+  // actually determines where the rolling total settles once expiry genuinely happens.
+  const dose=Math.min(info.exposureCap,Math.min(reactiveDose+pullForward,maxAllowedTotal));
   return{...info,weeklyTargetNow,dose,pulledForward:Math.max(0,dose-reactiveDose)};
 }
 // 2026-08-29: mesoIdx is now OPTIONAL (nullable) — Auto Routine no longer needs an active meso for
