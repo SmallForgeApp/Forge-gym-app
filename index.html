@@ -693,7 +693,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-12.5</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-13.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -10054,6 +10054,13 @@ const AUTO_ROUTINE_BREAK_SCALE_FLOOR=0.5;
 // of reactive + pulled-forward dosing — however often checked — can push it past that ceiling.
 // Simulated result at 1.1: holds flat at ~9 sets against an 8-set target, indefinitely, no drift.
 const AUTO_ROUTINE_LOOKAHEAD_ROLLING_CEILING=1.1;
+// SESSION-WIDE CAP (2026-09-13, user's explicit request): the most total pulled-forward volume any
+// one session will admit across ALL muscles combined — see buildAutoSession's own comment for why
+// this exists (several muscles trained together expire together, and each one's individual
+// pull-forward need is legitimate, but nothing coordinated how many land in the same session
+// before this). Roughly "one muscle's worth of full catch-up" — enough that a single alarming
+// muscle is never throttled, but a pile-up of several defers the rest to the next real session.
+const AUTO_ROUTINE_MAX_PULLFORWARD_PER_SESSION=8;
 // Same walk/credit logic as getMuscleVolume, restricted to the slice of the CURRENT rolling window
 // that will fall out of it within the next `horizonDays` — i.e. sets old enough today that they'll
 // no longer count toward `getMuscleVolume`'s cutoff once `horizonDays` pass, with nothing new
@@ -10075,6 +10082,39 @@ function getMuscleExpiringVolume(muscle,horizonDays,directOnly){
     else if(!directOnly&&exData.secondary&&exData.secondary.split(',').some(s=>s.trim()===muscle))sets+=credit*getSecondaryMuscleFraction(exData,muscle);
   }));
   return Math.round(sets*10)/10;
+}
+// Companion to getMuscleExpiringVolume (2026-09-13, user's explicit request — "spread the pull-
+// forward across the week instead of dumping it all into one session"): confirmed via live
+// simulation that training several muscles together in one session, then not touching any of them
+// again before that session ages out of the 7-day window, made ALL of them pull forward their full
+// catch-up SIMULTANEOUSLY the moment it expired — a real 24-set, 6-muscle, 82-minute session, not
+// a hypothetical. Root cause: getMuscleExposureDose always pulled forward the ENTIRE unrecoverable
+// need in one shot, with no notion of how much runway was actually left before the deadline. This
+// tells it that: same walk/credit/directOnly logic as getMuscleExpiringVolume, but tracking the
+// OLDEST contributing workout's age instead of summing volume — that's the piece closest to
+// actually expiring, so its remaining age (windowDays-age) is the real deadline the need must be
+// fully covered by.
+function getMuscleNearestExpiryDays(muscle,horizonDays,directOnly){
+  const windowDays=MUSCLE_VOLUME_WINDOW_DAYS;
+  const nowCutoff=new Date(Date.now()-windowDays*864e5);
+  const futureCutoff=new Date(Date.now()+(horizonDays-windowDays)*864e5);
+  let oldestAgeDays=null;
+  (state.history||[]).forEach(w=>{
+    if(!w)return;
+    const wd=new Date(w.date);
+    if(wd<nowCutoff||wd>=futureCutoff)return;
+    const touchesThisMuscle=(w.exercises||[]).some(ex=>{
+      if(!ex)return false;
+      const exData=getExercise(ex.exId);if(!exData)return false;
+      if(exData.muscle===muscle)return true;
+      return!directOnly&&exData.secondary&&exData.secondary.split(',').some(s=>s.trim()===muscle);
+    });
+    if(!touchesThisMuscle)return;
+    const ageDays=(Date.now()-wd)/864e5;
+    if(oldestAgeDays===null||ageDays>oldestAgeDays)oldestAgeDays=ageDays;
+  });
+  if(oldestAgeDays===null)return horizonDays; // nothing actually expiring right now — full horizon of runway, not urgent
+  return Math.max(0,windowDays-oldestAgeDays);
 }
 // SECONDARY/INDIRECT-AWARE EXPOSURE DOSING (2026-09-05, handover spec §1): getMuscleExposureDose
 // used to dose every muscle on weeklyTargetNow alone, with zero awareness of what's already been
@@ -10143,7 +10183,20 @@ function getMuscleExposureDose(muscle,activeSet,picks){
   const rollingCeiling=weeklyTargetNow*AUTO_ROUTINE_LOOKAHEAD_ROLLING_CEILING;
   const maxAllowedReactive=Math.max(0,Math.round(rollingCeiling-delivered));
   const maxAllowedTotal=Math.max(0,Math.round(rollingCeiling-(delivered-expiring)));
-  const pullForward=Math.min(Math.round(unrecoverableNeed),maxAllowedTotal);
+  // SPREAD THE PULL-FORWARD (2026-09-13, user's explicit request, after confirming via live
+  // simulation that training several muscles together in one session made ALL of them dump their
+  // full catch-up into one oversized session the moment that shared session aged out of the
+  // window): if there's still real runway before the deadline, only pull forward an even daily
+  // share of the need — Math.ceil so a small need never silently rounds down to 0 and gets lost.
+  // Once runway drops to a day or less (runwayDays<=1), there's no more room to spread across, so
+  // the FULL remaining amount is pulled — same guarantee the old lump-sum design had, just only
+  // invoked right at the deadline instead of every single time. This recalculates fresh every real
+  // session: if the user skips days, runwayDays shrinks correspondingly and the daily share grows
+  // to compensate, so the full need is still always covered by the actual deadline regardless of
+  // how often sessions actually happen — never a guess, same as before, just no longer front-loaded.
+  const runwayDays=unrecoverableNeed>0?getMuscleNearestExpiryDays(muscle,info.minGapDays,isPriority):info.minGapDays;
+  const pullForwardRaw=runwayDays<=1?unrecoverableNeed:unrecoverableNeed/Math.max(1,Math.round(runwayDays));
+  const pullForward=Math.min(unrecoverableNeed>0?Math.ceil(pullForwardRaw):0,maxAllowedTotal);
   if(remaining<=0&&pullForward<=0)return{...info,weeklyTargetNow,dose:0}; // genuinely nothing needed now, nothing unrecoverable, or the ceiling's already full
   const idealSessionsPerWeek=7/info.idealGapDays;
   const baseDose=Math.min(info.exposureCap,remaining/idealSessionsPerWeek);
@@ -10217,9 +10270,34 @@ function buildAutoSession(mesoIdx,minutesAvailable,setsBudget){
   // pass — getMuscleExposureDose now takes the current in-progress `picks` array directly, so each
   // muscle's need reflects everything already added this build, not just history through yesterday.
   let picks=[];
+  // SESSION-WIDE PULL-FORWARD CAP (2026-09-13, user's explicit request — "spread it across the
+  // week, not one session"): confirmed via live simulation that my first fix (spreading ONE
+  // muscle's need across ITS OWN remaining runway) didn't actually solve the reported problem —
+  // because the alarm (unrecoverableNeed) is deliberately narrow (see getMuscleExpiringVolume's
+  // own comment: it only fires once even the EARLIEST possible next session wouldn't arrive in
+  // time), by the time it fires there's usually only ~1 day of runway left for that ONE muscle
+  // regardless — nothing to spread within. The REAL problem is across MUSCLES, not within one:
+  // several muscles trained together in one session all expire together, and each one's alarm is
+  // individually legitimate, but nothing coordinated how many of them land in the SAME session.
+  // This caps the TOTAL pulled-forward volume any one session will admit — muscles are still
+  // processed priority-first (existing orderedMuscles order), so whichever alarms first gets
+  // today's limited pull-forward budget; anything past the cap has its dose reduced back down to
+  // its ordinary reactive portion, deferring the rest. That's a real, honest tradeoff (not just
+  // smoothing): a deferred muscle's catch-up isn't retried automatically until the NEXT real
+  // session, and if that session doesn't happen before the deadline, it's genuinely missed — same
+  // risk profile as any undertrained muscle, not a new failure mode, and far better than forcing
+  // an 80+ minute, 6-muscle mega-session every time several muscles happen to expire together.
+  let sessionPulledForwardSoFar=0;
   orderedMuscles.forEach(muscle=>{
     if(isAutoRoutineMuscleFullyResting(muscle))return;
-    const need=getMuscleExposureDose(muscle,activeSet,picks).dose;
+    const doseInfo=getMuscleExposureDose(muscle,activeSet,picks);
+    let need=doseInfo.dose;
+    if(doseInfo.pulledForward>0){
+      const roomLeft=Math.max(0,AUTO_ROUTINE_MAX_PULLFORWARD_PER_SESSION-sessionPulledForwardSoFar);
+      const allowedPulledForward=Math.min(doseInfo.pulledForward,roomLeft);
+      need-=(doseInfo.pulledForward-allowedPulledForward); // deferred portion comes back off today's dose
+      sessionPulledForwardSoFar+=allowedPulledForward;
+    }
     if(!need||need<=0)return;
     const target=Math.min(Math.round(need),getMuscleExposureCap(muscle));
     for(let i=0;i<target;i++){if(!growMuscleOneSet(picks,muscle,activeSet))break;}
