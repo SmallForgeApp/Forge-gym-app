@@ -693,7 +693,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-13.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-13.2</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -10279,16 +10279,41 @@ function buildAutoSession(mesoIdx,minutesAvailable,setsBudget){
   // regardless — nothing to spread within. The REAL problem is across MUSCLES, not within one:
   // several muscles trained together in one session all expire together, and each one's alarm is
   // individually legitimate, but nothing coordinated how many of them land in the SAME session.
-  // This caps the TOTAL pulled-forward volume any one session will admit — muscles are still
-  // processed priority-first (existing orderedMuscles order), so whichever alarms first gets
-  // today's limited pull-forward budget; anything past the cap has its dose reduced back down to
-  // its ordinary reactive portion, deferring the rest. That's a real, honest tradeoff (not just
-  // smoothing): a deferred muscle's catch-up isn't retried automatically until the NEXT real
-  // session, and if that session doesn't happen before the deadline, it's genuinely missed — same
-  // risk profile as any undertrained muscle, not a new failure mode, and far better than forcing
-  // an 80+ minute, 6-muscle mega-session every time several muscles happen to expire together.
+  // This caps the TOTAL pulled-forward volume any one session will admit. That's a real, honest
+  // tradeoff (not just smoothing): a deferred muscle's catch-up isn't retried automatically until
+  // the NEXT real session, and if that session doesn't happen before the deadline, it's genuinely
+  // missed — same risk profile as any undertrained muscle, not a new failure mode, and far better
+  // than forcing an 80+ minute, multi-muscle mega-session every time several muscles expire
+  // together.
+  // FAIRNESS ROTATION (2026-09-13, caught via my OWN follow-up long-run simulation before shipping
+  // — not user-reported): allocating the cap in fixed orderedMuscles order seemed reasonable but
+  // was a real bug — for anyone with a consistent "train everything together" pattern, ALL of that
+  // group's muscles share near-identical expiry timing every single week, so there's no urgency
+  // difference to break the tie, and the SAME muscles (whichever sort earlier in orderedMuscles —
+  // Chest/Back, alphabetically-ish) won the limited budget every week while the rest (Triceps/
+  // Quads/Hamstrings) were throttled EVERY week — a chronic, compounding shortfall, not an
+  // occasional deferral (confirmed: 16 simulated weeks left them at ~20-30% of target vs Chest/
+  // Back's ~50%). Fixed with a cheap pre-pass: probe each muscle's dose (picks=[], throwaway —
+  // only used to decide ALLOCATION ORDER, the real dose below still uses the live in-progress
+  // picks as always) to find which muscles want to pull forward this session, then allocate the
+  // cap to whichever of THOSE has gone longest since it last actually RECEIVED pulled-forward
+  // credit (state.autoRoutinePullForwardServedDates) — never-served sorts first. This is the same
+  // "least-recently-used rotates to the front" pattern already used for exercise freshness ranking
+  // elsewhere in Auto Routine, just applied to pull-forward allocation instead of exercise choice.
+  const pullForwardCandidates=orderedMuscles.filter(mu=>{
+    if(isAutoRoutineMuscleFullyResting(mu))return false;
+    return getMuscleExposureDose(mu,activeSet,[]).pulledForward>0;
+  });
+  const lastServed=state.autoRoutinePullForwardServedDates||{};
+  pullForwardCandidates.sort((a,b)=>{
+    const da=lastServed[a]?new Date(lastServed[a]).getTime():0; // never served = treated as oldest = highest priority
+    const db=lastServed[b]?new Date(lastServed[b]).getTime():0;
+    return da-db;
+  });
+  const fairnessOrder=pullForwardCandidates.concat(orderedMuscles.filter(mu=>!pullForwardCandidates.includes(mu)));
+  if(!state.autoRoutinePullForwardServedDates)state.autoRoutinePullForwardServedDates={};
   let sessionPulledForwardSoFar=0;
-  orderedMuscles.forEach(muscle=>{
+  fairnessOrder.forEach(muscle=>{
     if(isAutoRoutineMuscleFullyResting(muscle))return;
     const doseInfo=getMuscleExposureDose(muscle,activeSet,picks);
     let need=doseInfo.dose;
@@ -10297,6 +10322,7 @@ function buildAutoSession(mesoIdx,minutesAvailable,setsBudget){
       const allowedPulledForward=Math.min(doseInfo.pulledForward,roomLeft);
       need-=(doseInfo.pulledForward-allowedPulledForward); // deferred portion comes back off today's dose
       sessionPulledForwardSoFar+=allowedPulledForward;
+      if(allowedPulledForward>0)state.autoRoutinePullForwardServedDates[muscle]=new Date().toISOString();
     }
     if(!need||need<=0)return;
     const target=Math.min(Math.round(need),getMuscleExposureCap(muscle));
