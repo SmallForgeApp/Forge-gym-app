@@ -693,7 +693,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-13.3</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-13.4</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -9337,37 +9337,41 @@ function getPerfHopDirection(a,b){
   if(c<0&&(b.weight||0)>(a.weight||0))return 0; // weight went UP — never a regression, even if e1RM dipped from a bigger proportional rep reset
   return c;
 }
-// MEDIAN-BASELINE core (2026-09-13, user's explicit report — real design flaw found, not
-// generalized-fatigue-related): the old hop-comparison approach compared the newest session
-// against whichever single point happened to be immediately before it. With a FULL 3-point window
-// that works fine (a one-off great session sandwiched between two normal ones cancels itself out —
-// up-hop then down-hop). But with only 2 fresh points — common right after setting up a new
-// tracker, or for any exercise in a bigger rotation pool where "fresh" data arrives slowly — there's
-// only ONE hop and nothing to cancel it: one lucky session (better sleep, one extra rep everything
-// lined up) followed by a perfectly normal, sustainable session reads as an uncontested decline,
-// even though the person is handling their volume completely fine. Confirmed with real numbers:
-// 20kg×9 (a one-off) then back to 20kg×8 (the actual week-to-week normal) computes as e1RM 26→25,
-// a straight decrease with no counterbalancing hop to cancel it.
-// Fixed by comparing the newest session against the MEDIAN of the prior sessions instead of just
-// whichever one is immediately before it — a median is resistant to a single outlier by
-// construction, so "one great day, then back to the normal you've held for weeks" reads as AT
-// baseline, not below it. Requires at least 2 baseline points (3 fresh points total) — with fewer
-// than that there's no real baseline to speak of, same "not enough data" treatment as before, just
-// one point stricter given what a real baseline now requires.
+// CONSECUTIVE-STREAK + RECOVERY CORROBORATION (2026-09-13, user's explicit design — matches how
+// other training-tracking apps do this): superseding the median-baseline approach above with
+// something more principled. A median resists ONE outlier, but a genuine "is this muscle actually
+// overreached" signal should look like a real trend — 2+ consecutive sessions each worse than the
+// last — not just "below your typical." A single reversion-to-mean (one lucky day, back to normal)
+// can never produce 2 CONSECUTIVE drops in a row (it's one down-hop at most, immediately preceded
+// by an up-hop getting back to that lucky day), so this handles the false-positive case even more
+// directly than the median did, while also being a stronger, more defensible definition of "real
+// decline" on its own terms.
+// Also now requires corroboration from actual soreness/impact data (reusing getMuscleSFRSignal, the
+// same signal that already feeds the independent high-fatigue trigger below) — a DELIBERATELY
+// LOWER bar than full high-fatigue status (which already fires on its own regardless of any e1RM
+// trend), so this is a genuinely distinct, softer combined signal: "performance trending down AND
+// at least some corroborating sign recovery is lagging," not just "the numbers dipped." A pure
+// strength plateau/decline with zero reported soreness anywhere does NOT get flagged — this is
+// deliberately biased toward "would rather miss a subtle one than cry wolf on ordinary session
+// noise," per the user's stated priority.
+const AUTO_ROUTINE_DECLINE_STREAK_REQUIRED=2; // "2-3 consecutive sessions" per the user's own framing; raise to 3 for an even more conservative bar
+function isMuscleRecoverySomewhatLow(muscle){
+  const sfr=getMuscleSFRSignal(muscle);
+  if(sfr.impactSampleCount>=1&&sfr.avgConfirmedImpact!=null&&sfr.avgConfirmedImpact>=0.8)return true; // well below the 1.2 full high-fatigue cutoff — this is corroboration, not a duplicate trigger
+  if(sfr.impactSampleCount<1&&sfr.sampleCount>=1&&sfr.avgSoreness!=null&&sfr.avgSoreness>=1.5)return true; // same relationship to the 2.2 high-fatigue cutoff
+  return false;
+}
 function getExerciseFreshDeclineVerdict(exId,muscle){
-  const recent=getRecentFreshNormalTopSets(exId,muscle,5); // widened from 3 — a meaningful median wants more than the bare minimum 2 baseline points when available
-  if(recent.length<3)return null; // not enough data for a real (not single-point) baseline yet
-  const newest=recent[0];
-  const baseline=recent.slice(1).filter(p=>(new Date(newest.date)-new Date(p.date))/864e5<=AUTO_ROUTINE_BREAK_RECOVERY_WINDOW_DAYS); // same real-gap exclusion as before, just per-point instead of per-hop
-  if(baseline.length<2)return null; // still need a genuine multi-point baseline after the gap filter
-  const ormOf=p=>calcORM(p.weight||0,repsMetricOf(p));
-  const sortedBaselineORMs=baseline.map(ormOf).sort((a,b)=>a-b);
-  const medianORM=sortedBaselineORMs[Math.floor((sortedBaselineORMs.length-1)/2)];
-  const newestORM=ormOf(newest);
-  if(newestORM>=medianORM)return false; // at or above the established normal — not declining, even if below your single best recent session
-  const maxBaselineWeight=Math.max(...baseline.map(p=>p.weight||0));
-  if((newest.weight||0)>maxBaselineWeight)return false; // genuine weight PR this session — same double-progression guard as before (comparePerf/getPerfHopDirection), never a regression regardless of what the e1RM math says
-  return true;
+  const recent=getRecentFreshNormalTopSets(exId,muscle,AUTO_ROUTINE_DECLINE_STREAK_REQUIRED+2); // a little headroom beyond the required streak length
+  if(recent.length<AUTO_ROUTINE_DECLINE_STREAK_REQUIRED+1)return null; // not enough fresh sessions to see a streak this long yet
+  let consecutiveDrops=0;
+  for(let i=0;i<recent.length-1;i++){
+    const gapDays=(new Date(recent[i].date)-new Date(recent[i+1].date))/864e5;
+    if(gapDays>AUTO_ROUTINE_BREAK_RECOVERY_WINDOW_DAYS)break; // a real training gap breaks the streak — not comparable across it, same principle as before
+    const c=getPerfHopDirection(recent[i+1],recent[i]); // (earlier, later) — same weight-PR-aware comparison as ever, including its own double-progression guard
+    if(c<0)consecutiveDrops++;else break; // the streak ends the instant there's a non-drop (flat or up)
+  }
+  return consecutiveDrops>=AUTO_ROUTINE_DECLINE_STREAK_REQUIRED;
 }
 // UPDATED (2026-09-11, user's explicit request/design): if this muscle has a designated tracking
 // exercise (state.autoRoutineMuscleTracker — set via the 🎯 button in Edit Pool, distinct from 📌
@@ -9377,8 +9381,9 @@ function getExerciseFreshDeclineVerdict(exId,muscle){
 // without a designated tracker, so nothing changes for muscles the user hasn't set one up for yet.
 function getAutoRoutineMuscleDeclineSignal(muscle){
   const trackerExId=state.autoRoutineMuscleTracker&&state.autoRoutineMuscleTracker[muscle];
+  const recoveryLow=isMuscleRecoverySomewhatLow(muscle); // corroboration required either way — see comment above getExerciseFreshDeclineVerdict
   if(trackerExId&&!isExerciseInjured(trackerExId)){
-    return getExerciseFreshDeclineVerdict(trackerExId,muscle)===true;
+    return recoveryLow&&getExerciseFreshDeclineVerdict(trackerExId,muscle)===true;
   }
   const exIds=getAutoRoutineCandidateExIds(muscle).filter(id=>!isExerciseInjured(id));
   let declining=0,notDeclining=0;
@@ -9388,7 +9393,7 @@ function getAutoRoutineMuscleDeclineSignal(muscle){
     if(verdict)declining++;else notDeclining++;
   });
   if(declining===0)return false;
-  return declining>notDeclining; // majority of the muscle's own exercises must agree, not just one
+  return recoveryLow&&(declining>notDeclining); // majority of the muscle's own exercises AND corroborating recovery data
 }
 function isAutoRoutineMuscleStruggling(muscle){
   const rec=getVolumeRecommendation(muscle);
