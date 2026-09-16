@@ -693,7 +693,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-13.5</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-13.6</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -5207,10 +5207,15 @@ function wasExerciseFreshForMuscleInWorkout(w,exId,muscle){
 // struggle/decline signal and the trend multiplier below — NOT a general-purpose replacement for
 // getRecentNormalTopSets, which other callers (progression prefill, PR checks, etc.) correctly want
 // as "whatever actually happened last time," fatigue context and all.
-// UPDATED (2026-09-11, user's explicit request): compares each session's BEST/heaviest logged set
-// for the exercise, not just whichever set was logged first — same "top set" convention
-// getMesoReviewData already uses, for the same reason (a first-array-entry ramp/warm-up set
-// shouldn't be able to make real progress read as flat or declining).
+// UPDATED (2026-09-13, user's explicit correction): select by E1RM, not raw weight — "best set"
+// should mean best PREDICTED STRENGTH that session, consistent with how every downstream
+// comparison already works (comparePerf/getPerfHopDirection are e1RM-based). Picking by raw weight
+// alone could select a heavy low-rep single over a genuinely stronger higher-rep set — confirmed:
+// 22.5kg×3 (e1RM 25) got picked over 20kg×10 (e1RM 27) in the same session, understating that
+// session's real performance to every later comparison. Also now tracks maxWeightThisSession — the
+// heaviest weight lifted ANYWHERE that session, regardless of which specific set had the best
+// e1RM — so getPerfHopDirection's weight-PR check (below) isn't blind to a heavy single that
+// happens not to be the e1RM-best set.
 function getRecentFreshNormalTopSets(exId,muscle,count){
   const exDataForSkip=getExercise(exId);
   const muscleForSkip=exDataForSkip&&exDataForSkip.muscle;
@@ -5223,8 +5228,9 @@ function getRecentFreshNormalTopSets(exId,muscle,count){
     if(!wasExerciseFreshForMuscleInWorkout(w,exId,muscle))continue; // fatigued by an earlier same-muscle exercise that session — not a fair comparison point, skip it entirely rather than let it masquerade as a fresh reading
     const normalSets=(ex.sets||[]).filter(s=>s.done&&(!s.type||s.type==='normal'));
     if(normalSets.length){
-      const top=normalSets.reduce((a,b)=>(b.weight||0)>(a.weight||0)?b:a,normalSets[0]);
-      out.push({...top,useRIR:!!ex.useRIR,date:w.date});
+      const top=normalSets.reduce((a,b)=>calcORM(b.weight||0,repsMetricOf(b))>calcORM(a.weight||0,repsMetricOf(a))?b:a,normalSets[0]);
+      const maxWeightThisSession=Math.max(...normalSets.map(s=>s.weight||0));
+      out.push({...top,maxWeightThisSession,useRIR:!!ex.useRIR,date:w.date});
     }
   }
   return out;
@@ -9332,10 +9338,18 @@ function isAutoRoutineMuscleFullyResting(muscle){
 // regardless of what the rep-adjusted e1RM math says — and a majority vote across every candidate
 // exercise with enough data (more declining exercises than not), rather than any single exercise
 // being able to veto the whole muscle.
+// WEIGHT PR = automatically trending up (2026-09-13, user's explicit design): a new higher weight
+// than the prior session's max — even at reduced reps while still adapting to it — is real
+// progress by itself. e1RM can temporarily read flat or down for a session or two while reps catch
+// back up to the new weight, and that shouldn't register as neutral either; it should register as
+// genuine improvement, full stop. Checks the session's OVERALL max weight
+// (maxWeightThisSession — tracked by getRecentFreshNormalTopSets across ALL that session's sets,
+// with a same-point .weight fallback for any caller that doesn't populate it), not just the
+// individually e1RM-selected "top" set's own weight — so a heavy single elsewhere in the session
+// still counts even if a different, lighter set happened to have the best e1RM that day.
 function getPerfHopDirection(a,b){
-  const c=comparePerf(a,b);
-  if(c<0&&(b.weight||0)>(a.weight||0))return 0; // weight went UP — never a regression, even if e1RM dipped from a bigger proportional rep reset
-  return c;
+  if((b.maxWeightThisSession||b.weight||0)>(a.maxWeightThisSession||a.weight||0))return 1;
+  return comparePerf(a,b);
 }
 // CONSECUTIVE-STREAK + RECOVERY CORROBORATION (2026-09-13, user's explicit design — matches how
 // other training-tracking apps do this): superseding the median-baseline approach above with
