@@ -693,7 +693,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-13.4</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-13.5</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -9403,15 +9403,26 @@ function getAutoRoutineMuscleTrendMultiplier(muscle){
   const exIds=getAutoRoutineCandidateExIds(muscle).filter(id=>!isExerciseInjured(id));
   let up=0,down=0;
   exIds.forEach(exId=>{
-    const recent=getRecentFreshNormalTopSets(exId,muscle,3); // fresh-only (2026-09-11), same reasoning as the decline signal above
-    if(recent.length<2)return;
-    const points=[...recent].reverse();
-    let sawUp=false,sawDown=false;
-    for(let i=1;i<points.length;i++){
-      const c=getPerfHopDirection(points[i-1],points[i]); // same weight-increase-aware fix as the decline signal above
-      if(c>0)sawUp=true;if(c<0)sawDown=true;
+    // STREAK-ONLY (2026-09-13, ported from the decline signal's redesign, user's explicit request
+    // to keep the two consistent): a single reversion-to-mean shouldn't nudge exercise selection
+    // any more than it should trigger the struggling flag — same vulnerability, same fix. Does NOT
+    // port the recovery-corroboration half of that redesign: this is a mild, self-correcting 15%
+    // selection nudge, not a claim with real consequences like pulling a muscle out of priority, so
+    // there's no reason to gate a soft nudge on soreness evidence the way the struggling flag needs.
+    const recent=getRecentFreshNormalTopSets(exId,muscle,AUTO_ROUTINE_DECLINE_STREAK_REQUIRED+2);
+    if(recent.length<AUTO_ROUTINE_DECLINE_STREAK_REQUIRED+1)return;
+    let streakDir=0,streakLen=0;
+    for(let i=0;i<recent.length-1;i++){
+      const gapDays=(new Date(recent[i].date)-new Date(recent[i+1].date))/864e5;
+      if(gapDays>AUTO_ROUTINE_BREAK_RECOVERY_WINDOW_DAYS)break; // a real training gap breaks the streak
+      const c=getPerfHopDirection(recent[i+1],recent[i]); // (earlier, later)
+      const dir=c>0?1:(c<0?-1:0);
+      if(i===0){streakDir=dir;streakLen=dir!==0?1:0;}
+      else if(dir===streakDir&&dir!==0)streakLen++;
+      else break; // streak ends the instant direction doesn't match (including flat)
     }
-    if(sawUp&&!sawDown)up++;else if(sawDown&&!sawUp)down++;
+    if(streakDir>0&&streakLen>=AUTO_ROUTINE_DECLINE_STREAK_REQUIRED)up++;
+    else if(streakDir<0&&streakLen>=AUTO_ROUTINE_DECLINE_STREAK_REQUIRED)down++;
   });
   if(up===0&&down===0)return 1;
   if(up>down)return 1.15;
@@ -10982,11 +10993,18 @@ function openAutoSessionModal(mesoIdx){
 // priority system (see the scheduler section) independent of any mesocycle. If a real meso IS
 // running, its index is still passed through so its RIR ramp gets used automatically; if none
 // exists (or none has routines yet), Auto Routine proceeds with mesoIdx=null instead of blocking.
+// BUG FIX (2026-09-13, user-reported: meso priority warnings popping up at the end of Auto Routine
+// sessions with no meso active): the code below used to contradict the comment above it — whenever
+// state.activeMesoId wasn't set, it fell back to GUESSING some other mesocycle with routines
+// assigned (most-recently-started, or just the first one) rather than actually proceeding with
+// null. That stale fallback (left over from before the 2026-08-29 change made mesoIdx optional
+// here at all) meant an old, no-longer-relevant meso could get silently treated as "active" for
+// this session — so its finish-flow checks (priority-rotation-signal, early-deload-signal) fired
+// against it even though the user never selected it and had no meso genuinely active. Fixed: only
+// use the meso the user has actually marked active; otherwise mesoIdx stays null, exactly as the
+// comment already claimed it should.
 function openAutoRoutineFromHome(){
-  const withRoutines=(state.mesocycles||[]).filter(m=>m.routineIds&&m.routineIds.length);
-  let meso=null;
-  if(state.activeMesoId){meso=withRoutines.find(m=>m.id===state.activeMesoId)||null;}
-  if(!meso&&withRoutines.length){const started=withRoutines.filter(m=>m.currentPos!=null);meso=started.length?started[started.length-1]:withRoutines[0];}
+  const meso=state.activeMesoId?(state.mesocycles||[]).find(m=>m.id===state.activeMesoId&&m.routineIds&&m.routineIds.length):null;
   openAutoSessionModal(meso?state.mesocycles.indexOf(meso):null);
 }
 let autoSessionMesoIdx=null;
