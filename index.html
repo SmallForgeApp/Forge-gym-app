@@ -14634,6 +14634,38 @@ function getMuscleAvgSetsPerSession(muscle,lookback){
   }
   return count?total/count:0;
 }
+// SCHEDULER-AWARE SESSIONS PROJECTION (2026-09-18, user's explicit request — replaces the naive
+// "remaining \u00f7 last-5-session average" estimate above, which was totally blind to how Auto Routine
+// actually paces a muscle. That old estimate had two real problems: (1) it used getMuscleAvgSetsPerSession,
+// a plain historical average with zero awareness of minGapDays/idealGapDays/exposureCap, so a muscle
+// that's INTENTIONALLY dosed in small frequent chunks (e.g. a priority muscle on a short gap) reads as
+// needing many more "sessions" than it actually will, purely because each real chunk is small; and (2)
+// it never checked whether that many sessions could even physically occur before the review window
+// resets, given the muscle's own minimum rest gap.
+// This instead walks forward using the SAME steady-state dose formula getMuscleExposureDose uses
+// (baseDose = remaining \u00f7 idealSessionsPerWeek, capped by exposureCap, floored at 1) so the
+// projection is mechanically tied to the real scheduler and can't drift from what it will actually do.
+// It intentionally leaves out the live-session-only machinery (rolling ceiling, pull-forward,
+// break-return scaling) since those react to real day-to-day noise that a forward projection can't
+// know yet \u2014 this is the same steady-state simplification getAutoRoutineMuscleTargetNow's own ramp
+// math already makes elsewhere.
+function getMuscleProjectedSessions(muscle){
+  const activeSet=getAutoRoutineActiveMuscles();
+  const gaps=getMuscleGapDays(muscle,activeSet);
+  const target=getAutoRoutineMuscleTargetNow(muscle);
+  let remaining=Math.max(0,Math.round((target-getAutoRoutineDeliveredSoFar(muscle,activeSet,[]))*10)/10);
+  if(remaining<=0)return{sessions:0,days:0,idealGapDays:gaps.idealGapDays,minGapDays:gaps.minGapDays};
+  const idealSessionsPerWeek=7/gaps.idealGapDays;
+  const cap=gaps.exposureCap;
+  let sessions=0,daysElapsed=0;
+  while(remaining>0&&sessions<20){ // 20-session ceiling so a near-zero remainder can't loop forever
+    const dose=Math.max(1,Math.min(cap,Math.round(remaining/idealSessionsPerWeek)));
+    remaining-=dose;
+    sessions++;
+    daysElapsed+=gaps.idealGapDays;
+  }
+  return{sessions,days:Math.round(daysElapsed*10)/10,idealGapDays:gaps.idealGapDays,minGapDays:gaps.minGapDays};
+}
 // Single-gauge visual for one muscle's Review row (2026-09-10, replacing the earlier three-bars
 // version — see CSS comment on .lm-gauge for why). Four colour zones with fixed meaning across
 // every muscle (under MEV / building MEV\u2013MAV / solid MAV\u2013MRV / over MRV) so the zone a muscle is
@@ -14730,13 +14762,21 @@ function renderReview(){
     // no history means no honest basis for a prediction, so it's silently omitted rather than
     // guessed.
     const remaining=Math.round((target-ms[m])*10)/10;
-    const avgPerSession=remaining>0?getMuscleAvgSetsPerSession(m):0;
-    const sessionsNeeded=remaining>0&&avgPerSession>0?Math.ceil(remaining/avgPerSession):null;
+    // Scheduler-aware projection (2026-09-18) — see getMuscleProjectedSessions for why this replaced
+    // the old history-average estimate. daysLeftInWindow is only defined in calendar-week mode (a
+    // trailing-7-day window has no fixed reset, so "won't fit before the deadline" isn't a coherent
+    // warning there).
+    const proj=remaining>0?getMuscleProjectedSessions(m):null;
+    const sessionsNeeded=proj&&proj.sessions>0?proj.sessions:null;
+    const daysLeftInWindow=state.reviewWindowMode==='calendar'?Math.max(0,7-windowDays):null;
+    const wontFit=sessionsNeeded&&daysLeftInWindow!=null&&proj.days>daysLeftInWindow;
     return '<div class="muscle-bar-wrap"><div class="muscle-bar-label"><span style="font-weight:600">'+m+'</span>'
       +'<span style="display:flex;align-items:center;gap:6px"><span class="text3 small">'+ms[m]+' sets / '+windowLabel+'</span>'+chip+'</span></div>'
       +landmarkGaugeHtml(m,ms[m],lm,target)
       +(needsReason?'<div class="small text2" style="margin-top:5px;line-height:1.4">'+rec.action+'</div>':'')
-      +(sessionsNeeded?'<div class="small text3" style="margin-top:3px">'+remaining+' sets to your aim \u2014 about '+sessionsNeeded+' more workout'+(sessionsNeeded!==1?'s':'')+' at your usual pace</div>':'')
+      +(sessionsNeeded?'<div class="small text3" style="margin-top:3px">'+remaining+' sets to your aim \u2014 about '+sessionsNeeded+' more workout'+(sessionsNeeded!==1?'s':'')+' at '+m+'\u2019s normal '+proj.idealGapDays+'-day pace (~'+proj.days+' days)'
+          +(wontFit?' \u2014 <span style="color:var(--orange)">tighter than the '+daysLeftInWindow+' day'+(daysLeftInWindow!==1?'s':'')+' left this week</span>':'')
+          +'</div>':'')
       +'</div>';
   }).join('');
   const zeroVolMuscles=MUSCLE_GROUPS.filter(m=>!ms[m]&&m!=='Full Body');
