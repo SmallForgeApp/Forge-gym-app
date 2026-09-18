@@ -273,7 +273,7 @@ the exact count, instead of three separate bars each needing its own read.*/
 .lm-gauge-marker{position:absolute;top:-3px;bottom:-3px;width:3px;border-radius:2px;background:#fff;box-shadow:0 0 0 2.5px rgba(0,0,0,0.5);transform:translateX(-50%);}
 .lm-gauge-marker-val{position:absolute;top:-19px;transform:translateX(-50%);font-size:12px;font-weight:700;color:var(--text);white-space:nowrap;}
 .lm-gauge-target{position:absolute;top:-3px;bottom:-3px;width:2px;border-radius:1px;background:var(--purple);}
-.lm-gauge-target-val{position:absolute;bottom:-17px;transform:translateX(-50%);font-size:10px;font-weight:700;color:var(--purple);white-space:nowrap;}
+.lm-gauge-target-val{position:absolute;top:17px;transform:translateX(-50%);font-size:10px;font-weight:700;color:var(--purple);white-space:nowrap;}
 .lm-gauge-caption{display:flex;justify-content:space-between;margin-top:18px;font-size:10.5px;color:var(--text3);font-variant-numeric:tabular-nums;}
 /* Review window toggle (trailing 7 days vs. calendar-Monday current week) — same visual language
 as the existing .sort-chip segmented controls used elsewhere in the app. */
@@ -695,7 +695,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-13.7</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-18.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -14617,6 +14617,23 @@ function getMuscleGroupVolumesForReview(){
   const ms={};MUSCLE_GROUPS.forEach(m=>{ms[m]=getMuscleVolumeForReview(m);});
   return ms;
 }
+// Sessions-remaining prediction (2026-09-18, user's explicit request — "you can do this in 3
+// workouts"): averages the ACTUAL sets this muscle has delivered per session over its last few
+// real workouts (not an idealized exposure-cap guess) so the estimate reflects how this person
+// actually trains it, then divides the remaining gap to target by that average. Deliberately does
+// NOT use getMuscleExposureCap (the per-session safety ceiling) as the assumption — that's the
+// most a session COULD deliver, not what a typical one actually does, and would make every
+// prediction an unrealistic best case.
+function getMuscleAvgSetsPerSession(muscle,lookback){
+  lookback=lookback||5;
+  let count=0,total=0;
+  for(let i=0;i<state.history.length&&count<lookback;i++){
+    const w=state.history[i];
+    const sets=(w.exercises||[]).filter(ex=>{const exData=getExercise(ex.exId);return exData&&exData.muscle===muscle;}).reduce((a,ex)=>a+(ex.sets||[]).filter(s=>s.done).length,0);
+    if(sets>0){total+=sets;count++;}
+  }
+  return count?total/count:0;
+}
 // Single-gauge visual for one muscle's Review row (2026-09-10, replacing the earlier three-bars
 // version — see CSS comment on .lm-gauge for why). Four colour zones with fixed meaning across
 // every muscle (under MEV / building MEV\u2013MAV / solid MAV\u2013MRV / over MRV) so the zone a muscle is
@@ -14707,10 +14724,19 @@ function renderReview(){
     const meta=rec?VOLUME_STATUS_META[rec.status]:null;
     const chip=meta?statusChipHtml(meta.icon,meta.label,meta.color):'';
     const needsReason=rec&&rec.status!=='building'&&rec.status!=='mav-to-mrv';
+    const target=getAutoRoutineMuscleTargetNow(m);
+    // SESSIONS-REMAINING PREDICTION (2026-09-18, user's explicit request): only shown when there's
+    // a genuine gap left to this week's aim AND real recent history to base a pace estimate on —
+    // no history means no honest basis for a prediction, so it's silently omitted rather than
+    // guessed.
+    const remaining=Math.round((target-ms[m])*10)/10;
+    const avgPerSession=remaining>0?getMuscleAvgSetsPerSession(m):0;
+    const sessionsNeeded=remaining>0&&avgPerSession>0?Math.ceil(remaining/avgPerSession):null;
     return '<div class="muscle-bar-wrap"><div class="muscle-bar-label"><span style="font-weight:600">'+m+'</span>'
       +'<span style="display:flex;align-items:center;gap:6px"><span class="text3 small">'+ms[m]+' sets / '+windowLabel+'</span>'+chip+'</span></div>'
-      +landmarkGaugeHtml(m,ms[m],lm,getAutoRoutineMuscleTargetNow(m))
+      +landmarkGaugeHtml(m,ms[m],lm,target)
       +(needsReason?'<div class="small text2" style="margin-top:5px;line-height:1.4">'+rec.action+'</div>':'')
+      +(sessionsNeeded?'<div class="small text3" style="margin-top:3px">'+remaining+' sets to your aim \u2014 about '+sessionsNeeded+' more workout'+(sessionsNeeded!==1?'s':'')+' at your usual pace</div>':'')
       +'</div>';
   }).join('');
   const zeroVolMuscles=MUSCLE_GROUPS.filter(m=>!ms[m]&&m!=='Full Body');
