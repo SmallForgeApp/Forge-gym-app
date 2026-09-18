@@ -272,7 +272,9 @@ the exact count, instead of three separate bars each needing its own read.*/
 .lm-gauge-divider{position:absolute;top:0;bottom:0;width:1px;background:rgba(0,0,0,0.4);}
 .lm-gauge-marker{position:absolute;top:-3px;bottom:-3px;width:3px;border-radius:2px;background:#fff;box-shadow:0 0 0 2.5px rgba(0,0,0,0.5);transform:translateX(-50%);}
 .lm-gauge-marker-val{position:absolute;top:-19px;transform:translateX(-50%);font-size:12px;font-weight:700;color:var(--text);white-space:nowrap;}
-.lm-gauge-caption{display:flex;justify-content:space-between;margin-top:5px;font-size:10.5px;color:var(--text3);font-variant-numeric:tabular-nums;}
+.lm-gauge-target{position:absolute;top:-3px;bottom:-3px;width:2px;border-radius:1px;background:var(--purple);}
+.lm-gauge-target-val{position:absolute;bottom:-17px;transform:translateX(-50%);font-size:10px;font-weight:700;color:var(--purple);white-space:nowrap;}
+.lm-gauge-caption{display:flex;justify-content:space-between;margin-top:18px;font-size:10.5px;color:var(--text3);font-variant-numeric:tabular-nums;}
 /* Review window toggle (trailing 7 days vs. calendar-Monday current week) — same visual language
 as the existing .sort-chip segmented controls used elsewhere in the app. */
 .review-window-toggle{display:flex;gap:6px;padding:12px 16px 0;}
@@ -693,7 +695,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-13.6</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-13.7</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -14619,17 +14621,27 @@ function getMuscleGroupVolumesForReview(){
 // version — see CSS comment on .lm-gauge for why). Four colour zones with fixed meaning across
 // every muscle (under MEV / building MEV\u2013MAV / solid MAV\u2013MRV / over MRV) so the zone a muscle is
 // in reads instantly from colour, plus one marker pin at the actual volume with its number on it.
-// The scale extends a little past whichever is larger of MRV or the current volume, so an
-// over-MRV muscle still shows accurately instead of pinning uselessly at the right edge.
+// The scale extends a little past whichever is larger of MRV, current volume, or target, so an
+// over-MRV muscle (or a target near the top of its ramp) still shows accurately instead of pinning
+// uselessly at the right edge.
 // LM_ZONE_COLORS moved up near the startup render list (2026-09-12 audit fix) — renderReview() is
 // called unconditionally at startup, before this point in the file would otherwise have run.
-function landmarkGaugeHtml(m,vol,lm){
+// UPDATED (2026-09-13, user's explicit request — "a line to show what the muscle's aim is for the
+// week"): added a distinct target marker (getAutoRoutineMuscleTargetNow — the SAME dynamic weekly
+// number Auto Routine's own dosing targets, ramping for priority muscles between MEV and MAV/MRV,
+// flat at MEV for everyone else) separate from the static MEV/MAV/MRV zone dividers, which only
+// mark the fixed landmark boundaries, not what's actually being aimed for this specific week. Given
+// its own colour (purple) distinct from every zone colour and from the white current-volume marker,
+// so it reads clearly even when it happens to sit inside the building zone (the common case for an
+// actively-ramping muscle).
+function landmarkGaugeHtml(m,vol,lm,target){
   if(!lm||!(lm.mrv>0))return '';
   const mev=lm.mev||0,mav=Math.max(lm.mav||0,mev),mrv=Math.max(lm.mrv,mav);
-  const scaleMax=Math.max(mrv*1.1,vol*1.05,1);
+  const scaleMax=Math.max(mrv*1.1,vol*1.05,(target||0)*1.05,1);
   const pct=v=>Math.max(0,Math.min(100,v/scaleMax*100));
   const zUnder=pct(mev),zBuilding=pct(mav)-pct(mev),zSolid=pct(mrv)-pct(mav),zOver=100-pct(mrv);
   const markerPos=Math.max(2,Math.min(98,pct(vol)));
+  const targetPos=target!=null?Math.max(2,Math.min(98,pct(target))):null;
   return '<div class="lm-gauge">'
     +'<div class="lm-gauge-marker-val" style="left:'+markerPos+'%">'+vol+'</div>'
     +'<div class="lm-gauge-track">'
@@ -14640,8 +14652,10 @@ function landmarkGaugeHtml(m,vol,lm){
     +'<div class="lm-gauge-divider" style="left:'+pct(mev)+'%"></div>'
     +'<div class="lm-gauge-divider" style="left:'+pct(mav)+'%"></div>'
     +'<div class="lm-gauge-divider" style="left:'+pct(mrv)+'%"></div>'
+    +(targetPos!=null?'<div class="lm-gauge-target" style="left:'+targetPos+'%"></div>':'')
     +'<div class="lm-gauge-marker" style="left:'+markerPos+'%"></div>'
     +'</div>'
+    +(targetPos!=null?'<div class="lm-gauge-target-val" style="left:'+targetPos+'%">Aim '+Math.round(target*10)/10+'</div>':'')
     +'<div class="lm-gauge-caption"><span>MEV '+lm.mev+'</span><span>MAV '+lm.mav+'</span><span>MRV '+lm.mrv+'</span></div>'
     +'</div>';
 }
@@ -14695,7 +14709,7 @@ function renderReview(){
     const needsReason=rec&&rec.status!=='building'&&rec.status!=='mav-to-mrv';
     return '<div class="muscle-bar-wrap"><div class="muscle-bar-label"><span style="font-weight:600">'+m+'</span>'
       +'<span style="display:flex;align-items:center;gap:6px"><span class="text3 small">'+ms[m]+' sets / '+windowLabel+'</span>'+chip+'</span></div>'
-      +landmarkGaugeHtml(m,ms[m],lm)
+      +landmarkGaugeHtml(m,ms[m],lm,getAutoRoutineMuscleTargetNow(m))
       +(needsReason?'<div class="small text2" style="margin-top:5px;line-height:1.4">'+rec.action+'</div>':'')
       +'</div>';
   }).join('');
