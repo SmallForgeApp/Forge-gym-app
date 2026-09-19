@@ -295,6 +295,14 @@ the exact count, instead of three separate bars each needing its own read.*/
 .wvp-seg-plan{background:repeating-linear-gradient(45deg,rgba(var(--accent-rgb),.6) 0 4px,rgba(var(--accent-rgb),.2) 4px 8px);}
 .wvp-aim{position:absolute;top:-3px;bottom:-3px;width:2px;border-radius:1px;background:var(--purple);}
 .wvp-note{font-size:10.5px;color:var(--text3);margin-top:3px;}
+/* Week plan chooser (2026-09-19) */
+.wp-opt{padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg3);margin-bottom:8px;cursor:pointer;}
+.wp-opt.sel{border-color:var(--accent);}
+.wp-opt-top{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);}
+.wp-opt-avg{margin-left:auto;font-size:11.5px;color:var(--text2);font-variant-numeric:tabular-nums;}
+.wp-opt-tag{font-size:10px;font-weight:700;color:var(--accent2);border:1px solid var(--accent2);border-radius:8px;padding:1px 6px;}
+.wp-opt-times{font-size:11.5px;color:var(--text3);margin-top:4px;font-variant-numeric:tabular-nums;}
+.wp-opt-note{font-size:11px;margin-top:4px;}
 /* Review window toggle (trailing 7 days vs. calendar-Monday current week) — same visual language
 as the existing .sort-chip segmented controls used elsewhere in the app. */
 .review-window-toggle{display:flex;gap:6px;padding:12px 16px 0;}
@@ -716,7 +724,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-19.2</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-19.3</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -939,6 +947,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     </div>
     <div class="modal-body">
       <div class="small text3 mb8">Builds today's session from your Auto Routine exercise pool — no active mesocycle required. Each muscle only shows up if it's actually due (past its own minimum recovery gap since last trained), and gets a per-exposure dose sized for its own recovery speed, already accounting for any indirect/secondary credit it's picked up elsewhere this week. Up to 2 muscles at a time are auto-selected by readiness and ramp from MEV to MRV over about 4 weeks (hard-capped by 6); everyone else holds at MEV. Leave both fields below blank and it fills a session with everything due today (topped up to at least 10 sets if genuinely-eligible work allows); set Minutes OR Sets and it trims or fills to fit that instead — only one can be active at a time. You'll always get a warning (not a hard block) if the result still looks unusually long.</div>
+      <div class="small text2 mb8" id="auto-session-week-plan"></div>
       <div class="input-label">Minutes available (optional)</div>
       <input id="auto-session-minutes" type="number" min="1" inputmode="numeric" placeholder="Leave blank to use the default below" oninput="document.getElementById('auto-session-sets').value=''"/>
       <div class="small text3 mt4" id="auto-session-default-estimate"></div>
@@ -967,6 +976,18 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     </div>
   </div>
 </div>
+</div>
+
+<!-- Week plan chooser (2026-09-19) -->
+<div class="modal-overlay" id="modal-week-plan">
+  <div class="modal"><div class="modal-handle"></div>
+    <div class="modal-title">Plan your week</div>
+    <div class="modal-body" id="week-plan-body"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost flex-1" onclick="skipWeekPlan()">Use my usual pace</button>
+      <button class="btn btn-ghost flex-1" onclick="closeModal('modal-week-plan')">Close</button>
+    </div>
+  </div>
 </div>
 
 <!-- Switch Exercise (2026-08-21) -->
@@ -10361,6 +10382,16 @@ function getAutoRoutineSessionOffsetsThisWeek(minGapDays,daysLeft,firstOffset){
 // wait, over-estimated sessions left and left ~3 sets/muscle/week undelivered.)
 function getAutoRoutineSessionsLeftThisWeek(minGapDays){
   const daysLeft=getCalendarWeekDaysLeft();
+  // WEEK PLAN (2026-09-19): if the user picked how many sessions they will do this week (see
+  // getWeekPlanOptions), that is a far better answer than any guess from past frequency — someone on a
+  // rotating shift pattern can't be predicted from history, but knows their own week. The planned
+  // sessions still to do are laid out as evenly as the days left allow, and this muscle gets as many
+  // of them as its rest gap permits.
+  const plannedLeft=getWeekPlanSessionsLeft();
+  if(plannedLeft!=null){
+    const offsets=getSpreadSessionOffsets(plannedLeft,daysLeft);
+    return Math.max(1,getAutoRoutineMuscleSessionSlots(offsets,minGapDays,0).length);
+  }
   const possible=getAutoRoutineSessionOffsetsThisWeek(minGapDays,daysLeft,0).length;
   const g=Math.max(1,Math.ceil(minGapDays));
   const p=Math.min(1,Math.max(0.1,getAutoRoutineGymDaysPerWeek()/7));
@@ -11256,6 +11287,10 @@ function openAutoSessionModal(mesoIdx){
   const est=document.getElementById('auto-session-default-estimate');
   if(est)est.textContent='Default if left blank: ~'+getDefaultAutoSessionMinutes()+' min (everything due today, per the explanation above)';
   openModal('modal-auto-session');
+  renderAutoSessionWeekPlanRow();
+  // First time the Auto Session screen is opened in a calendar week (no plan chosen yet, and there is still
+  // volume to plan): put the week-plan chooser on top. Wrapped so a planning failure can never stop a session starting.
+  try{if(needsWeekPlanPrompt())openWeekPlanModal();}catch(e){console.error('week plan prompt failed:',e);}
 }
 // Home screen entry point (2026-08-21, user's explicit request for a dedicated home-screen
 // button) — reuses the exact same "find the active meso" logic renderActiveMesoHero already uses,
@@ -14934,6 +14969,182 @@ function getMuscleWeekPlan(muscle){
 // Whole-week roll-up for the Review tab's plan card: sessions needed = the hungriest muscle's count
 // (one session can train many muscles, so the week needs as many sessions as its most demanding
 // muscle), compared with how many the user is expected to fit from now at their usual frequency.
+// ── WEEK PLAN CHOOSER (2026-09-19, user's explicit request) ──
+// "On the day I try to start my first session, show the max number of sessions and their times, all
+// the way down to the lowest realistic number and their times, and let me select." The user works a
+// three-shift rota, so the sessions they can fit change week to week in a way no history-based guess can
+// follow — but THEY know their week. Each option is "N sessions from today": the remaining volume for
+// every muscle (this calendar week's aim minus what's delivered) is dealt across N sessions laid out as
+// evenly as the days left allow, giving each muscle only as many of them as its own rest gap permits and
+// never more than its per-exposure cap, and each session's length is estimated with the SAME per-set /
+// per-exercise time model the Auto Session screen uses. Options run from the most sessions the days
+// left allow (max 7) down to the fewest that still finish every muscle with no session over ~2 hours.
+// Picking one is per-week and optional (never a fixed routine): it makes getAutoRoutineSessionsLeftThisWeek
+// use the real number instead of a frequency guess, and it expires when the week does.
+// Estimates ignore indirect credit that other exercises will add during the week (so they run a touch
+// high for muscles like arms) and assume the sessions are spread evenly — treat the times as "about".
+function getCalendarWeekKey(){
+  const w=getCalendarWeekStart();
+  return w.getFullYear()+'-'+(w.getMonth()+1)+'-'+w.getDate();
+}
+function getActiveWeekPlan(){
+  const p=state.autoRoutineWeekPlan;
+  return p&&p.weekStart===getCalendarWeekKey()?p:null;
+}
+// Planned sessions still to do, today included: the plan's total minus distinct workout days since it was
+// made and before today (a workout logged earlier today, or before the plan existed, doesn't count).
+// null = no numeric plan (none chosen, or "use my usual pace" was picked).
+function getWeekPlanSessionsLeft(){
+  const p=getActiveWeekPlan();
+  if(!p||!p.sessions)return null;
+  const madeAt=new Date(p.madeAt).getTime();
+  const today=new Date();today.setHours(0,0,0,0);
+  const days=new Set();
+  (state.history||[]).forEach(w=>{
+    if(!w)return;
+    const t=new Date(w.date).getTime();
+    if(t>=madeAt&&t<today.getTime()){const d=new Date(t);days.add(d.getFullYear()+'-'+d.getMonth()+'-'+d.getDate());}
+  });
+  return Math.max(1,p.sessions-days.size);
+}
+// Day offsets (0 = today) for n sessions spread as evenly as the days left allow.
+function getSpreadSessionOffsets(n,daysLeft){
+  n=Math.max(1,Math.min(n,daysLeft+1));
+  if(n===1)return[0];
+  const out=[];
+  for(let k=0;k<n;k++)out.push(Math.round(k*daysLeft/(n-1)));
+  return out;
+}
+// Which of those sessions (indexes) a muscle can join: greedy, at least minGapDays (whole days) apart,
+// starting no earlier than firstOffset.
+function getAutoRoutineMuscleSessionSlots(offsets,minGapDays,firstOffset){
+  const g=Math.max(1,Math.ceil(minGapDays));
+  const idx=[];let last=null;
+  offsets.forEach((o,k)=>{
+    if(o<(firstOffset||0))return;
+    if(last===null||o-last>=g){idx.push(k);last=o;}
+  });
+  return idx;
+}
+function estimateWeekPlanSessionMinutes(entries){
+  const picks=[];let sets=0;
+  entries.forEach(e=>{
+    let rem=e.sets,ci=0;
+    while(rem>0){
+      const c=e.it.cands[Math.min(ci,e.it.cands.length-1)];
+      const n=Math.min(3,rem); // same 3-sets-per-exercise variety threshold the builder uses
+      picks.push({exId:c.exId,sets:n,muscle:e.it.m});
+      rem-=n;sets+=n;ci++;
+    }
+  });
+  let sec=picks.length?estimatePicksSeconds(picks):0;
+  // The builder pads a session up to AUTO_ROUTINE_MIN_SESSION_SETS (10) sets, so a nearly-empty day still
+  // takes a real workout's time — scale up to that floor at this session's own per-set pace (or a typical
+  // 3 minutes a set when nothing at all is due).
+  if(sets<10)sec=(sets>0?sec/sets:180)*10;
+  return Math.round(sec/60);
+}
+function getWeekPlanOptions(){
+  const act=getAutoRoutineActiveMuscles();
+  const daysLeft=getCalendarWeekDaysLeft();
+  const maxN=Math.min(7,daysLeft+1);
+  const items=[];
+  Object.keys(state.volumeLandmarks||{}).forEach(m=>{
+    let cands=[];try{cands=rankCandidatesForMuscle(m,null);}catch(e){}
+    if(!cands.length)return;
+    const info=getMuscleExposureInfo(m,act);
+    const aim=getAutoRoutineMuscleTargetNow(m);
+    const delivered=getAutoRoutineDeliveredSoFar(m,act,[],'week');
+    const remaining=Math.max(0,Math.round((aim-delivered)*10)/10);
+    if(remaining<=0)return;
+    items.push({m,remaining,cap:info.exposureCap,gap:info.minGapDays,first:info.eligible?0:Math.max(0,Math.ceil(info.minGapDays)-(info.daysSince||0)),cands});
+  });
+  const options=[];
+  for(let n=maxN;n>=1;n--){
+    const offsets=getSpreadSessionOffsets(n,daysLeft);
+    const sess=offsets.map(()=>[]);
+    let shortfall=0;const shortM=[];
+    items.forEach(it=>{
+      const slots=getAutoRoutineMuscleSessionSlots(offsets,it.gap,it.first);
+      let left=it.remaining;
+      slots.forEach((k,i)=>{
+        const d=Math.min(it.cap,Math.ceil(left/(slots.length-i)-1e-9));
+        if(d>0){sess[k].push({it,sets:d});left-=d;}
+      });
+      if(left>0.05){shortfall+=left;shortM.push(it.m);}
+    });
+    const minutes=sess.map(estimateWeekPlanSessionMinutes);
+    options.push({n,minutes,avg:Math.round(minutes.reduce((a,b)=>a+b,0)/n),max:Math.max(...minutes),shortfall:Math.round(shortfall*10)/10,shortMuscles:shortM});
+  }
+  return{options,maxN,items:items.length,daysLeft};
+}
+function needsWeekPlanPrompt(){
+  if(getActiveWeekPlan())return false; // already chosen, or "use my usual pace" already picked, this week
+  return getWeekPlanOptions().items>0;
+}
+function renderWeekPlanModal(){
+  const el=document.getElementById('week-plan-body');
+  if(!el)return;
+  const data=getWeekPlanOptions();
+  if(!data.items){el.innerHTML='<div class="small text2">Every muscle has already hit its aim for this week \u2014 nothing left to plan.</div>';return;}
+  const LIMIT=120; // minutes: the same "very long session" line the app already warns at
+  const ok=o=>o.shortfall===0&&o.max<=LIMIT;
+  const lastOk=data.options.reduce((a,o,i)=>ok(o)?i:a,-1);
+  const shown=lastOk>=0?data.options.slice(0,lastOk+1):data.options;
+  const cur=getActiveWeekPlan();
+  const avgDays=getAutoRoutineGymDaysPerWeek();
+  const usualN=Math.max(1,Math.min(data.maxN,1+Math.floor(avgDays*data.daysLeft/7+0.25)));
+  const pl=n=>n!==1?'s':'';
+  const rows=shown.map(o=>{
+    let note='';
+    if(o.shortfall>0)note='<div class="wp-opt-note" style="color:var(--orange)">Can\u2019t fully fit \u2014 about '+o.shortfall+' set'+pl(o.shortfall)+' short ('+o.shortMuscles.join(', ')+')</div>';
+    else if(o.max>LIMIT)note='<div class="wp-opt-note" style="color:var(--orange)">Longest session runs over 2 hours</div>';
+    return '<div class="wp-opt'+(cur&&cur.sessions===o.n?' sel':'')+'" onclick="selectWeekPlan('+o.n+')">'
+      +'<div class="wp-opt-top"><b>'+o.n+' session'+pl(o.n)+'</b>'+(o.n===usualN?'<span class="wp-opt-tag">\u2248 your usual</span>':'')+'<span class="wp-opt-avg">avg '+o.avg+' min \u00B7 longest '+o.max+'</span></div>'
+      +'<div class="wp-opt-times">'+o.minutes.join(' \u00B7 ')+' min</div>'+note+'</div>';
+  }).join('');
+  el.innerHTML='<div class="small text3 mb8" style="line-height:1.5">Pick how many sessions you\u2019ll do for the rest of this week, today included. Each shows roughly how long every session would run to finish the week\u2019s volume for all muscles. It only lasts this week \u2014 change it any time.</div>'
+    +rows
+    +'<div class="small text3 mt4" style="line-height:1.5">Times are estimates, with sessions spread evenly over the days left \u2014 train whenever suits you. '+(lastOk>=0&&lastOk<data.options.length-1?'Fewer than '+shown[shown.length-1].n+' can\u2019t finish every muscle in a realistic session, so those are hidden.':'')+'</div>';
+}
+function openWeekPlanModal(){
+  renderWeekPlanModal();
+  openModal('modal-week-plan');
+}
+function afterWeekPlanChange(){
+  renderAutoSessionWeekPlanRow();
+  const est=document.getElementById('auto-session-default-estimate');
+  const am=document.getElementById('modal-auto-session');
+  if(est&&am&&am.classList.contains('open'))est.textContent='Default if left blank: ~'+getDefaultAutoSessionMinutes()+' min (everything due today, per the explanation above)';
+  try{renderReview();}catch(e){console.error('renderReview after week plan change failed:',e);}
+}
+function selectWeekPlan(n){
+  state.autoRoutineWeekPlan={weekStart:getCalendarWeekKey(),sessions:n,madeAt:new Date().toISOString()};
+  save();
+  closeModal('modal-week-plan');
+  afterWeekPlanChange();
+}
+// "Use my usual pace": no numeric plan this week, and stop asking until next week.
+function skipWeekPlan(){
+  state.autoRoutineWeekPlan={weekStart:getCalendarWeekKey(),sessions:null,madeAt:new Date().toISOString()};
+  save();
+  closeModal('modal-week-plan');
+  afterWeekPlanChange();
+}
+function renderAutoSessionWeekPlanRow(){
+  const el=document.getElementById('auto-session-week-plan');
+  if(!el)return;
+  const p=getActiveWeekPlan();
+  const link=t=>'<span style="color:var(--accent2);cursor:pointer;text-decoration:underline" onclick="openWeekPlanModal()">'+t+'</span>';
+  if(p&&p.sessions){
+    const left=getWeekPlanSessionsLeft();
+    el.innerHTML='\uD83D\uDCC5 This week: <b>'+p.sessions+' session'+(p.sessions!==1?'s':'')+'</b> planned'+(left!=null&&left!==p.sessions?' ('+left+' left)':'')+' \u00B7 '+link('change');
+  }else if(p){
+    el.innerHTML='\uD83D\uDCC5 Week plan: using your usual pace \u00B7 '+link('plan the week');
+  }else{
+    el.innerHTML='\uD83D\uDCC5 '+link('Plan this week\u2019s sessions');
+  }
+}
 function getWeekPlanSummary(){
   const plans=[];
   Object.keys(state.volumeLandmarks||{}).forEach(m=>{
@@ -14943,7 +15154,8 @@ function getWeekPlanSummary(){
   });
   const daysLeft=getCalendarWeekDaysLeft();
   const avg=getAutoRoutineGymDaysPerWeek();
-  const expected=Math.max(1,Math.min(daysLeft+1,1+Math.floor(avg*daysLeft/7+0.25)));
+  const planLeft=getWeekPlanSessionsLeft();
+  const expected=planLeft!=null?Math.max(1,Math.min(daysLeft+1,planLeft)):Math.max(1,Math.min(daysLeft+1,1+Math.floor(avg*daysLeft/7+0.25)));
   const needed=plans.reduce((a,p)=>Math.max(a,p.sessions),0);
   const weekStart=getCalendarWeekStart();
   let hitRolling=0,hitWeek=0;
@@ -14952,7 +15164,7 @@ function getWeekPlanSummary(){
     const b=getMuscleVolumeBreakdownSince(p.muscle,weekStart);
     if(b.direct+b.indirect>=p.aim-0.05)hitWeek++;
   });
-  return{plans,needed,expected,avg,daysLeft,sessionsDone:getCalendarWeekSessionsDone(),
+  return{plans,needed,expected,avg,daysLeft,planned:planLeft!=null,planTotal:(getActiveWeekPlan()||{}).sessions||null,sessionsDone:getCalendarWeekSessionsDone(),
     shortfall:plans.filter(p=>p.shortfall>0),bigger:plans.filter(p=>p.biggerSessions),
     hitRolling,hitWeek,total:plans.length};
 }
@@ -14969,13 +15181,13 @@ function getWeekPlanCardHtml(){
     v={icon:'\u2705',label:'Week done',color:'var(--green)',text:'Every muscle has hit its aim for this week.'};
   }else if(s.needed>s.expected){
     v={icon:'\uD83D\uDD34',label:'Up your game',color:'var(--red)',
-      text:s.needed+' session'+pl(s.needed)+' needed at normal size, but at your usual pace you\u2019d only fit about '+s.expected+'. Get in the gym more \u2014 or expect bigger sessions.'};
+      text:s.needed+' session'+pl(s.needed)+' needed at normal size, but '+(s.planned?'your plan only has '+s.expected+' left':'at your usual pace you\u2019d only fit about '+s.expected)+'. Get in the gym more \u2014 or expect bigger sessions.'};
   }else if(s.needed<s.expected){
     v={icon:'\uD83D\uDFE2',label:'Light week',color:'var(--green)',
-      text:'Only '+s.needed+' session'+pl(s.needed)+' needed \u2014 you\u2019d usually fit about '+s.expected+' more. You can ease off.'};
+      text:'Only '+s.needed+' session'+pl(s.needed)+' needed \u2014 '+(s.planned?'your plan has '+s.expected+' left':'you\u2019d usually fit about '+s.expected+' more')+'. You can ease off.'};
   }else{
     v={icon:'\uD83D\uDFE1',label:'On track',color:'var(--accent2)',
-      text:s.needed+' session'+pl(s.needed)+' needed \u2014 about what you usually fit.'};
+      text:s.needed+' session'+pl(s.needed)+' needed \u2014 '+(s.planned?'matches your plan.':'about what you usually fit.')};
   }
   const hungriest=s.plans.filter(p=>p.sessions>0&&p.sessions===s.needed).sort((a,b)=>b.sessions-a.sessions||b.remaining-a.remaining).slice(0,4);
   const bigNum=s.needed;
@@ -14983,9 +15195,10 @@ function getWeekPlanCardHtml(){
     +'<div><div style="font-size:30px;font-weight:800;line-height:1">'+bigNum+'</div><div class="small text3">more session'+pl(bigNum)+' needed by Sunday</div></div>'
     +'<span style="font-size:12px;font-weight:700;color:'+v.color+';background:var(--bg3);border:1px solid '+v.color+';border-radius:12px;padding:5px 10px;white-space:nowrap">'+v.icon+' '+v.label+'</span></div>'
     +'<div class="small text2" style="margin-top:8px;line-height:1.45">'+v.text+'</div>'
-    +'<div class="small text3" style="margin-top:6px;line-height:1.5">'+s.sessionsDone+' session'+pl(s.sessionsDone)+' so far this week \u00B7 you usually do ~'+(Math.round(s.avg*2)/2)+'/week \u00B7 '+dayWord+'</div>'
+    +'<div class="small text3" style="margin-top:6px;line-height:1.5">'+s.sessionsDone+' session'+pl(s.sessionsDone)+' so far this week \u00B7 '+(s.planned?'your plan: '+s.planTotal+' sessions this week':'you usually do ~'+(Math.round(s.avg*2)/2)+'/week')+' \u00B7 '+dayWord+'</div>'
     +(hungriest.length?'<div style="margin-top:8px"><span class="small text3">Driving it: </span>'+hungriest.map(p=>'<span class="muscle-tag">'+p.muscle+' \u00B7 '+p.sessions+'</span>').join('')+'</div>':'')
-    +'<div class="small text3" style="margin-top:8px">At aim \u2014 previous 7 days: '+s.hitRolling+'/'+s.total+' muscles \u00B7 this week so far: '+s.hitWeek+'/'+s.total+'</div>';
+    +'<div class="small text3" style="margin-top:8px">At aim \u2014 previous 7 days: '+s.hitRolling+'/'+s.total+' muscles \u00B7 this week so far: '+s.hitWeek+'/'+s.total+'</div>'
+    +'<div style="margin-top:10px"><button class="btn btn-ghost btn-sm" onclick="openWeekPlanModal()">\uD83D\uDCC5 '+(s.planned?'Change week plan':'Plan my week')+'</button></div>';
 }
 // Single-gauge visual for one muscle's Review row (2026-09-10, replacing the earlier three-bars
 // version — see CSS comment on .lm-gauge for why). Four colour zones with fixed meaning across
