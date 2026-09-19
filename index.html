@@ -275,6 +275,26 @@ the exact count, instead of three separate bars each needing its own read.*/
 .lm-gauge-target{position:absolute;top:-3px;bottom:-3px;width:2px;border-radius:1px;background:var(--purple);}
 .lm-gauge-target-val{position:absolute;top:17px;transform:translateX(-50%);font-size:10px;font-weight:700;color:var(--purple);white-space:nowrap;}
 .lm-gauge-caption{display:flex;justify-content:space-between;margin-top:18px;font-size:10.5px;color:var(--text3);font-variant-numeric:tabular-nums;}
+/* In-workout muscle volume progress panel (2026-09-19) — reuses the Review gauge's purple aim line. */
+#workout-volume-panel{margin-top:8px;}
+.wvp-head{display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-size:11px;color:var(--text2);}
+.wvp-strip{display:flex;gap:6px;overflow-x:auto;padding:6px 0 2px;-webkit-overflow-scrolling:touch;}
+.wvp-chip{position:relative;flex:0 0 auto;min-width:60px;padding:4px 8px 8px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);font-size:10.5px;color:var(--text2);overflow:hidden;}
+.wvp-chip b{display:block;font-size:12px;color:var(--text);font-variant-numeric:tabular-nums;}
+.wvp-chip i{position:absolute;left:0;bottom:0;height:3px;background:var(--accent);}
+.wvp-chip.plan{border-color:var(--accent2);}.wvp-chip.plan i{background:var(--accent2);}
+.wvp-chip.hit{border-color:var(--green);}.wvp-chip.hit i{background:var(--green);}
+.wvp-body{max-height:34vh;overflow-y:auto;margin-top:6px;}
+.wvp-row{padding:6px 0;border-top:1px solid var(--border);}
+.wvp-top{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;}
+.wvp-name{font-weight:600;color:var(--text);}
+.wvp-num{color:var(--text2);font-variant-numeric:tabular-nums;text-align:right;}.wvp-num b{color:var(--text);}
+.wvp-track{position:relative;height:10px;border-radius:5px;background:var(--bg4);margin-top:5px;}
+.wvp-fill{display:flex;height:100%;border-radius:5px;overflow:hidden;}
+.wvp-seg-before{background:var(--text3);}.wvp-seg-done{background:var(--accent);}
+.wvp-seg-plan{background:repeating-linear-gradient(45deg,rgba(var(--accent-rgb),.6) 0 4px,rgba(var(--accent-rgb),.2) 4px 8px);}
+.wvp-aim{position:absolute;top:-3px;bottom:-3px;width:2px;border-radius:1px;background:var(--purple);}
+.wvp-note{font-size:10.5px;color:var(--text3);margin-top:3px;}
 /* Review window toggle (trailing 7 days vs. calendar-Monday current week) — same visual language
 as the existing .sort-chip segmented controls used elsewhere in the app. */
 .review-window-toggle{display:flex;gap:6px;padding:12px 16px 0;}
@@ -470,6 +490,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div id="workout-volume-note" style="margin-top:4px;font-size:11px;color:#2ed573;display:none"></div>
     <div id="workout-session-set-warning" style="margin-top:4px;font-size:11px;color:#ff4757;font-weight:700;display:none"></div>
     <div id="workout-review-note" style="margin-top:4px;font-size:11px;color:var(--text2);display:none;cursor:pointer;text-decoration:underline"></div>
+    <div id="workout-volume-panel" style="display:none"></div>
     <input id="workout-notes" placeholder="Session notes..." style="margin-top:6px;font-size:12px;padding:6px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px"/>
   </div>
   <div class="scroll pb" id="exercises-container"><div style="height:10px"></div></div>
@@ -695,7 +716,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-18.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-19.2</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -2455,6 +2476,98 @@ function updateWorkoutStats(){
   if(volEl)volEl.textContent=vol>0?vol.toFixed(vol%1?1:0)+'kg':'0kg';
   if(setsEl)setsEl.textContent=sets;
   if(rpeEl)rpeEl.textContent=effCount?(effSum/effCount).toFixed(1):'—';
+  try{renderWorkoutVolumePanel();}catch(e){console.error('renderWorkoutVolumePanel failed:',e);}
+}
+// IN-WORKOUT MUSCLE VOLUME PANEL (2026-09-19, user's explicit request): "something to visualise
+// muscle volume progression so I can think whether I have the energy to fit another set in this
+// workout to complete my volume goals." For every muscle this workout touches (primary or as a
+// secondary), one bar: what the window already had BEFORE today (grey) + what THIS workout has done
+// so far (solid) + sets still planned but not ticked off (striped), against the same dynamic aim the
+// Review gauge shows (purple line). A collapsed one-line strip of chips by default (phone-friendly);
+// tap it to open the full bars plus a short list of eligible muscles this workout isn't touching that
+// are still short. Uses the Review tab's window toggle so its "before" numbers match Review exactly.
+// History-based "before" values are cached (keyed on history length + window mode + date) because
+// this runs on every set change.
+function getWorkoutVolumeRows(){
+  const out={rows:[],alsoShort:[],label:getReviewWindowLabel()};
+  if(!activeWorkout||!(activeWorkout.exercises||[]).length)return out;
+  const lm=state.volumeLandmarks||{};
+  const key=(state.history||[]).length+'|'+state.reviewWindowMode+'|'+new Date().toDateString();
+  if(!window.__wvpCache||window.__wvpCache.key!==key){
+    const before={};Object.keys(lm).forEach(m=>{before[m]=getMuscleVolumeForReview(m);});
+    window.__wvpCache={key,before};
+  }
+  const before=window.__wvpCache.before;
+  const done={},planned={},order=[];
+  activeWorkout.exercises.forEach(ex=>{
+    const exData=getExercise(ex.exId);if(!exData)return;
+    const doneCredit=getExerciseVolumeCredit(ex);
+    const allCredit=getExerciseVolumeCredit({sets:(ex.sets||[]).map(s=>s?{...s,done:true}:s)});
+    const plannedCredit=Math.max(0,allCredit-doneCredit);
+    const apply=(m,f)=>{
+      if(!lm[m])return;
+      if(!(m in done)){done[m]=0;planned[m]=0;order.push(m);}
+      done[m]+=doneCredit*f;planned[m]+=plannedCredit*f;
+    };
+    apply(exData.muscle,1);
+    if(exData.secondary)exData.secondary.split(',').map(s=>s.trim()).filter(Boolean).forEach(sm=>apply(sm,getSecondaryMuscleFraction(exData,sm)));
+  });
+  order.forEach(m=>{
+    const b=before[m]||0,d=Math.round(done[m]*10)/10,p=Math.round(planned[m]*10)/10;
+    out.rows.push({m,before:b,done:d,planned:p,aim:getAutoRoutineMuscleTargetNow(m)});
+  });
+  const act=getAutoRoutineActiveMuscles();
+  Object.keys(lm).forEach(m=>{
+    if(m in done)return;
+    const aim=getAutoRoutineMuscleTargetNow(m),toGo=aim-(before[m]||0);
+    if(toGo<1)return;
+    let ok=true;try{ok=rankCandidatesForMuscle(m).length>0&&getMuscleExposureInfo(m,act).eligible;}catch(e){}
+    if(ok)out.alsoShort.push({m,toGo:Math.round(toGo*10)/10});
+  });
+  return out;
+}
+function toggleWorkoutVolumePanel(){
+  state.workoutVolumePanelOpen=!state.workoutVolumePanelOpen;
+  save();
+  renderWorkoutVolumePanel();
+}
+function renderWorkoutVolumePanel(){
+  const el=document.getElementById('workout-volume-panel');
+  if(!el)return;
+  const data=getWorkoutVolumeRows();
+  if(!data.rows.length){el.style.display='none';el.innerHTML='';return;}
+  el.style.display='';
+  const open=!!state.workoutVolumePanelOpen;
+  const f=x=>String(Math.round(x*10)/10);
+  const pl=n=>n!==1?'s':'';
+  const chips=data.rows.map(r=>{
+    const now=r.before+r.done,withPlan=now+r.planned;
+    const cls=now>=r.aim-0.05?'hit':(withPlan>=r.aim-0.05?'plan':'');
+    const fill=r.aim>0?Math.min(100,now/r.aim*100):100;
+    return '<div class="wvp-chip '+cls+'"><span>'+r.m+'</span><b>'+f(now)+'/'+f(r.aim)+'</b><i style="width:'+fill.toFixed(0)+'%"></i></div>';
+  }).join('');
+  let html='<div class="wvp-head" onclick="toggleWorkoutVolumePanel()"><span>\uD83D\uDCCA Muscle volume vs aim ('+data.label+')</span><span>'+(open?'\u25B4 hide':'\u25BE details')+'</span></div>';
+  if(!open){
+    html+='<div class="wvp-strip" onclick="toggleWorkoutVolumePanel()">'+chips+'</div>';
+  }else{
+    html+='<div class="wvp-body">'+data.rows.map(r=>{
+      const now=r.before+r.done,withPlan=now+r.planned;
+      const scale=Math.max(r.aim,withPlan,1);
+      const pct=x=>Math.max(0,Math.min(100,x/scale*100)).toFixed(1);
+      let note;
+      if(now>=r.aim-0.05)note='\u2713 aim reached'+(now>r.aim+0.5?' (+'+f(now-r.aim)+' over)':'');
+      else if(withPlan>=r.aim-0.05)note='Your planned sets will reach the aim ('+f(r.aim-now)+' to go)';
+      else note=f(r.aim-now)+' to go \u2014 ~'+Math.ceil(r.aim-withPlan-1e-9)+' more set'+pl(Math.ceil(r.aim-withPlan-1e-9))+' after your planned sets';
+      return '<div class="wvp-row"><div class="wvp-top"><span class="wvp-name">'+r.m+'</span><span class="wvp-num">'+f(r.before)+' + '+f(r.done)+(r.planned>0?' (+'+f(r.planned)+' planned)':'')+' \u2192 <b>'+f(now)+'</b> / '+f(r.aim)+'</span></div>'
+        +'<div class="wvp-track"><div class="wvp-fill"><div class="wvp-seg-before" style="width:'+pct(r.before)+'%"></div><div class="wvp-seg-done" style="width:'+pct(r.done)+'%"></div><div class="wvp-seg-plan" style="width:'+pct(r.planned)+'%"></div></div>'
+        +'<div class="wvp-aim" style="left:'+pct(r.aim)+'%"></div></div>'
+        +'<div class="wvp-note">'+note+'</div></div>';
+    }).join('')
+    +(data.alsoShort.length?'<div class="wvp-row"><div class="wvp-note">Not in this workout, still short: '+data.alsoShort.map(x=>x.m+' '+f(x.toGo)).join(' \u00B7 ')+'</div></div>':'')
+    +'<div class="wvp-note" style="padding-top:6px">grey = before this workout \u00B7 solid = done \u00B7 striped = planned \u00B7 purple line = aim</div>'
+    +'</div>';
+  }
+  el.innerHTML=html;
 }
 function updateWorkoutEstimate(){
   const el=document.getElementById('workout-est-time');if(!el||!activeWorkout)return;
@@ -3970,9 +4083,7 @@ function checkPriorityReorderAfterEdit(routineId){
 // references this before its original `let` declaration (further down the file) would have run.
 let reviewPRsOpenMuscles=new Set();
 const LM_ZONE_COLORS={under:'#ff8c0055',building:'#47c8ff55',solid:'#2ed57355',over:'#ff475755'};
-[renderRoutinesList,renderExerciseDB,renderHistory,renderReview].forEach(fn=>{
-  try{fn();}catch(e){console.error(fn.name+' failed during startup:',e);}
-});
+// (2026-09-19) The startup render list that used to run HERE now runs at the very END of the script (see the comment there).
 
 // ── ROUTINES ──
 function daysAgo(dateStr){
@@ -10161,6 +10272,120 @@ function getMuscleNearestExpiryDays(muscle,horizonDays,directOnly){
   if(oldestAgeDays===null)return horizonDays; // nothing actually expiring right now — full horizon of runway, not urgent
   return Math.max(0,windowDays-oldestAgeDays);
 }
+// ── MULTI-HORIZON PLANNING (2026-09-19, user's explicit request; supersedes the 09-18.2
+// Current-Week-only version) ── The user trains on a DIFFERENT, random set of days every week and
+// wants Auto Routine to give what is due today while ALSO weighing (1) how the previous 7 days went
+// against the aim, (2) this calendar week's aim, and (3) the next few days (roll-off look-ahead).
+// So dosing no longer reads the Review tab's window toggle at all — that toggle now only changes
+// what Review DISPLAYS. getMuscleExposureDose looks at rolling AND calendar-week volume together.
+// The 09-18.2 build also learned the user's usual training WEEKDAYS; for someone whose days change
+// every week that is actively misleading (two weekdays that happened to repeat look like a
+// schedule), so it is gone — replaced by just HOW OFTEN they train per week (see below).
+// Monday 00:00 local of the current calendar week, and how many days come AFTER today before it
+// ends (Mon=6 ... Sun=0). Independent of state.reviewWindowMode on purpose.
+function getCalendarWeekStart(){
+  const now=new Date();const day=now.getDay();
+  return new Date(now.getFullYear(),now.getMonth(),now.getDate()+(day===0?-6:1-day));
+}
+function getCalendarWeekDaysLeft(){const day=new Date().getDay();return day===0?0:7-day;}
+// Distinct days with a logged workout so far this calendar week.
+function getCalendarWeekSessionsDone(){
+  const start=getCalendarWeekStart(),days=new Set();
+  (state.history||[]).forEach(w=>{
+    if(!w)return;const t=new Date(w.date);
+    if(t>=start)days.add(t.getFullYear()+'-'+t.getMonth()+'-'+t.getDate());
+  });
+  return days.size;
+}
+// Same per-set crediting as getMuscleVolumeBreakdown (direct / secondary-fraction indirect), just
+// windowed from an arbitrary start date instead of the fixed rolling MUSCLE_VOLUME_WINDOW_DAYS.
+function getMuscleVolumeBreakdownSince(muscle,startDate){
+  let direct=0,indirect=0;
+  (state.history||[]).filter(w=>w&&new Date(w.date)>=startDate).forEach(w=>(w.exercises||[]).forEach(ex=>{
+    if(!ex)return;
+    const exData=getExercise(ex.exId);if(!exData)return;
+    const credit=getExerciseVolumeCredit(ex);
+    if(exData.muscle===muscle)direct+=credit;
+    else if(exData.secondary&&exData.secondary.split(',').some(s=>s.trim()===muscle))indirect+=credit*getSecondaryMuscleFraction(exData,muscle);
+  }));
+  return{direct:Math.round(direct*10)/10,indirect:Math.round(indirect*10)/10};
+}
+// What the scheduler treats as "already delivered from history" for ONE window. Priority muscles:
+// direct only. Everyone else: direct + indirect. windowKind 'rolling' (default) = the previous 7
+// days, exactly as before; 'week' = this calendar week. Live in-session picks are added on top by
+// getAutoRoutineDeliveredSoFar.
+function getAutoRoutineHistDelivered(muscle,isPriority,windowKind){
+  if(windowKind==='week'){
+    const b=getMuscleVolumeBreakdownSince(muscle,getCalendarWeekStart());
+    return isPriority?b.direct:Math.round((b.direct+b.indirect)*10)/10;
+  }
+  return isPriority?getMuscleVolumeBreakdown(muscle).direct:getMuscleVolume(muscle).sets;
+}
+// HOW OFTEN the user trains: distinct workout days per ACTIVE week over the last 28 days (a
+// holiday week with nothing logged doesn't drag the average down). Falls back to 3 with under two
+// logged days of history. This replaces the 09-18.2 weekday learner — see the note above.
+function getAutoRoutineGymDaysPerWeek(){
+  const cutoff=Date.now()-28*864e5,days=new Set(),weeks=new Set();
+  (state.history||[]).forEach(w=>{
+    if(!w)return;
+    const ms=new Date(w.date).getTime();
+    if(!(ms>=cutoff)||ms>Date.now())return;
+    const t=new Date(ms);
+    days.add(t.getFullYear()+'-'+t.getMonth()+'-'+t.getDate());
+    weeks.add(Math.floor((ms-cutoff)/(7*864e5)));
+  });
+  if(days.size<2||weeks.size<1)return 3;
+  return Math.min(7,days.size/weeks.size);
+}
+// Day offsets (0 = today) on which a muscle COULD be trained before the calendar week ends,
+// spaced at least minGapDays apart (rounded UP to whole days — eligibility is measured in whole
+// calendar days). firstOffset > 0 for a muscle that is not eligible until later. This is pure
+// spacing CAPACITY — it says nothing about which days the user will actually train.
+function getAutoRoutineSessionOffsetsThisWeek(minGapDays,daysLeft,firstOffset){
+  const gap=Math.max(1,Math.ceil(minGapDays));
+  const offsets=[];let last=null;
+  for(let k=firstOffset||0;k<=daysLeft;k++){
+    if(last!==null&&k-last<gap)continue;
+    offsets.push(k);last=k;
+  }
+  return offsets;
+}
+// How many more sessions (today included) this muscle can realistically still get before Sunday.
+// The user's days are random, so this is an EXPECTATION, not a schedule: a muscle can only use a gym
+// day once its rest gap (g whole days) has passed, and then has to wait for the next gym day to
+// actually come around — so its expected time between sessions is g-1+1/p days (p = chance any given
+// day is a gym day = usual gym days per week / 7), NOT just the rest gap. Rounded DOWN and capped by
+// the pure spacing capacity: under-guessing only makes today's dose a little bigger, over-guessing
+// risks ending the week short. Recomputed fresh every session, so a missed day just makes the next
+// dose bigger. (Simulated: counting every gym-day-eligible slot as a certain session, ignoring the
+// wait, over-estimated sessions left and left ~3 sets/muscle/week undelivered.)
+function getAutoRoutineSessionsLeftThisWeek(minGapDays){
+  const daysLeft=getCalendarWeekDaysLeft();
+  const possible=getAutoRoutineSessionOffsetsThisWeek(minGapDays,daysLeft,0).length;
+  const g=Math.max(1,Math.ceil(minGapDays));
+  const p=Math.min(1,Math.max(0.1,getAutoRoutineGymDaysPerWeek()/7));
+  const cycleDays=g-1+1/p;
+  const expected=1+Math.floor(daysLeft/cycleDays+1e-9);
+  return Math.max(1,Math.min(possible,expected));
+}
+// A muscle's NORMAL per-session dose: its steady-state share of the aim, never above its per-exposure
+// cap. Used by the Review week plan to answer "how many sessions at normal size."
+function getAutoRoutineNormalSessionDose(aim,info){
+  return Math.max(1,Math.min(info.exposureCap,Math.ceil(aim/(7/info.idealGapDays)-1e-9)));
+}
+// Shared by the real dose (getMuscleExposureDose) and anything that needs the same arithmetic.
+// deadlineMode false: the original steady-state rate (remaining spread over a full week's ideal
+// cadence). true: enough per session to finish by the deadline (ceil, with a tiny epsilon so float
+// noise like 8.0000000001 can't add a whole extra set).
+function getAutoRoutineReactiveBaseDose(remaining,cap,idealSessionsPerWeek,deadlineMode,sessionsLeft){
+  if(deadlineMode)return remaining>0?Math.min(cap,Math.ceil(remaining/Math.max(1,sessionsLeft)-1e-9)):0;
+  return Math.min(cap,remaining/idealSessionsPerWeek);
+}
+// Return-from-break scale-down (unchanged formula, just shared).
+function getAutoRoutineBreakScale(daysSince,idealGapDays){
+  if(daysSince!=null&&daysSince>idealGapDays)return Math.max(AUTO_ROUTINE_BREAK_SCALE_FLOOR,Math.min(1,1-(daysSince-idealGapDays)/AUTO_ROUTINE_BREAK_RECOVERY_WINDOW_DAYS));
+  return 1;
+}
 // SECONDARY/INDIRECT-AWARE EXPOSURE DOSING (2026-09-05, handover spec §1): getMuscleExposureDose
 // used to dose every muscle on weeklyTargetNow alone, with zero awareness of what's already been
 // delivered this week — direct or indirect (secondary-muscle credit from another exercise, e.g.
@@ -10175,9 +10400,9 @@ function getMuscleNearestExpiryDays(muscle,horizonDays,directOnly){
 // correctly sees credit an earlier exercise in this same session already gave it, not a stale
 // pre-session number. Defaults to [] so existing callers with no live picks context (e.g.
 // getAutoRoutineTotalDueNow's pre-build estimate) are unaffected.
-function getAutoRoutineDeliveredSoFar(muscle,activeSet,picks){
+function getAutoRoutineDeliveredSoFar(muscle,activeSet,picks,windowKind){
   const isPriority=activeSet.has(muscle);
-  const histDelivered=isPriority?getMuscleVolumeBreakdown(muscle).direct:getMuscleVolume(muscle).sets;
+  const histDelivered=getAutoRoutineHistDelivered(muscle,isPriority,windowKind);
   let liveDirect=0,liveIndirect=0;
   (picks||[]).forEach(p=>{
     const exData=getExercise(p.exId);if(!exData)return;
@@ -10196,8 +10421,10 @@ function getMuscleExposureDose(muscle,activeSet,picks){
   // Confirmed via simulation (handover spec §1): with zero history, getMuscleVolume/
   // getMuscleVolumeBreakdown correctly return 0, so delivered=0 and remaining=weeklyTargetNow
   // automatically — no special-casing "first session" needed or wanted here.
-  const delivered=getAutoRoutineDeliveredSoFar(muscle,activeSet,picks);
+  const delivered=getAutoRoutineDeliveredSoFar(muscle,activeSet,picks,'rolling'); // previous 7 days
+  const deliveredWeek=getAutoRoutineDeliveredSoFar(muscle,activeSet,picks,'week'); // this calendar week (2026-09-19)
   const remaining=Math.max(0,weeklyTargetNow-delivered);
+  const remainingWeek=Math.max(0,weeklyTargetNow-deliveredWeek);
   // LOOK-AHEAD (see REVISION 2 in the comment above getMuscleExpiringVolume): the horizon is this
   // muscle's OWN minGapDays — how much of `delivered` will expire before a second session could
   // possibly happen at all — not a fixed constant. If that's non-zero there is no session to split
@@ -10242,24 +10469,52 @@ function getMuscleExposureDose(muscle,activeSet,picks){
   const runwayDays=unrecoverableNeed>0?getMuscleNearestExpiryDays(muscle,info.minGapDays,isPriority):info.minGapDays;
   const pullForwardRaw=runwayDays<=1?unrecoverableNeed:unrecoverableNeed/Math.max(1,Math.round(runwayDays));
   const pullForward=Math.min(unrecoverableNeed>0?Math.ceil(pullForwardRaw):0,maxAllowedTotal);
-  if(remaining<=0&&pullForward<=0)return{...info,weeklyTargetNow,dose:0}; // genuinely nothing needed now, nothing unrecoverable, or the ceiling's already full
+  if(remaining<=0&&pullForward<=0&&remainingWeek<=0)return{...info,weeklyTargetNow,dose:0}; // genuinely nothing needed in ANY window (previous 7 days, next few days, this week), or the ceiling's already full
   const idealSessionsPerWeek=7/info.idealGapDays;
-  const baseDose=Math.min(info.exposureCap,remaining/idealSessionsPerWeek);
-  let scaleFactor=1;
-  if(info.daysSince!=null&&info.daysSince>info.idealGapDays){
-    scaleFactor=Math.max(AUTO_ROUTINE_BREAK_SCALE_FLOOR,Math.min(1,1-(info.daysSince-info.idealGapDays)/AUTO_ROUTINE_BREAK_RECOVERY_WINDOW_DAYS));
-  }
+  // MULTI-HORIZON DOSE (2026-09-19, user's explicit request — random weekly schedule, so no single
+  // window and no fixed weekday pattern can be trusted). Three horizons feed ONE dose, whichever asks
+  // for the MOST (never summed — they describe the same missing volume seen through different windows):
+  //  1. PREVIOUS 7 DAYS: `remaining` vs the rolling window, spread at the muscle's steady-state cadence
+  //     (the original formula, untouched).
+  //  2. NEXT FEW DAYS: the roll-off look-ahead pullForward above (untouched).
+  //  3. THIS WEEK'S GOAL: `remainingWeek` vs the calendar week, split over the sessions the user can
+  //     realistically still do before Sunday (getAutoRoutineSessionsLeftThisWeek: spacing capacity,
+  //     capped by their usual gym days per week). CEIL so per-session rounding can never compound into a
+  //     shortfall. This is what closes a gap that the rolling window can't see — e.g. Monday, when last
+  //     week's late sets still fill the rolling window but this week's count is still zero.
+  // Ceiling for the week-driven part: 1.1x aim for the calendar week, plus MRV as the safety net on the
+  // rolling window — the rolling window legitimately runs well above the aim when a big session late
+  // last week sits next to the first sessions of this one (simulated: a tighter 1.5x-aim net there
+  // silently blocked exactly the catch-up the week's goal needed), so it can't use the tight 1.1x.
+  const scaleFactor=getAutoRoutineBreakScale(info.daysSince,info.idealGapDays);
+  const baseDose=getAutoRoutineReactiveBaseDose(remaining,info.exposureCap,idealSessionsPerWeek,false,null);
   const reactiveDoseRaw=remaining>0?Math.max(1,Math.round(baseDose*scaleFactor)):0;
   // Reactive dosing gets the STRICTER reference (maxAllowedReactive, against the real current
   // total) — this is the piece that fixes the overshoot: it can't push a total that's already at or
   // past the ceiling any higher, regardless of pull-forward.
   const reactiveDose=Math.min(reactiveDoseRaw,maxAllowedReactive);
-  // Same exposureCap ceiling as before — pulling volume forward can smooth the ramp but can never
-  // push a single session past this muscle's per-exposure safety limit. The COMBINED total is capped
-  // against maxAllowedTotal (the projected-after-expiry reference) since that's the number that
-  // actually determines where the rolling total settles once expiry genuinely happens.
-  const dose=Math.min(info.exposureCap,Math.min(reactiveDose+pullForward,maxAllowedTotal));
-  return{...info,weeklyTargetNow,dose,pulledForward:Math.max(0,dose-reactiveDose)};
+  // The COMBINED total is capped against maxAllowedTotal (the projected-after-expiry reference) since
+  // that's the number that actually determines where the rolling total settles once expiry happens.
+  const rollingPlusPull=Math.min(reactiveDose+pullForward,maxAllowedTotal);
+  let weekDose=0;
+  if(remainingWeek>0){
+    const sessionsLeft=getAutoRoutineSessionsLeftThisWeek(info.minGapDays);
+    const weekBase=getAutoRoutineReactiveBaseDose(remainingWeek,info.exposureCap,idealSessionsPerWeek,true,sessionsLeft);
+    const weekRaw=Math.max(1,Math.round(weekBase*scaleFactor));
+    const weekCeiling=Math.max(0,Math.min(
+      Math.round(weeklyTargetNow*AUTO_ROUTINE_LOOKAHEAD_ROLLING_CEILING-deliveredWeek),
+      Math.round(getMuscleLandmarks(muscle).mrv-delivered)));
+    weekDose=Math.min(weekRaw,weekCeiling);
+  }
+  // Same exposureCap ceiling as always — no horizon can push a single session past this muscle's
+  // per-exposure safety limit.
+  const dose=Math.min(info.exposureCap,Math.max(rollingPlusPull,weekDose));
+  // pulledForward = ONLY the part of the dose that nothing else asked for: buildAutoSession budgets it
+  // per session (AUTO_ROUTINE_MAX_PULLFORWARD_PER_SESSION) and defers the excess, so anything the
+  // reactive rate or THIS WEEK's goal already needs must never be mistaken for pull-forward and
+  // trimmed by that budget (simulated in a 2-day week: Quads' whole week-driven dose was labelled
+  // pull-forward, got deferred behind other muscles' look-ahead, and the muscle ended the week at 2/8).
+  return{...info,weeklyTargetNow,dose,pulledForward:Math.max(0,dose-Math.max(reactiveDose,weekDose))};
 }
 // 2026-08-29: mesoIdx is now OPTIONAL (nullable) — Auto Routine no longer needs an active meso for
 // its volume targets or priority (see the standing progress/priority section above); a real meso,
@@ -12155,7 +12410,13 @@ function confirmSuperset(){
   closeModal('modal-superset');renderActiveWorkout();
 }
 function ungroupSuperset(gid){
-  activeWorkout.exercises.forEach(e=>{if(e.supersetGroup===gid)e.supersetGroup=null;});
+  // BUG FIX (2026-09-19, user-reported: "I can't ungroup supersets"): the header's Ungroup button passes the
+  // group id through an inline onclick attribute, which turns it into a STRING. Manually-made supersets
+  // (confirmSuperset -> uid()) have string ids so they matched, but supersets that come from a routine or
+  // are auto-linked into an Auto Routine session (autoLinkKnownSupersets) use NUMERIC ids (1, 2, ...) —
+  // and 1 === '1' is false, so the strict comparison silently matched nothing. Compare as strings.
+  const g=String(gid);
+  activeWorkout.exercises.forEach(e=>{if(e.supersetGroup!=null&&String(e.supersetGroup)===g)e.supersetGroup=null;});
   renderActiveWorkout();
 }
 
@@ -14634,37 +14895,97 @@ function getMuscleAvgSetsPerSession(muscle,lookback){
   }
   return count?total/count:0;
 }
-// SCHEDULER-AWARE SESSIONS PROJECTION (2026-09-18, user's explicit request — replaces the naive
-// "remaining \u00f7 last-5-session average" estimate above, which was totally blind to how Auto Routine
-// actually paces a muscle. That old estimate had two real problems: (1) it used getMuscleAvgSetsPerSession,
-// a plain historical average with zero awareness of minGapDays/idealGapDays/exposureCap, so a muscle
-// that's INTENTIONALLY dosed in small frequent chunks (e.g. a priority muscle on a short gap) reads as
-// needing many more "sessions" than it actually will, purely because each real chunk is small; and (2)
-// it never checked whether that many sessions could even physically occur before the review window
-// resets, given the muscle's own minimum rest gap.
-// This instead walks forward using the SAME steady-state dose formula getMuscleExposureDose uses
-// (baseDose = remaining \u00f7 idealSessionsPerWeek, capped by exposureCap, floored at 1) so the
-// projection is mechanically tied to the real scheduler and can't drift from what it will actually do.
-// It intentionally leaves out the live-session-only machinery (rolling ceiling, pull-forward,
-// break-return scaling) since those react to real day-to-day noise that a forward projection can't
-// know yet \u2014 this is the same steady-state simplification getAutoRoutineMuscleTargetNow's own ramp
-// math already makes elsewhere.
-function getMuscleProjectedSessions(muscle){
+// WEEK PLAN (2026-09-19, user's explicit request; replaces the 09-18 sessions projection): "how many
+// sessions do I still need to finish this week's volume, so I know if it's a light week or I need to
+// get in the gym more." Deliberately NOT a copy of what the scheduler will dose — the scheduler always
+// spreads what is left over however many sessions the user is EXPECTED to do (so its count would
+// always just equal that expectation and say nothing). This asks the question independent of the
+// user's habits: at this muscle's NORMAL per-session size (its steady-state share of the aim), how
+// many more sessions would finish this calendar week's remaining volume? Compared against how many
+// sessions the user usually fits, that reads as light / on track / need more. Always the CALENDAR week
+// (the deadline the user cares about), whatever Review's window toggle shows.
+//  needed        sessions at normal size            possible  sessions the rest-gap even allows before Sunday
+//  sessions      min(needed,possible)               biggerSessions  fits only if sessions run bigger than normal
+//  shortfall     sets that can't be delivered by Sunday even at the per-session maximum
+function getMuscleWeekPlan(muscle){
   const activeSet=getAutoRoutineActiveMuscles();
-  const gaps=getMuscleGapDays(muscle,activeSet);
-  const target=getAutoRoutineMuscleTargetNow(muscle);
-  let remaining=Math.max(0,Math.round((target-getAutoRoutineDeliveredSoFar(muscle,activeSet,[]))*10)/10);
-  if(remaining<=0)return{sessions:0,days:0,idealGapDays:gaps.idealGapDays,minGapDays:gaps.minGapDays};
-  const idealSessionsPerWeek=7/gaps.idealGapDays;
-  const cap=gaps.exposureCap;
-  let sessions=0,daysElapsed=0;
-  while(remaining>0&&sessions<20){ // 20-session ceiling so a near-zero remainder can't loop forever
-    const dose=Math.max(1,Math.min(cap,Math.round(remaining/idealSessionsPerWeek)));
-    remaining-=dose;
-    sessions++;
-    daysElapsed+=gaps.idealGapDays;
+  const info=getMuscleExposureInfo(muscle,activeSet);
+  const isPriority=activeSet.has(muscle);
+  const aim=getAutoRoutineMuscleTargetNow(muscle);
+  const delivered=getAutoRoutineDeliveredSoFar(muscle,activeSet,[],'week');
+  const remaining=Math.max(0,Math.round((aim-delivered)*10)/10);
+  const daysLeft=getCalendarWeekDaysLeft();
+  const out={muscle,aim,remaining,needed:0,possible:0,sessions:0,lastDay:0,typicalDose:0,biggerSessions:false,shortfall:0,directOnly:isPriority,daysLeft};
+  if(remaining<=0)return out;
+  const firstOffset=info.eligible?0:Math.max(0,Math.ceil(info.minGapDays)-(info.daysSince||0));
+  const offsets=getAutoRoutineSessionOffsetsThisWeek(info.minGapDays,daysLeft,firstOffset);
+  const typical=getAutoRoutineNormalSessionDose(aim,info);
+  const cap=info.exposureCap;
+  const needed=Math.ceil(remaining/typical-1e-9);
+  out.typicalDose=typical;out.cap=cap;out.needed=needed;out.possible=offsets.length;
+  out.sessions=Math.min(needed,offsets.length);
+  out.lastDay=out.sessions>0?offsets[out.sessions-1]:0;
+  if(needed>offsets.length){
+    out.biggerSessions=offsets.length>0&&remaining<=offsets.length*cap;
+    out.shortfall=Math.max(0,Math.round((remaining-offsets.length*cap)*10)/10);
   }
-  return{sessions,days:Math.round(daysElapsed*10)/10,idealGapDays:gaps.idealGapDays,minGapDays:gaps.minGapDays};
+  return out;
+}
+// Whole-week roll-up for the Review tab's plan card: sessions needed = the hungriest muscle's count
+// (one session can train many muscles, so the week needs as many sessions as its most demanding
+// muscle), compared with how many the user is expected to fit from now at their usual frequency.
+function getWeekPlanSummary(){
+  const plans=[];
+  Object.keys(state.volumeLandmarks||{}).forEach(m=>{
+    let trainable=true;
+    try{trainable=rankCandidatesForMuscle(m).length>0;}catch(e){}
+    if(trainable)plans.push(getMuscleWeekPlan(m));
+  });
+  const daysLeft=getCalendarWeekDaysLeft();
+  const avg=getAutoRoutineGymDaysPerWeek();
+  const expected=Math.max(1,Math.min(daysLeft+1,1+Math.floor(avg*daysLeft/7+0.25)));
+  const needed=plans.reduce((a,p)=>Math.max(a,p.sessions),0);
+  const weekStart=getCalendarWeekStart();
+  let hitRolling=0,hitWeek=0;
+  plans.forEach(p=>{
+    if(getMuscleVolume(p.muscle).sets>=p.aim-0.05)hitRolling++;
+    const b=getMuscleVolumeBreakdownSince(p.muscle,weekStart);
+    if(b.direct+b.indirect>=p.aim-0.05)hitWeek++;
+  });
+  return{plans,needed,expected,avg,daysLeft,sessionsDone:getCalendarWeekSessionsDone(),
+    shortfall:plans.filter(p=>p.shortfall>0),bigger:plans.filter(p=>p.biggerSessions),
+    hitRolling,hitWeek,total:plans.length};
+}
+function getWeekPlanCardHtml(){
+  const s=getWeekPlanSummary();
+  const pl=n=>n!==1?'s':'';
+  const dayWord=(s.daysLeft+1)+' day'+pl(s.daysLeft+1)+' left incl. today';
+  let v;
+  if(s.shortfall.length){
+    const tot=Math.round(s.shortfall.reduce((a,p)=>a+p.shortfall,0)*10)/10;
+    v={icon:'\uD83D\uDFE0',label:'Can\u2019t fully fit',color:'var(--orange)',
+      text:'Even with the biggest safe session on every day left, about '+tot+' set'+pl(tot)+' ('+s.shortfall.map(p=>p.muscle+' '+p.shortfall).join(', ')+') can\u2019t be delivered by Sunday \u2014 not enough sessions fit before the week ends.'};
+  }else if(s.needed===0){
+    v={icon:'\u2705',label:'Week done',color:'var(--green)',text:'Every muscle has hit its aim for this week.'};
+  }else if(s.needed>s.expected){
+    v={icon:'\uD83D\uDD34',label:'Up your game',color:'var(--red)',
+      text:s.needed+' session'+pl(s.needed)+' needed at normal size, but at your usual pace you\u2019d only fit about '+s.expected+'. Get in the gym more \u2014 or expect bigger sessions.'};
+  }else if(s.needed<s.expected){
+    v={icon:'\uD83D\uDFE2',label:'Light week',color:'var(--green)',
+      text:'Only '+s.needed+' session'+pl(s.needed)+' needed \u2014 you\u2019d usually fit about '+s.expected+' more. You can ease off.'};
+  }else{
+    v={icon:'\uD83D\uDFE1',label:'On track',color:'var(--accent2)',
+      text:s.needed+' session'+pl(s.needed)+' needed \u2014 about what you usually fit.'};
+  }
+  const hungriest=s.plans.filter(p=>p.sessions>0&&p.sessions===s.needed).sort((a,b)=>b.sessions-a.sessions||b.remaining-a.remaining).slice(0,4);
+  const bigNum=s.needed;
+  return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px">'
+    +'<div><div style="font-size:30px;font-weight:800;line-height:1">'+bigNum+'</div><div class="small text3">more session'+pl(bigNum)+' needed by Sunday</div></div>'
+    +'<span style="font-size:12px;font-weight:700;color:'+v.color+';background:var(--bg3);border:1px solid '+v.color+';border-radius:12px;padding:5px 10px;white-space:nowrap">'+v.icon+' '+v.label+'</span></div>'
+    +'<div class="small text2" style="margin-top:8px;line-height:1.45">'+v.text+'</div>'
+    +'<div class="small text3" style="margin-top:6px;line-height:1.5">'+s.sessionsDone+' session'+pl(s.sessionsDone)+' so far this week \u00B7 you usually do ~'+(Math.round(s.avg*2)/2)+'/week \u00B7 '+dayWord+'</div>'
+    +(hungriest.length?'<div style="margin-top:8px"><span class="small text3">Driving it: </span>'+hungriest.map(p=>'<span class="muscle-tag">'+p.muscle+' \u00B7 '+p.sessions+'</span>').join('')+'</div>':'')
+    +'<div class="small text3" style="margin-top:8px">At aim \u2014 previous 7 days: '+s.hitRolling+'/'+s.total+' muscles \u00B7 this week so far: '+s.hitWeek+'/'+s.total+'</div>';
 }
 // Single-gauge visual for one muscle's Review row (2026-09-10, replacing the earlier three-bars
 // version — see CSS comment on .lm-gauge for why). Four colour zones with fixed meaning across
@@ -14757,26 +15078,31 @@ function renderReview(){
     const chip=meta?statusChipHtml(meta.icon,meta.label,meta.color):'';
     const needsReason=rec&&rec.status!=='building'&&rec.status!=='mav-to-mrv';
     const target=getAutoRoutineMuscleTargetNow(m);
-    // SESSIONS-REMAINING PREDICTION (2026-09-18, user's explicit request): only shown when there's
-    // a genuine gap left to this week's aim AND real recent history to base a pace estimate on —
-    // no history means no honest basis for a prediction, so it's silently omitted rather than
-    // guessed.
-    const remaining=Math.round((target-ms[m])*10)/10;
-    // Scheduler-aware projection (2026-09-18) — see getMuscleProjectedSessions for why this replaced
-    // the old history-average estimate. daysLeftInWindow is only defined in calendar-week mode (a
-    // trailing-7-day window has no fixed reset, so "won't fit before the deadline" isn't a coherent
-    // warning there).
-    const proj=remaining>0?getMuscleProjectedSessions(m):null;
-    const sessionsNeeded=proj&&proj.sessions>0?proj.sessions:null;
-    const daysLeftInWindow=state.reviewWindowMode==='calendar'?Math.max(0,7-windowDays):null;
-    const wontFit=sessionsNeeded&&daysLeftInWindow!=null&&proj.days>daysLeftInWindow;
+    // WEEK PLAN LINE (2026-09-19, user's explicit request): what's still needed by Sunday for THIS
+    // muscle, always in calendar-week terms (the plan card above says the same for the whole week),
+    // whichever window the toggle is showing. Priority muscles are judged on direct sets only by the
+    // scheduler (see getAutoRoutineDeliveredSoFar), so when that makes the gap differ from the gauge's
+    // (which also counts indirect sets) the line says so instead of silently disagreeing.
+    const plan=getMuscleWeekPlan(m);
+    const remaining=plan.remaining;
+    const pl=n=>n!==1?'s':'';
+    let planLine='';
+    if(remaining>0){
+      if(plan.sessions>0){
+        planLine='By Sunday: '+remaining+' set'+pl(remaining)+' to go \u2014 about '+plan.sessions+' more workout'+pl(plan.sessions)
+          +(plan.biggerSessions?' (bigger than usual, up to '+plan.cap+' sets each)':'');
+      }else{
+        planLine='By Sunday: '+remaining+' set'+pl(remaining)+' to go \u2014 no more sessions left that '+m+' can be trained in';
+      }
+      const gaugeGap=Math.max(0,Math.round((target-getMuscleVolumeBreakdownSince(m,getCalendarWeekStart()).direct-getMuscleVolumeBreakdownSince(m,getCalendarWeekStart()).indirect)*10)/10);
+      if(plan.directOnly&&Math.abs(remaining-gaugeGap)>0.05)planLine+=' (direct sets only)';
+      if(plan.shortfall>0)planLine+=' \u2014 <span style="color:var(--orange)">about '+plan.shortfall+' set'+pl(plan.shortfall)+' short even at the per-session max</span>';
+    }
     return '<div class="muscle-bar-wrap"><div class="muscle-bar-label"><span style="font-weight:600">'+m+'</span>'
       +'<span style="display:flex;align-items:center;gap:6px"><span class="text3 small">'+ms[m]+' sets / '+windowLabel+'</span>'+chip+'</span></div>'
       +landmarkGaugeHtml(m,ms[m],lm,target)
       +(needsReason?'<div class="small text2" style="margin-top:5px;line-height:1.4">'+rec.action+'</div>':'')
-      +(sessionsNeeded?'<div class="small text3" style="margin-top:3px">'+remaining+' sets to your aim \u2014 about '+sessionsNeeded+' more workout'+(sessionsNeeded!==1?'s':'')+' at '+m+'\u2019s normal '+proj.idealGapDays+'-day pace (~'+proj.days+' days)'
-          +(wontFit?' \u2014 <span style="color:var(--orange)">tighter than the '+daysLeftInWindow+' day'+(daysLeftInWindow!==1?'s':'')+' left this week</span>':'')
-          +'</div>':'')
+      +(planLine?'<div class="small text3" style="margin-top:3px">'+planLine+'</div>':'')
       +'</div>';
   }).join('');
   const zeroVolMuscles=MUSCLE_GROUPS.filter(m=>!ms[m]&&m!=='Full Body');
@@ -14826,6 +15152,8 @@ function renderReview(){
     if(!sugg.length)sugg.push({i:'🏆',t:'Excellent week! Great muscle balance and consistent frequency. Keep it up.'});
   }
   c.innerHTML=statsHtml
+    +'<div class="section-label">Volume Plan \u00B7 by Sunday</div>'
+    +'<div class="review-card" style="margin:0 16px 10px">'+getWeekPlanCardHtml()+'</div>'
     +'<div class="section-label">Muscle Volume ('+windowLabel+')</div>'
     +'<div class="review-card" style="margin:0 16px 10px">'
     +(!ww.length?'<div class="small text2" style="text-align:center;padding:14px 0">Complete workouts to see your breakdown</div>':'')
@@ -15802,6 +16130,17 @@ window.addEventListener('popstate',()=>{
 });
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2);}
 function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+// STARTUP RENDER LIST - moved here from ~line 4086 (2026-09-19). User-reported error on load:
+//   renderReview failed during startup: ReferenceError: Cannot access 'AUTO_ROUTINE_MAX_MAV_ACTIVE_MUSCLES' before initialization
+// Same TDZ class as LM_ZONE_COLORS / reviewPRsOpenMuscles further up: renderReview reaches Auto Routine consts declared
+// thousands of lines further down the file, and each earlier fix only moved ONE const up until the next one broke.
+// Running the list after the whole script has evaluated makes the entire class impossible - every top-level const/let
+// already exists by now. Nothing between the old position and here depends on these renders having happened first (only
+// static-element handler registrations, window/document listeners and the swipe-to-dismiss IIFE). Each render stays
+// individually try/catch-isolated so one failing render can never take down the others.
+[renderRoutinesList,renderExerciseDB,renderHistory,renderReview].forEach(fn=>{
+  try{fn();}catch(e){console.error(fn.name+' failed during startup:',e);}
+});
 </script>
 </body>
 </html>
