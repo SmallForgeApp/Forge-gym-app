@@ -724,7 +724,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-20.4</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-20.6</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -946,7 +946,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
     <div class="modal-body">
-      <div class="small text3 mb8">Builds today's session from your Auto Routine exercise pool — no active mesocycle required. Each muscle only shows up if it's actually due (past its own minimum recovery gap since last trained), and gets a per-exposure dose sized for its own recovery speed, already accounting for any indirect/secondary credit it's picked up elsewhere this week. Up to 2 muscles at a time are auto-selected by readiness and ramp from MEV to MRV over about 4 weeks (hard-capped by 6); everyone else holds at MEV. Leave both fields below blank and it fills a session with everything due today (topped up to at least 10 sets if genuinely-eligible work allows); set Minutes OR Sets and it trims or fills to fit that instead — only one can be active at a time. You'll always get a warning (not a hard block) if the result still looks unusually long.</div>
+      <div class="small text3 mb8">Builds today's session from your Auto Routine exercise pool — no active mesocycle required. Each muscle only shows up if it's actually due (past its own recovery gap since last trained \u2014 shorter when last time was only a set or two), and gets a per-exposure dose sized for its own recovery speed, already accounting for any indirect/secondary credit it's picked up elsewhere this week. Up to 2 muscles at a time are auto-selected by readiness and ramp from MEV to MRV over about 4 weeks (hard-capped by 6); everyone else holds at MEV. Leave both fields below blank and it fills a session with everything due today (topped up to at least 10 sets if genuinely-eligible work allows); set Minutes OR Sets and it trims or fills to fit that instead — only one can be active at a time. You'll always get a warning (not a hard block) if the result still looks unusually long.</div>
       <div class="small text2" id="auto-session-week-plan" style="margin:12px 0 12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg3);font-size:13px;line-height:1.4"></div>
       <div class="input-label">Minutes available (optional)</div>
       <input id="auto-session-minutes" type="number" min="1" inputmode="numeric" placeholder="Leave blank to use the default below" oninput="document.getElementById('auto-session-sets').value=''"/>
@@ -9710,15 +9710,45 @@ function getGMT430DayIndex(ms){
   return Math.floor((ms-AUTO_ROUTINE_DAY_BOUNDARY_HOUR_GMT*36e5)/864e5);
 }
 function getAutoRoutineDaysSinceMuscleTrained(muscle){
+  // Newest workout by DATE (2026-09-20): this used to return the first match in array order, which is only the newest
+  // workout while history is kept newest-first. Same answer for every well-ordered history; correct for any other.
+  let newest=null;
   for(let i=0;i<state.history.length;i++){
     const w=state.history[i];
+    if(!w)continue;
     const hit=(w.exercises||[]).some(e=>{
       const exData=getExercise(e.exId);
       return exData&&exData.muscle===muscle&&!isExerciseInjured(e.exId)&&(e.sets||[]).some(s=>s.done);
     });
-    if(hit)return getGMT430DayIndex(Date.now())-getGMT430DayIndex(new Date(w.date).getTime());
+    if(hit){const t=new Date(w.date).getTime();if(newest===null||t>newest)newest=t;}
   }
-  return null;
+  return newest===null?null:getGMT430DayIndex(Date.now())-getGMT430DayIndex(newest);
+}
+// LAST EXPOSURE (2026-09-20, user's explicit request): "a single set for a muscle counts as much for fatigue as 10 sets — it
+// needs the same amount of days to recover". True: days-since-trained looked at ANY done set, and the rest gap
+// (minGapDays) was one fixed number per muscle, so a 1-set top-up locked a muscle out for as long as a full session did.
+// Returns how many days ago the muscle was last trained (same 4:30am-GMT day rule as getAutoRoutineDaysSinceMuscleTrained,
+// which stays as the standalone version) AND how many working sets (warm-ups excluded) it got that day across every
+// workout logged on that day. Only this most recent day counts — the point is "how big was the last exposure".
+function getAutoRoutineLastExposure(muscle){
+  const trainedIn=w=>(w.exercises||[]).some(e=>{
+    const exData=getExercise(e.exId);
+    return exData&&exData.muscle===muscle&&!isExerciseInjured(e.exId)&&(e.sets||[]).some(s=>s.done);
+  });
+  // Newest by DATE, not by position in the array (the old first-match-wins loop silently depended on history being kept newest-first).
+  let newest=null;
+  state.history.forEach(w=>{if(w&&trainedIn(w)){const t=new Date(w.date).getTime();if(newest===null||t>newest)newest=t;}});
+  if(newest===null)return null;
+  const dayIdx=getGMT430DayIndex(newest);
+  let sets=0;
+  state.history.forEach(w=>{
+    if(!w||getGMT430DayIndex(new Date(w.date).getTime())!==dayIdx)return;
+    (w.exercises||[]).forEach(e=>{
+      const exData=getExercise(e.exId);
+      if(exData&&exData.muscle===muscle&&!isExerciseInjured(e.exId))sets+=(e.sets||[]).filter(s=>s.done&&s.type!=='warmup').length;
+    });
+  });
+  return{daysSince:getGMT430DayIndex(Date.now())-dayIdx,sets};
 }
 function getAutoRoutineMuscleReadiness(muscle){
   if(isAutoRoutineMuscleStruggling(muscle)||isAutoRoutineMuscleFullyResting(muscle))return 0;
@@ -10274,7 +10304,21 @@ function getMuscleGapDays(muscle,activeSet){
 }
 function getMuscleExposureInfo(muscle,activeSet){
   const gaps=getMuscleGapDays(muscle,activeSet||getAutoRoutineActiveMuscles());
-  const daysSince=getAutoRoutineDaysSinceMuscleTrained(muscle);
+  const lastExposure=getAutoRoutineLastExposure(muscle);
+  const daysSince=lastExposure?lastExposure.daysSince:null;
+  // FATIGUE-SCALED REST GAP (2026-09-20, user's explicit request — see getAutoRoutineLastExposure): the muscle's rest gap is its
+  // base minGapDays for a normal-sized last exposure, and shrinks in proportion when the last exposure was smaller — down to a
+  // third of it (a single set of a muscle that normally gets 3 needs about a third of the days). "Normal-sized" = the muscle's own
+  // normal per-session dose (its share of the weekly aim at its usual cadence). A last exposure of a full dose or more changes
+  // nothing (scale 1 = exactly the old rule, never longer). Eligibility is measured in whole days, so this only opens the door
+  // sooner for genuinely small exposures (1 set: a 2-day-gap muscle is eligible again tomorrow instead of the day after);
+  // whether it then gets sets, and how many, is still decided by the dose (need-based), not by eligibility.
+  let fatigueScale=1;
+  if(lastExposure){
+    const normalDose=getAutoRoutineNormalSessionDose(getAutoRoutineMuscleTargetNow(muscle),gaps);
+    fatigueScale=Math.max(1/3,Math.min(1,lastExposure.sets/Math.max(1,normalDose)));
+  }
+  const restGapDays=gaps.minGapDays*fatigueScale;
   // SAME-DAY LEFTOVER VOLUME (handover, 2026-09-08): daysSince is already
   // getGMT430DayIndex(now)-getGMT430DayIndex(lastTrained), so daysSince===0 already IS "same
   // calendar day, 4:30am-GMT-boundary" — no need to re-derive it from a raw timestamp. Without this,
@@ -10283,8 +10327,8 @@ function getMuscleExposureInfo(muscle,activeSet){
   // (getAutoRoutineDeliveredSoFar/getMuscleExposureDose) was already correct — it's the boolean gate
   // here that was blocking access to it same-day. Doesn't touch the from-tomorrow-onward rest-gap
   // rule at all: daysSince>=1 still goes through the normal minGapDays comparison exactly as before.
-  const eligible=daysSince==null||daysSince>=gaps.minGapDays||daysSince===0;
-  return{...gaps,daysSince,eligible};
+  const eligible=daysSince==null||daysSince>=restGapDays-1e-9||daysSince===0;
+  return{...gaps,daysSince,eligible,restGapDays,fatigueScale,lastExposureSets:lastExposure?lastExposure.sets:null};
 }
 // Return-from-break handling (spec §6): NOT a bigger catch-up dose — a SMALLER one, scaling back up
 // to normal over AUTO_ROUTINE_BREAK_RECOVERY_WINDOW_DAYS as the gap since last trained normalizes.
@@ -10891,7 +10935,7 @@ function buildAutoSession(mesoIdx,minutesAvailable,setsBudget){
         const pullForwardCandidates=orderedMuscles.filter(mu=>!includedMuscles.has(mu)&&!isAutoRoutineMuscleFullyResting(mu));
         pullForwardCandidates.sort((a,b)=>{
           const infoA=getMuscleExposureInfo(a,activeSet),infoB=getMuscleExposureInfo(b,activeSet);
-          return(infoA.minGapDays-infoA.daysSince)-(infoB.minGapDays-infoB.daysSince);
+          return(infoA.restGapDays-infoA.daysSince)-(infoB.restGapDays-infoB.daysSince);
         });
         // ROUND-ROBIN here too (2026-09-11, same request/reasoning as Stage 2 above) — pull-forward
         // candidates get topped up one set at a time in soonest-due order, not maxed one at a time.
@@ -10913,28 +10957,40 @@ function buildAutoSession(mesoIdx,minutesAvailable,setsBudget){
     // untouched below) — DECIDED not to silently auto-pad past what's actually eligible, and not to
     // silently deliver the tiny session either; if maximal padding still can't reach the floor,
     // flag it so the caller (confirmAutoSession) can surface "No session due" instead.
+    // TOP-UP ORDER (2026-09-20, user's explicit request: "top up muscles that are still short of their weekly aim first,
+    // still fill to 10"). The old padding grew whichever muscles were already in the session (highest protect rank first) and
+    // then any other rested muscle, without asking whether they still NEEDED the sets — so a muscle already at its aim could be
+    // stacked up to its per-session cap just to reach 10 (measured on random schedules: weeks containing a padded session went
+    // over 130% of aim 21% of the time vs 12% without one; e.g. a Chest that only needed 1 set with its week already full was
+    // padded to 7). Now:
+    //   PASS 1 tops up the rested muscles still SHORT of their aim — short in EITHER window the dose looks at (this calendar
+    //          week or the previous 7 days) — biggest gap first, and stops adding to a muscle the moment its gap closes.
+    //   PASS 2 (only if pass 1 still can't reach the floor) fills from any rested muscle, always the one FURTHEST BELOW its aim
+    //          first (a muscle over aim in either window counts as full), instead of stacking the ones already in the session.
+    // Both passes keep the round-robin one-set-per-muscle-per-pass rule (2026-09-11), the per-session cap, the MRV guard,
+    // exercise variety and the eligibility gate. The floor itself and the "below floor" outcome below are unchanged.
+    const padAim=mu=>getAutoRoutineMuscleTargetNow(mu);
+    const padDelivered=(mu,w)=>getAutoRoutineDeliveredSoFar(mu,activeSet,picks,w);
+    const padShortBy=mu=>{const aim=padAim(mu);return Math.max(aim-padDelivered(mu,'week'),aim-padDelivered(mu,'rolling'));};
+    const padFill=mu=>{const aim=padAim(mu);return aim>0?Math.max(padDelivered(mu,'week'),padDelivered(mu,'rolling'))/aim:99;};
+    const padEligible=orderedMuscles.filter(mu=>!isAutoRoutineMuscleFullyResting(mu)&&getMuscleExposureInfo(mu,activeSet).eligible);
     let progressed=true;
     while(totalSets()<AUTO_ROUTINE_MIN_SESSION_SETS&&progressed){
       progressed=false;
-      const musclesByRank=[...new Set(picks.map(p=>p.muscle))].sort((a,b)=>getMuscleProtectRank(picks,b)-getMuscleProtectRank(picks,a));
-      for(const muscle of musclesByRank){
+      const shortNow=padEligible.filter(mu=>padShortBy(mu)>0.05).sort((x,y)=>padShortBy(y)-padShortBy(x));
+      for(const muscle of shortNow){
         if(totalSets()>=AUTO_ROUTINE_MIN_SESSION_SETS)break;
+        if(padShortBy(muscle)<=0.05)continue; // sets already added in this pass may have closed its gap
         if(growMuscleOneSet(picks,muscle,activeSet))progressed=true;
       }
     }
-    if(totalSets()<AUTO_ROUTINE_MIN_SESSION_SETS){
-      const includedMuscles=new Set(picks.map(p=>p.muscle));
-      const fillCandidates=orderedMuscles.filter(mu=>!includedMuscles.has(mu)&&!isAutoRoutineMuscleFullyResting(mu)&&getMuscleExposureInfo(mu,activeSet).eligible);
-      fillCandidates.sort((a,b)=>getAutoRoutineMuscleReadiness(b)-getAutoRoutineMuscleReadiness(a));
-      // ROUND-ROBIN (2026-09-11, same request/reasoning as the explicit-budget branch above) — top
-      // up one set per candidate per pass rather than maxing each in turn.
-      let progressed2=true;
-      while(totalSets()<AUTO_ROUTINE_MIN_SESSION_SETS&&progressed2&&fillCandidates.length){
-        progressed2=false;
-        for(const muscle of fillCandidates){
-          if(totalSets()>=AUTO_ROUTINE_MIN_SESSION_SETS)break;
-          if(growMuscleOneSet(picks,muscle,activeSet))progressed2=true;
-        }
+    progressed=true;
+    while(totalSets()<AUTO_ROUTINE_MIN_SESSION_SETS&&progressed){
+      progressed=false;
+      const byRoom=padEligible.slice().sort((x,y)=>padFill(x)-padFill(y));
+      for(const muscle of byRoom){
+        if(totalSets()>=AUTO_ROUTINE_MIN_SESSION_SETS)break;
+        if(growMuscleOneSet(picks,muscle,activeSet))progressed=true;
       }
     }
     if(totalSets()<AUTO_ROUTINE_MIN_SESSION_SETS){
@@ -11244,7 +11300,7 @@ function extendActiveAutoSession(addMinutes,addSets,allowExceedCap){
     const pullForwardCandidates=orderedMuscles.filter(mu=>!includedMuscles.has(mu)&&!isAutoRoutineMuscleFullyResting(mu));
     pullForwardCandidates.sort((a,b)=>{
       const infoA=getMuscleExposureInfo(a,activeSet),infoB=getMuscleExposureInfo(b,activeSet);
-      return(infoA.minGapDays-infoA.daysSince)-(infoB.minGapDays-infoB.daysSince);
+      return(infoA.restGapDays-infoA.daysSince)-(infoB.restGapDays-infoB.daysSince);
     });
     // ROUND-ROBIN here too, same reasoning.
     let progressed3=true;
@@ -15134,7 +15190,7 @@ function getMuscleWeekPlan(muscle){
   const daysLeft=getCalendarWeekDaysLeft();
   const out={muscle,aim,remaining,needed:0,possible:0,sessions:0,lastDay:0,typicalDose:0,biggerSessions:false,shortfall:0,directOnly:isPriority,daysLeft};
   if(remaining<=0)return out;
-  const firstOffset=info.eligible?0:Math.max(0,Math.ceil(info.minGapDays)-(info.daysSince||0));
+  const firstOffset=info.eligible?0:Math.max(0,Math.ceil(info.restGapDays-1e-9)-(info.daysSince||0));
   const offsets=getAutoRoutineSessionOffsetsThisWeek(info.minGapDays,daysLeft,firstOffset);
   const typical=getAutoRoutineNormalSessionDose(aim,info);
   const cap=info.exposureCap;
@@ -15239,7 +15295,7 @@ function getWeekPlanOptions(){
     const delivered=getAutoRoutineDeliveredSoFar(m,act,[],'week');
     const remaining=Math.max(0,Math.round((aim-delivered)*10)/10);
     if(remaining<=0)return;
-    items.push({m,remaining,cap:info.exposureCap,gap:info.minGapDays,first:info.eligible?0:Math.max(0,Math.ceil(info.minGapDays)-(info.daysSince||0)),cands});
+    items.push({m,remaining,cap:info.exposureCap,gap:info.minGapDays,first:info.eligible?0:Math.max(0,Math.ceil(info.restGapDays-1e-9)-(info.daysSince||0)),cands});
   });
   const options=[];
   for(let n=maxN;n>=1;n--){
