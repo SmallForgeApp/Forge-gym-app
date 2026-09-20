@@ -724,7 +724,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-19.3</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-19.4</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -9382,6 +9382,11 @@ const AUTO_ROUTINE_EXERCISE_VARIETY_THRESHOLD=3;
 // not a meso's continuousVolumeMode/priorityMuscles settings.
 function growMuscleOneSet(picks,muscle,activeSet,allowExceedCap){
   const total=picks.filter(p=>p.muscle===muscle).reduce((a,p)=>a+p.sets,0);
+  // MRV guard (2026-09-19, found by the Auto Routine check suite): the fill/padding paths only checked the
+  // per-session cap, so the 10-set floor could keep stacking sets onto a muscle whose rolling volume was already
+  // at MRV (a priority Chest hit 23 direct sets in 7 days against an MRV of 22 — padding, not the dose, put it there).
+  // Counts history + this session's picks by the same rule the dose uses. Skipped for the explicit mid-session extend.
+  if(!allowExceedCap&&getAutoRoutineDeliveredSoFar(muscle,activeSet||getAutoRoutineActiveMuscles(),picks,'rolling')>=getMuscleLandmarks(muscle).mrv)return false;
   if(!allowExceedCap&&total>=getMuscleExposureCap(muscle))return false; // allowExceedCap (handover spec §4, 2026-09-05): mid-session extend only, after an explicit user confirm — every build/fill call above passes nothing here and stays a hard limit
   let target=picks.find(p=>p.muscle===muscle&&p.sets<AUTO_ROUTINE_EXERCISE_VARIETY_THRESHOLD);
   if(!target){
@@ -10380,7 +10385,7 @@ function getAutoRoutineSessionOffsetsThisWeek(minGapDays,daysLeft,firstOffset){
 // risks ending the week short. Recomputed fresh every session, so a missed day just makes the next
 // dose bigger. (Simulated: counting every gym-day-eligible slot as a certain session, ignoring the
 // wait, over-estimated sessions left and left ~3 sets/muscle/week undelivered.)
-function getAutoRoutineSessionsLeftThisWeek(minGapDays){
+function getAutoRoutineSessionsLeftThisWeek(minGapDays,idealGapDays){
   const daysLeft=getCalendarWeekDaysLeft();
   // WEEK PLAN (2026-09-19): if the user picked how many sessions they will do this week (see
   // getWeekPlanOptions), that is a far better answer than any guess from past frequency — someone on a
@@ -10389,14 +10394,29 @@ function getAutoRoutineSessionsLeftThisWeek(minGapDays){
   // of them as its rest gap permits.
   const plannedLeft=getWeekPlanSessionsLeft();
   if(plannedLeft!=null){
-    const offsets=getSpreadSessionOffsets(plannedLeft,daysLeft);
-    return Math.max(1,getAutoRoutineMuscleSessionSlots(offsets,minGapDays,0).length);
+    // Monotone by construction (found by the check suite): laying N sessions out "as evenly as possible"
+    // can land them on days that fit a muscle's rest gap WORSE than a smaller plan does (4 sessions on
+    // days 0,1,3,4 give a 2-day-gap muscle 2 slots; 3 sessions on 0,2,4 give it 3) — which made a bigger
+    // plan produce a BIGGER dose today for some muscles. A bigger plan never has fewer slots than a
+    // smaller one: take the best over every smaller even layout.
+    let best=1;
+    for(let q=1;q<=plannedLeft;q++){
+      best=Math.max(best,getAutoRoutineMuscleSessionSlots(getSpreadSessionOffsets(q,daysLeft),minGapDays,0).length);
+    }
+    return Math.max(1,best);
   }
   const possible=getAutoRoutineSessionOffsetsThisWeek(minGapDays,daysLeft,0).length;
   const g=Math.max(1,Math.ceil(minGapDays));
   const p=Math.min(1,Math.max(0.1,getAutoRoutineGymDaysPerWeek()/7));
   const cycleDays=g-1+1/p;
-  const expected=1+Math.floor(daysLeft/cycleDays+1e-9);
+  let expected=1+Math.floor(daysLeft/cycleDays+1e-9);
+  // ...and the muscle's OWN observed rhythm (found by the check suite): the estimate above only knows how often the
+  // user goes to the gym, not how clustered the gym days are. With gym days that bunch up (say Mon Tue Thu Fri) a muscle
+  // with a 2-day rest gap can only attend Mon and Thu, but the estimate above still expected ~3 sessions a week from it, so
+  // Quads/Hamstrings finished ~half of those weeks at ~75% of aim. How often THIS muscle really gets trained
+  // (idealGapDays, from its own history) already reflects both the gym frequency and the clustering, with no weekday
+  // pattern assumed. Take the more cautious of the two (a bigger dose now is safe: caps and ceilings still bound it).
+  if(idealGapDays>0)expected=Math.min(expected,1+Math.floor(daysLeft/idealGapDays+1e-9));
   return Math.max(1,Math.min(possible,expected));
 }
 // A muscle's NORMAL per-session dose: its steady-state share of the aim, never above its per-exposure
@@ -10483,7 +10503,9 @@ function getMuscleExposureDose(muscle,activeSet,picks){
   //   mostly made of soon-to-expire sets reads as "already at the ceiling" and a genuine pull-forward
   //   need gets silently zeroed out (Chest: 8.5/8 sets, 5.5 about to expire, a real 5-set need, but
   //   the old shared reference left ~0.3 sets of headroom and killed the dose entirely).
-  const rollingCeiling=weeklyTargetNow*AUTO_ROUTINE_LOOKAHEAD_ROLLING_CEILING;
+  // Never above MRV (2026-09-19, found by the check suite: a priority muscle already at its aim near MRV was
+  // allowed 10% headroom above MRV — a priority Chest reached 23 direct sets in 7 days against an MRV of 22).
+  const rollingCeiling=Math.min(weeklyTargetNow*AUTO_ROUTINE_LOOKAHEAD_ROLLING_CEILING,getMuscleLandmarks(muscle).mrv);
   const maxAllowedReactive=Math.max(0,Math.round(rollingCeiling-delivered));
   const maxAllowedTotal=Math.max(0,Math.round(rollingCeiling-(delivered-expiring)));
   // SPREAD THE PULL-FORWARD (2026-09-13, user's explicit request, after confirming via live
@@ -10529,7 +10551,7 @@ function getMuscleExposureDose(muscle,activeSet,picks){
   const rollingPlusPull=Math.min(reactiveDose+pullForward,maxAllowedTotal);
   let weekDose=0;
   if(remainingWeek>0){
-    const sessionsLeft=getAutoRoutineSessionsLeftThisWeek(info.minGapDays);
+    const sessionsLeft=getAutoRoutineSessionsLeftThisWeek(info.minGapDays,info.idealGapDays);
     const weekBase=getAutoRoutineReactiveBaseDose(remainingWeek,info.exposureCap,idealSessionsPerWeek,true,sessionsLeft);
     const weekRaw=Math.max(1,Math.round(weekBase*scaleFactor));
     const weekCeiling=Math.max(0,Math.min(
@@ -10601,6 +10623,7 @@ function buildAutoSession(mesoIdx,minutesAvailable,setsBudget){
   // pass — getMuscleExposureDose now takes the current in-progress `picks` array directly, so each
   // muscle's need reflects everything already added this build, not just history through yesterday.
   let picks=[];
+  const servedMuscles=[]; // pull-forward fairness credit earned by THIS build — committed only if the session is really started (see launchAutoSessionWithPicks)
   // SESSION-WIDE PULL-FORWARD CAP (2026-09-13, user's explicit request — "spread it across the
   // week, not one session"): confirmed via live simulation that my first fix (spreading ONE
   // muscle's need across ITS OWN remaining runway) didn't actually solve the reported problem —
@@ -10642,7 +10665,6 @@ function buildAutoSession(mesoIdx,minutesAvailable,setsBudget){
     return da-db;
   });
   const fairnessOrder=pullForwardCandidates.concat(orderedMuscles.filter(mu=>!pullForwardCandidates.includes(mu)));
-  if(!state.autoRoutinePullForwardServedDates)state.autoRoutinePullForwardServedDates={};
   let sessionPulledForwardSoFar=0;
   fairnessOrder.forEach(muscle=>{
     if(isAutoRoutineMuscleFullyResting(muscle))return;
@@ -10653,7 +10675,7 @@ function buildAutoSession(mesoIdx,minutesAvailable,setsBudget){
       const allowedPulledForward=Math.min(doseInfo.pulledForward,roomLeft);
       need-=(doseInfo.pulledForward-allowedPulledForward); // deferred portion comes back off today's dose
       sessionPulledForwardSoFar+=allowedPulledForward;
-      if(allowedPulledForward>0)state.autoRoutinePullForwardServedDates[muscle]=new Date().toISOString();
+      if(allowedPulledForward>0&&!servedMuscles.includes(muscle))servedMuscles.push(muscle);
     }
     if(!need||need<=0)return;
     const target=Math.min(Math.round(need),getMuscleExposureCap(muscle));
@@ -10794,7 +10816,18 @@ function buildAutoSession(mesoIdx,minutesAvailable,setsBudget){
       picks.autoRoutineBelowFloor=true; // real 3rd state — confirmAutoSession checks this to show "No session due" instead of either a tiny session or the plain "nothing due" message
     }
   }
-  return applyMuscleTrackerOrdering(picks);
+  // BUG FIX (2026-09-19, found by the Auto Routine check suite): building a session used to WRITE the
+  // pull-forward fairness tracker (state.autoRoutinePullForwardServedDates) right here. But this function
+  // is also called just to PREVIEW — the Auto Session screen's "Default if left blank" estimate builds one,
+  // then Start builds another — so every look at the screen consumed fairness credit for a session that
+  // hadn't started: two builds in a row gave different sessions (the preview you saw was never the
+  // session you got; measured: default estimate 77 min vs 80 min built), and muscles could be marked
+  // "served" without ever being trained. Building is now pure. The muscles that earned credit ride on the
+  // returned array, and launchAutoSessionWithPicks records them only when the session actually starts,
+  // and only for muscles that really ended up with sets after any time/sets-budget trimming.
+  const ordered=applyMuscleTrackerOrdering(picks);
+  ordered.autoRoutineServedMuscles=servedMuscles.filter(m=>ordered.some(p=>p.muscle===m&&p.sets>0));
+  return ordered;
 }
 const WARN_SESSION_MINUTES_THRESHOLD=120; // 2026-08-21, user's explicit ask: warn (never hard-block) once a built session is unusually long, regardless of whether that length matches what was actually requested — a real 3-hour ask should still get the warning, per the user's own description; they just override it.
 // Known-superset auto-linking (2026-08-21, user's explicit request — "is there a way of it
@@ -10882,6 +10915,16 @@ function reorderForSupersetAdjacency(exercises){
 // for tagging the resulting workout's meso context; volume progress now always advances via
 // Auto Routine's own standing tracker (advanceAutoRoutineMuscleProgress), never the meso's.
 function launchAutoSessionWithPicks(mesoIdx,picks,sorenessScores){
+  // Commit the pull-forward fairness credit this session earned (see buildAutoSession's note): only now,
+  // because the session is really starting.
+  try{
+    const served=(picks&&picks.autoRoutineServedMuscles)||[];
+    if(served.length){
+      if(!state.autoRoutinePullForwardServedDates)state.autoRoutinePullForwardServedDates={};
+      const nowIso=new Date().toISOString();
+      served.forEach(m=>{state.autoRoutinePullForwardServedDates[m]=nowIso;});
+    }
+  }catch(e){console.error('recording pull-forward fairness failed:',e);}
   const m=mesoIdx!=null?state.mesocycles[mesoIdx]:null;
   // BUG FIX (external test handover, issues #9 and #10): two separate ordering bugs, same root
   // pattern — global state read by getSetTarget during the picks.map() below wasn't populated yet.
