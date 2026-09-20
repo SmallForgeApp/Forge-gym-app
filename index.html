@@ -724,7 +724,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-19.4</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-20.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -9352,8 +9352,75 @@ function estimateSetSeconds(exId){
 // Total estimated seconds for a set of picks — per-exercise now, not one blended average across
 // the whole session. Superset-adjusted overhead (see countSupersetAdjustedExerciseSlots) still
 // applies on top, unchanged.
-function estimatePicksSeconds(picks){
+// The app's BASE time model (unchanged): compound set 3.5 min, isolation set 2.5 min, +30s per exercise slot.
+function estimatePicksSecondsRaw(picks){
   return picks.reduce((a,p)=>a+p.sets*estimateSetSeconds(p.exId),0)+countSupersetAdjustedExerciseSlots(picks)*30;
+}
+// PERSONAL PACE (2026-09-20, user's explicit request): every session-length estimate in the app (Auto Session
+// default, preview, the week-plan chooser, the minutes/sets budget trimming, the long-session warning) is the base
+// model above times how long THIS user's real Auto Routine sessions have actually taken relative to it.
+// Measured on the user's own backup: 22 usable sessions, 15 ran >10% slower than the base estimate, 6 within 10%,
+// 1 faster; the 9 Auto Routine sessions ran 0.76-1.36x (median 1.08). The scatter is real, so this learns ONE robust
+// factor (median) AND the spread, and the UI shows a range ("usually 49-72") rather than a falsely exact number.
+// Tested leave-one-out on those 9 sessions: mean error 6.7 -> 5.4 min, bias +5.3 -> +2.3 min. Using only the latest
+// few sessions was no better than using all of them, so it averages the last 12 rather than chasing recent ones.
+// Only "Auto Routine" workouts count. A session is ignored when it can't say anything about pace: fewer than 3 working
+// sets, an exercise the app no longer knows (its time can't be modelled), or a logged duration that isn't a real workout
+// time (under 1 or over 9.5 minutes per set — left running, or logged after the fact). Under 4 usable sessions: no
+// adjustment (factor 1, no range). Factor is kept within 0.85-1.4 so a few odd sessions can't wreck the estimates.
+function getSessionPaceRatio(w){
+  if(!w||w.name!=='Auto Routine')return null;
+  const secs=Number(w.duration);if(!(secs>0))return null;
+  const picks=[];let sets=0;
+  for(const ex of (w.exercises||[])){
+    const e=getExercise(ex.exId);
+    const done=(ex.sets||[]).filter(x=>x&&x.done&&x.type!=='warmup').length;
+    if(!e){if((ex.sets||[]).some(x=>x&&x.done))return null;continue;}
+    if(done){picks.push({exId:ex.exId,sets:done,muscle:e.muscle});sets+=done;}
+  }
+  if(sets<3)return null;
+  const mins=secs/60,perSet=mins/sets;
+  if(perSet<1||perSet>9.5)return null;
+  const raw=estimatePicksSecondsRaw(picks)/60;
+  return raw>0?mins/raw:null;
+}
+function computePersonalPace(){
+  const recent=(state.history||[]).filter(w=>w&&w.name==='Auto Routine').slice().sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const ratios=[];
+  for(const w of recent){if(ratios.length>=12)break;const r=getSessionPaceRatio(w);if(r!=null&&Number.isFinite(r))ratios.push(r);}
+  if(ratios.length<4)return{factor:1,low:1,high:1,n:ratios.length,calibrated:false};
+  const sorted=ratios.slice().sort((a,b)=>a-b);
+  const q=p=>{const pos=p*(sorted.length-1),lo=Math.floor(pos),hi=Math.ceil(pos);return sorted[lo]+(sorted[hi]-sorted[lo])*(pos-lo);};
+  const factor=Math.min(1.4,Math.max(0.85,q(0.5)));
+  const low=Math.max(0.6,Math.min(q(0.1),factor*0.9));
+  const high=Math.min(1.9,Math.max(q(0.9),factor*1.1));
+  return{factor,low,high,n:ratios.length,calibrated:true};
+}
+// Cached: recomputed only when the history changes (this is called from inside the session builder's loops).
+function getPersonalPace(){
+  const h=state.history||[];
+  const key=h.length+'|'+(h[0]&&h[0].id)+'|'+(h[h.length-1]&&h[h.length-1].id);
+  if(window.__paceCache&&window.__paceCache.key===key)return window.__paceCache.val;
+  let val;try{val=computePersonalPace();}catch(e){console.error('personal pace failed:',e);val={factor:1,low:1,high:1,n:0,calibrated:false};}
+  window.__paceCache={key,val};
+  return val;
+}
+function estimatePicksSeconds(picks){
+  return estimatePicksSecondsRaw(picks)*getPersonalPace().factor;
+}
+// Minutes: the calibrated middle estimate plus the range this user's sessions usually land in (80% of them).
+function estimatePicksRange(picks){
+  const raw=estimatePicksSecondsRaw(picks)/60,p=getPersonalPace();
+  return{mid:Math.round(raw*p.factor),low:Math.round(raw*p.low),high:Math.round(raw*p.high),calibrated:p.calibrated,n:p.n,factor:p.factor};
+}
+function formatMinutesRange(r){
+  return '~'+r.mid+' min'+(r.calibrated&&r.high>r.low+2?', usually '+r.low+'\u2013'+r.high:'');
+}
+function getPaceNoteText(){
+  const p=getPersonalPace();
+  if(!p.calibrated)return 'Times are the app\u2019s base estimate \u2014 it adjusts to your own pace once you have 4 logged Auto Routine sessions.';
+  const pct=Math.round(Math.abs(p.factor-1)*100);
+  return 'Times use your own pace: your last '+p.n+' Auto Routine sessions '+(pct<2?'matched the base estimate':'ran about '+pct+'% '+(p.factor>1?'slower':'faster')+' than the app\u2019s base estimate')+'.';
 }
 // BUG FIX (found via external test handover, same day): this was 5, calibrated back when the
 // per-muscle cap was a flat 10 (PRIORITY_VOLUME_SET_CAP) — beyond 5 on one exercise, split the
@@ -10385,7 +10452,33 @@ function getAutoRoutineSessionOffsetsThisWeek(minGapDays,daysLeft,firstOffset){
 // risks ending the week short. Recomputed fresh every session, so a missed day just makes the next
 // dose bigger. (Simulated: counting every gym-day-eligible slot as a certain session, ignoring the
 // wait, over-estimated sessions left and left ~3 sets/muscle/week undelivered.)
-function getAutoRoutineSessionsLeftThisWeek(minGapDays,idealGapDays){
+// How many sessions a week a muscle with this rest gap COULD attend, judged from the user's REAL gym days over the last
+// 28 days (greedy: attend a gym day if it is at least the gap after the last attended one). This is the piece the
+// gym-days-per-week estimate can't see: it only knows how OFTEN the user trains, not how bunched up the days are —
+// with gym days like Mon Tue Thu Fri a 2-day-gap muscle can attend only Mon and Thu, yet ~3 sessions a week were
+// expected of it, and Quads/Hamstrings finished about half of those weeks at ~75% of aim (found by the check suite).
+// No weekday pattern is assumed: it replays the actual dates. (A first attempt used each muscle's own observed
+// training frequency instead — rejected after testing on the real backup: a muscle a routine only ever trained once
+// a week looked "once a week" forever, so its whole weekly volume landed in ONE session, ~133 min on a Monday.)
+// null with under two logged gym days.
+function getAutoRoutineAttendRatePerWeek(minGapDays){
+  const cutoff=Date.now()-28*864e5,keys=[],seen=new Set(),weeks=new Set();
+  (state.history||[]).forEach(w=>{
+    if(!w)return;
+    const ms=new Date(w.date).getTime();
+    if(!(ms>=cutoff)||ms>Date.now())return;
+    const t=new Date(ms),k=new Date(t.getFullYear(),t.getMonth(),t.getDate()).getTime();
+    if(!seen.has(k)){seen.add(k);keys.push(k);}
+    weeks.add(Math.floor((ms-cutoff)/(7*864e5)));
+  });
+  if(keys.length<2||!weeks.size)return null;
+  keys.sort((a,b)=>a-b);
+  const gap=Math.max(1,Math.ceil(minGapDays));
+  let last=null,n=0;
+  keys.forEach(k=>{if(last===null||Math.round((k-last)/864e5)>=gap){n++;last=k;}});
+  return Math.min(7,n/weeks.size);
+}
+function getAutoRoutineSessionsLeftThisWeek(minGapDays){
   const daysLeft=getCalendarWeekDaysLeft();
   // WEEK PLAN (2026-09-19): if the user picked how many sessions they will do this week (see
   // getWeekPlanOptions), that is a far better answer than any guess from past frequency — someone on a
@@ -10410,19 +10503,15 @@ function getAutoRoutineSessionsLeftThisWeek(minGapDays,idealGapDays){
   const p=Math.min(1,Math.max(0.1,getAutoRoutineGymDaysPerWeek()/7));
   const cycleDays=g-1+1/p;
   let expected=1+Math.floor(daysLeft/cycleDays+1e-9);
-  // ...and the muscle's OWN observed rhythm (found by the check suite): the estimate above only knows how often the
-  // user goes to the gym, not how clustered the gym days are. With gym days that bunch up (say Mon Tue Thu Fri) a muscle
-  // with a 2-day rest gap can only attend Mon and Thu, but the estimate above still expected ~3 sessions a week from it, so
-  // Quads/Hamstrings finished ~half of those weeks at ~75% of aim. How often THIS muscle really gets trained
-  // (idealGapDays, from its own history) already reflects both the gym frequency and the clustering, with no weekday
-  // pattern assumed. Take the more cautious of the two (a bigger dose now is safe: caps and ceilings still bound it).
-  if(idealGapDays>0)expected=Math.min(expected,1+Math.floor(daysLeft/idealGapDays+1e-9));
+  const attend=getAutoRoutineAttendRatePerWeek(minGapDays);
+  if(attend!=null)expected=Math.min(expected,1+Math.floor(daysLeft*attend/7+1e-9));
   return Math.max(1,Math.min(possible,expected));
 }
 // A muscle's NORMAL per-session dose: its steady-state share of the aim, never above its per-exposure
 // cap. Used by the Review week plan to answer "how many sessions at normal size."
 function getAutoRoutineNormalSessionDose(aim,info){
-  return Math.max(1,Math.min(info.exposureCap,Math.ceil(aim/(7/info.idealGapDays)-1e-9)));
+  const rate=Math.max(7/info.idealGapDays,getAutoRoutineAttendRatePerWeek(info.minGapDays)||0);
+  return Math.max(1,Math.min(info.exposureCap,Math.ceil(aim/rate-1e-9)));
 }
 // Shared by the real dose (getMuscleExposureDose) and anything that needs the same arithmetic.
 // deadlineMode false: the original steady-state rate (remaining spread over a full week's ideal
@@ -10523,7 +10612,14 @@ function getMuscleExposureDose(muscle,activeSet,picks){
   const pullForwardRaw=runwayDays<=1?unrecoverableNeed:unrecoverableNeed/Math.max(1,Math.round(runwayDays));
   const pullForward=Math.min(unrecoverableNeed>0?Math.ceil(pullForwardRaw):0,maxAllowedTotal);
   if(remaining<=0&&pullForward<=0&&remainingWeek<=0)return{...info,weeklyTargetNow,dose:0}; // genuinely nothing needed in ANY window (previous 7 days, next few days, this week), or the ceiling's already full
-  const idealSessionsPerWeek=7/info.idealGapDays;
+  // Cadence the dose is spread over. A muscle's OBSERVED training rhythm is a symptom of how it happened to be trained (on the
+  // real backup: Chest, Triceps, Quads, Hamstrings, Calves had each been hit about once a week by fixed routines, so their
+  // "ideal gap" read 7 days) — dosing at that cadence meant "the whole week's volume every visit": a blank Monday came out
+  // at 41 sets / ~124 min. Auto Routine is the thing deciding when a muscle gets trained, so the dose is spread over the
+  // sessions the muscle could attend given the user's real gym days (getAutoRoutineAttendRatePerWeek) whenever that is
+  // more often than its history shows. Never slower than before.
+  const attendRate=getAutoRoutineAttendRatePerWeek(info.minGapDays);
+  const idealSessionsPerWeek=Math.max(7/info.idealGapDays,attendRate||0);
   // MULTI-HORIZON DOSE (2026-09-19, user's explicit request — random weekly schedule, so no single
   // window and no fixed weekday pattern can be trusted). Three horizons feed ONE dose, whichever asks
   // for the MOST (never summed — they describe the same missing volume seen through different windows):
@@ -10549,25 +10645,35 @@ function getMuscleExposureDose(muscle,activeSet,picks){
   // The COMBINED total is capped against maxAllowedTotal (the projected-after-expiry reference) since
   // that's the number that actually determines where the rolling total settles once expiry happens.
   const rollingPlusPull=Math.min(reactiveDose+pullForward,maxAllowedTotal);
-  let weekDose=0;
+  let weekDose=0,weekShare=0;
   if(remainingWeek>0){
-    const sessionsLeft=getAutoRoutineSessionsLeftThisWeek(info.minGapDays,info.idealGapDays);
+    const sessionsLeft=getAutoRoutineSessionsLeftThisWeek(info.minGapDays);
     const weekBase=getAutoRoutineReactiveBaseDose(remainingWeek,info.exposureCap,idealSessionsPerWeek,true,sessionsLeft);
     const weekRaw=Math.max(1,Math.round(weekBase*scaleFactor));
     const weekCeiling=Math.max(0,Math.min(
       Math.round(weeklyTargetNow*AUTO_ROUTINE_LOOKAHEAD_ROLLING_CEILING-deliveredWeek),
       Math.round(getMuscleLandmarks(muscle).mrv-delivered)));
     weekDose=Math.min(weekRaw,weekCeiling);
+    weekShare=weekBase;
   }
   // Same exposureCap ceiling as always — no horizon can push a single session past this muscle's
   // per-exposure safety limit.
-  const dose=Math.min(info.exposureCap,Math.max(rollingPlusPull,weekDose));
+  // BOUND (2026-09-19, found by running the suite on the user's REAL backup): the previous-7-days and next-few-days
+  // horizons describe the SAME missing volume as this week's goal, seen through a different window — so on the first
+  // session of a week after a light week they stacked up: every muscle was short in the rolling window AND had a full
+  // week still to go, and a blank Monday came out at 41 sets / ~124 min (the week-plan chooser promised ~83 min for the
+  // same 3-session week, and 52 min for 7 sessions when the real first session was 80). Those two horizons may now lift a
+  // muscle above its per-session share of this week's remaining volume by at most ONE set (tested against +25% and +50%: same
+  // aim-hit rate, but +1 overshoots least and matches the chooser's promised session lengths best); once the week's goal is met they
+  // no longer add anything (the volume you do this week is what fills the next rolling window anyway).
+  const rollingBound=weekShare>0?weekShare+1:0;
+  const dose=Math.min(info.exposureCap,Math.max(Math.min(rollingPlusPull,rollingBound),weekDose));
   // pulledForward = ONLY the part of the dose that nothing else asked for: buildAutoSession budgets it
   // per session (AUTO_ROUTINE_MAX_PULLFORWARD_PER_SESSION) and defers the excess, so anything the
   // reactive rate or THIS WEEK's goal already needs must never be mistaken for pull-forward and
   // trimmed by that budget (simulated in a 2-day week: Quads' whole week-driven dose was labelled
   // pull-forward, got deferred behind other muscles' look-ahead, and the muscle ended the week at 2/8).
-  return{...info,weeklyTargetNow,dose,pulledForward:Math.max(0,dose-Math.max(reactiveDose,weekDose))};
+  return{...info,weeklyTargetNow,dose,pulledForward:Math.max(0,dose-Math.max(Math.min(reactiveDose,rollingBound),weekDose))};
 }
 // 2026-08-29: mesoIdx is now OPTIONAL (nullable) — Auto Routine no longer needs an active meso for
 // its volume targets or priority (see the standing progress/priority section above); a real meso,
@@ -11328,7 +11434,7 @@ function openAutoSessionModal(mesoIdx){
   const input=document.getElementById('auto-session-minutes');if(input)input.value='';
   const setsInput=document.getElementById('auto-session-sets');if(setsInput)setsInput.value='';
   const est=document.getElementById('auto-session-default-estimate');
-  if(est)est.textContent='Default if left blank: ~'+getDefaultAutoSessionMinutes()+' min (everything due today, per the explanation above)';
+  renderAutoSessionEstimate();
   openModal('modal-auto-session');
   renderAutoSessionWeekPlanRow();
   // First time the Auto Session screen is opened in a calendar week (no plan chosen yet, and there is still
@@ -11541,7 +11647,7 @@ function showAutoRoutinePreview(mesoIdx,picks,estMinutes){
     ?'<div class="exercise-soreness-warn severe" style="margin:0 0 10px">\u26a0\ufe0f This is an unusually long session (~'+estMinutes+' min). You can still start it below.</div>'
     :'';
   document.getElementById('auto-routine-preview-summary').innerHTML=warnHtml
-    +'<div class="text3">About '+estMinutes+' min \u2014 '+picks.length+' exercise'+(picks.length!==1?'s':'')+', '+picks.reduce((a,p)=>a+p.sets,0)+' total sets.</div>'
+    +'<div class="text3">About '+estMinutes+' min'+(estimatePicksRange(picks).calibrated?' (usually '+estimatePicksRange(picks).low+'\u2013'+estimatePicksRange(picks).high+')':'')+' \u2014 '+picks.length+' exercise'+(picks.length!==1?'s':'')+', '+picks.reduce((a,p)=>a+p.sets,0)+' total sets.</div>'
     +renderAutoRoutineWeeklyProgressHtml(picks);
   const listEl=document.getElementById('auto-routine-preview-list');
   listEl.innerHTML=picks.map(p=>{
@@ -11587,10 +11693,20 @@ function startPreviewedAutoRoutine(){
 // selected). Fixed by just running the real blank-mode build and feeding its real picks through the
 // exact same estimatePicksSeconds the preview uses — same numbers, calculated the same way, because
 // it's now literally the same code path instead of two parallel approximations that could disagree.
-function getDefaultAutoSessionMinutes(){
+function getDefaultAutoSessionEstimate(){
   const picks=buildAutoSession(null,null,null);
-  if(!picks||!picks.length)return 30; // nothing currently owed anywhere — short floor rather than 0
-  return Math.max(20,Math.round(estimatePicksSeconds(picks)/60));
+  if(!picks||!picks.length)return{mid:30,low:30,high:30,calibrated:false}; // nothing currently owed anywhere — short floor rather than 0
+  const r=estimatePicksRange(picks),mid=Math.max(20,r.mid);
+  return{mid,low:Math.min(Math.max(20,r.low),mid),high:Math.max(r.high,mid),calibrated:r.calibrated};
+}
+function getDefaultAutoSessionMinutes(){
+  return getDefaultAutoSessionEstimate().mid;
+}
+function renderAutoSessionEstimate(){
+  const el=document.getElementById('auto-session-default-estimate');
+  if(!el)return;
+  el.innerHTML='Default if left blank: '+formatMinutesRange(getDefaultAutoSessionEstimate())+' (everything due today, per the explanation above)'
+    +'<div style="margin-top:3px">'+getPaceNoteText()+'</div>';
 }
 // BUG FIX (found via external test handover, same day): this used to synthesize a numeric budget
 // even when the field was left blank (falling back to getDefaultAutoSessionMinutes()) and pass
@@ -15148,7 +15264,7 @@ function renderWeekPlanModal(){
   }).join('');
   el.innerHTML='<div class="small text3 mb8" style="line-height:1.5">Pick how many sessions you\u2019ll do for the rest of this week, today included. Each shows roughly how long every session would run to finish the week\u2019s volume for all muscles. It only lasts this week \u2014 change it any time.</div>'
     +rows
-    +'<div class="small text3 mt4" style="line-height:1.5">Times are estimates, with sessions spread evenly over the days left \u2014 train whenever suits you. '+(lastOk>=0&&lastOk<data.options.length-1?'Fewer than '+shown[shown.length-1].n+' can\u2019t finish every muscle in a realistic session, so those are hidden.':'')+'</div>';
+    +'<div class="small text3 mt4" style="line-height:1.5">Times are estimates, with sessions spread evenly over the days left \u2014 train whenever suits you. '+(getPersonalPace().calibrated?'Adjusted to your own pace (\u00d7'+getPersonalPace().factor.toFixed(2)+'). ':'')+(lastOk>=0&&lastOk<data.options.length-1?'Fewer than '+shown[shown.length-1].n+' can\u2019t finish every muscle in a realistic session, so those are hidden.':'')+'</div>';
 }
 function openWeekPlanModal(){
   renderWeekPlanModal();
@@ -15158,7 +15274,7 @@ function afterWeekPlanChange(){
   renderAutoSessionWeekPlanRow();
   const est=document.getElementById('auto-session-default-estimate');
   const am=document.getElementById('modal-auto-session');
-  if(est&&am&&am.classList.contains('open'))est.textContent='Default if left blank: ~'+getDefaultAutoSessionMinutes()+' min (everything due today, per the explanation above)';
+  if(am&&am.classList.contains('open'))renderAutoSessionEstimate();
   try{renderReview();}catch(e){console.error('renderReview after week plan change failed:',e);}
 }
 function selectWeekPlan(n){
