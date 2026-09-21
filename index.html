@@ -724,7 +724,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-20.6</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-21.2</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1005,7 +1005,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div class="modal-title">Switch Exercise</div>
     <div class="modal-body">
       <div class="small text2 mb8" id="switch-ex-current-name" style="color:var(--accent);font-size:13px;font-weight:600"></div>
-      <div class="small text3 mb8">Same muscle, pulled from across your routines. Sets/reps for today are auto-estimated from that exercise's own history (or start blank if you've never logged it).</div>
+      <div class="small text3 mb8" id="switch-ex-help" style="line-height:1.45;margin:6px 0 12px"></div>
       <div id="switch-ex-candidate-list"></div>
     </div>
     <div class="modal-actions">
@@ -1708,6 +1708,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
 // ============================================================
 // CONSTANTS
 // ============================================================
+const AUTO_ROUTINE_DAY_BOUNDARY_HOUR_GMT=4.5; // 4:30am GMT — the app's "new day" (see the GMT-ONLY DAY/WEEK RULES below getGMT430DayIndex)
 const SET_TYPES=[
   {id:'normal',label:'Normal',desc:'Standard working set',badgeClass:'badge-normal'},
   {id:'warmup',label:'Warm Up',desc:'Light prep set',badgeClass:'badge-warmup'},
@@ -2522,7 +2523,7 @@ function getWorkoutVolumeRows(){
   const out={rows:[],alsoShort:[],label:getReviewWindowLabel()};
   if(!activeWorkout||!(activeWorkout.exercises||[]).length)return out;
   const lm=state.volumeLandmarks||{};
-  const key=(state.history||[]).length+'|'+state.reviewWindowMode+'|'+new Date().toDateString();
+  const key=(state.history||[]).length+'|'+state.reviewWindowMode+'|'+getAppWeekStartMs();
   if(!window.__wvpCache||window.__wvpCache.key!==key){
     const before={};Object.keys(lm).forEach(m=>{before[m]=getMuscleVolumeForReview(m);});
     window.__wvpCache={key,before};
@@ -2946,14 +2947,12 @@ function deletePhysioExercise(id){
 // mirrors the OTHER convention on purpose since it's the same "how many weeks did I actually hit
 // this" question Home's own Weekly Consistency chart answers).
 function getPhysioWeekBuckets(routineId,numWeeks){
-  const now=new Date();
-  const day=now.getDay();
-  const diffToMonday=(day===0?-6:1-day);
-  const thisMonday=new Date(now.getFullYear(),now.getMonth(),now.getDate()+diffToMonday);
+  // Weeks run Monday 04:30 GMT -> Monday 04:30 GMT (2026-09-21, see the GMT-ONLY DAY / WEEK RULES)
+  const thisMonday=getAppWeekStartMs();
   const buckets=[];
   for(let i=numWeeks-1;i>=0;i--){
-    const start=new Date(thisMonday);start.setDate(thisMonday.getDate()-7*i);
-    const end=new Date(start);end.setDate(start.getDate()+7);
+    const start=new Date(thisMonday-7*i*864e5);
+    const end=new Date(start.getTime()+7*864e5);
     const count=(state.physioHistory||[]).filter(s=>{if(!s||s.routineId!==routineId)return false;const d=new Date(s.date);return d>=start&&d<end;}).length;
     buckets.push({start,count});
   }
@@ -4131,10 +4130,8 @@ function daysAgo(dateStr){
   // Calendar-day difference, not a rolling 24h window — a workout at 11pm checked at 6am the
   // next morning is only 7 hours apart but IS a different calendar day, and should say
   // "Yesterday" rather than "Today".
-  const now=new Date(),then=new Date(dateStr);
-  const startOfNow=new Date(now.getFullYear(),now.getMonth(),now.getDate());
-  const startOfThen=new Date(then.getFullYear(),then.getMonth(),then.getDate());
-  const d=Math.round((startOfNow-startOfThen)/864e5);
+  // Days counted on the app's 04:30 GMT day (2026-09-21): a 2am workout still belongs to the day before.
+  const d=getAppDayIndex(Date.now())-getAppDayIndex(new Date(dateStr).getTime());
   if(d===0)return'Today';if(d===1)return'Yesterday';if(d<7)return d+'d ago';if(d<30)return Math.floor(d/7)+'w ago';return Math.floor(d/30)+'mo ago';
 }
 
@@ -4186,13 +4183,13 @@ function getFolderCategory(r){
 function getSuggestedRoutine(){
   if(!state.routines.length) return null;
   const days=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-  const todayName=days[new Date().getDay()];
+  const todayName=days[(getAppWeekdayMon0(getAppDayIndex())+1)%7]; // GMT 04:30 day (2026-09-21)
 
   // 1. Find routine most commonly done on today's day of week
   const dayFreq={};
   (state.history||[]).forEach(w=>{
     if(!w)return;
-    const wDay=days[new Date(w.date).getDay()];
+    const wDay=days[(getAppWeekdayMon0(getAppDayIndex(new Date(w.date).getTime()))+1)%7];
     if(wDay!==todayName) return;
     // Match to a routine by name overlap or exercise overlap
     state.routines.forEach((r,i)=>{
@@ -4252,14 +4249,12 @@ function getSuggestedRoutine(){
 // screen, with the next-up routine made visually prominent, so the person
 // can see and follow their whole training cycle without leaving the front page.
 function getWeekBuckets(numWeeks){
-  const now=new Date();
-  const day=now.getDay();
-  const diffToMonday=(day===0?-6:1-day);
-  const thisMonday=new Date(now.getFullYear(),now.getMonth(),now.getDate()+diffToMonday);
+  // Weeks run Monday 04:30 GMT -> Monday 04:30 GMT (2026-09-21, see the GMT-ONLY DAY / WEEK RULES)
+  const thisMonday=getAppWeekStartMs();
   const buckets=[];
   for(let i=numWeeks-1;i>=0;i--){
-    const start=new Date(thisMonday);start.setDate(thisMonday.getDate()-7*i);
-    const end=new Date(start);end.setDate(start.getDate()+7);
+    const start=new Date(thisMonday-7*i*864e5);
+    const end=new Date(start.getTime()+7*864e5);
     const count=(state.history||[]).filter(w=>{if(!w)return false;const d=new Date(w.date);return d>=start&&d<end;}).length;
     buckets.push({start,count});
   }
@@ -9188,6 +9183,26 @@ function getDaysSinceExerciseTrained(exId){
 // 2026-08-21: draws from state.autoRoutinePool (a user-curated list, managed via Edit Pool on the
 // Auto Routine modal) when the user has actually set one up — falls back to "anything in any
 // routine" (the original behavior) if the pool is empty, so nothing breaks before it's configured.
+// REAL TURN (2026-09-20, user's explicit request): "an exercise that has one set still counts as being done and isn't eligible
+// again until all the other exercises have had their turn — it can fall on one set often, so it never gets a decent amount of
+// sets." True: rankCandidatesForMuscle ranked by getDaysSinceExerciseTrained (ANY done set), and when a muscle's dose spills
+// past the 3-sets-per-exercise variety threshold (dose 4 = 3 + 1), the second exercise gets one set and goes to the back of the
+// queue as if it had had its turn. Worse, two exercises used in the same session tie on "days since", the tie keeps pool order,
+// so the same one was first (3 sets) and the same other one second (1 set) session after session.
+// A "real turn" is now 2 or more working sets (warm-ups don't count) of that exercise in one workout — a lone set is a top-up or
+// a spill-over, not its turn, so that exercise stays at the front of the queue and gets the main slot next time. Ties (several
+// exercises with no real turn, or the same real-turn day) fall back to whichever has gone longest without ANY set, so a
+// never-trained exercise still beats one that got a single set yesterday.
+function getDaysSinceExerciseRealTurn(exId){
+  let newest=null;
+  for(const w of (state.history||[])){
+    if(!w)continue;
+    let n=0;
+    (w.exercises||[]).forEach(e=>{if(e&&e.exId===exId)n+=(e.sets||[]).filter(x=>x&&x.done&&x.type!=='warmup').length;});
+    if(n>=2){const t=new Date(w.date).getTime();if(newest===null||t>newest)newest=t;}
+  }
+  return newest===null?null:Math.round((Date.now()-newest)/864e5);
+}
 function isAutoRoutineFixed(exId){
   return!!(state.autoRoutineFixedExIds&&state.autoRoutineFixedExIds.includes(exId));
 }
@@ -9229,9 +9244,10 @@ function rankCandidatesForMuscle(muscle,excludeExId){
   const list=[...candidateIds].filter(id=>!isExerciseInjured(id)).map(id=>{
     const exData=getExercise(id);
     const daysSinceTrained=getDaysSinceExerciseTrained(id);
+    const daysSinceRealTurn=getDaysSinceExerciseRealTurn(id);
     const lastFeedback=getLastNExerciseFeedback(id,1)[0];
     const recentPain=!!(lastFeedback&&lastFeedback.jointPain>=2);
-    return{exId:id,name:exData.name,muscle:exData.muscle,daysSinceTrained,recentPain};
+    return{exId:id,name:exData.name,muscle:exData.muscle,daysSinceTrained,daysSinceRealTurn,recentPain};
   });
   // FIX TO AUTO ROUTINE (2026-08-28, user's explicit request): a pinned exercise sorts ahead of
   // the normal freshness ranking, so whenever growMuscleOneSet needs to introduce a new exercise
@@ -9245,9 +9261,13 @@ function rankCandidatesForMuscle(muscle,excludeExId){
     if(a.recentPain!==b.recentPain)return a.recentPain?1:-1;
     const aFixed=isAutoRoutineFixed(a.exId),bFixed=isAutoRoutineFixed(b.exId);
     if(aFixed!==bFixed)return aFixed?-1:1;
+    const aTurn=a.daysSinceRealTurn==null?Infinity:a.daysSinceRealTurn;
+    const bTurn=b.daysSinceRealTurn==null?Infinity:b.daysSinceRealTurn;
+    if(aTurn!==bTurn)return bTurn-aTurn; // longest since a REAL turn (2+ sets) first
     const aDays=a.daysSinceTrained==null?Infinity:a.daysSinceTrained;
     const bDays=b.daysSinceTrained==null?Infinity:b.daysSinceTrained;
-    return bDays-aDays;
+    if(aDays!==bDays)return bDays-aDays; // then longest since ANY set (a never-trained exercise beats one that got a single set yesterday)
+    return 0;
   });
   return list;
 }
@@ -9260,18 +9280,27 @@ function openSwitchExerciseModal(exIdx){
   const ex=activeWorkout.exercises[exIdx];if(!ex)return;
   switchExerciseExIdx=exIdx;
   const exData=getExercise(ex.exId)||{name:'this exercise'};
-  document.getElementById('switch-ex-current-name').textContent='Replacing: '+exData.name;
+  document.getElementById('switch-ex-current-name').textContent='Replacing: '+exData.name+(exData.muscle?' ('+exData.muscle+')':'');
+  // Wording rewritten 2026-09-21 (user: "the text doesn't make the most sense"): the old line said the options were "pulled from across
+  // your routines" — wrong for an Auto Routine session, whose exercises come from your Auto Routine pool — and never said what happens to
+  // today's sets or what happens to the pool.
+  {const isAuto=isActiveAutoRoutineSession(),n=(ex.sets||[]).length||1,mu=exData.muscle||'this muscle';
+   const help=document.getElementById('switch-ex-help');
+   if(help)help.textContent=(isAuto?'Other '+mu+' exercises, the one most due first.':'Other '+mu+' exercises from across your routines.')
+     +' Today keeps the same '+n+' set'+(n!==1?'s':'')+'; weights and reps start from that exercise\u2019s own history (blank if you\u2019ve never logged it).'
+     +(isAuto?' This only changes today \u2014 afterwards you can also swap it in your Auto Routine pool.':' This only changes today.');}
   const candidates=getSwitchExerciseCandidates(ex.exId);
   const list=document.getElementById('switch-ex-candidate-list');
   if(!candidates.length){
     list.innerHTML='<div class="small text3" style="padding:10px 0">No other exercises for '+escHtml(exData.muscle||'this muscle')+' found across your routines.</div>';
   }else{
     list.innerHTML=candidates.map(c=>{
-      const reason=c.daysSinceTrained==null?'Never logged':('Not trained in '+c.daysSinceTrained+'d');
+      const reason=c.daysSinceTrained==null?'Never logged':(c.daysSinceRealTurn===c.daysSinceTrained?('Not trained in '+c.daysSinceTrained+'d'):('Only a lone set '+c.daysSinceTrained+'d ago \u2014 '+(c.daysSinceRealTurn==null?'no full turn yet':'last full turn '+c.daysSinceRealTurn+'d ago')));
       const painNote=c.recentPain?' \u2014 \u26a0\ufe0f joint pain flagged last time':'';
+      const inPoolTag=(isActiveAutoRoutineSession()&&Array.isArray(state.autoRoutinePool)&&state.autoRoutinePool.includes(c.exId))?'In your pool \u00B7 ':'';
       return'<div class="r-dropdown-item" style="display:block;padding:10px 4px" onclick="confirmExerciseSwitch(\''+c.exId+'\')">'
         +'<div class="bold">'+escHtml(c.name)+'</div>'
-        +'<div class="small text3">'+escHtml(reason+painNote)+'</div></div>';
+        +'<div class="small text3">'+escHtml(inPoolTag+reason+painNote)+'</div></div>';
     }).join('');
   }
   openModal('modal-switch-exercise');
@@ -9305,26 +9334,42 @@ function performExerciseSwitch(exIdx,newExId){
     sets.push(s);
   }
   const oldExData=getExercise(ex.exId);
-  activeWorkout.exercises[exIdx]={exId:newExId,sets,supersetGroup:ex.supersetGroup,repRange,useRIR};
+  const oldName=oldExData?oldExData.name:'this exercise';
+  // UNDO FIX (2026-09-21, user report: "there's no undo option"): the undo toast (5s) was shown and then, in an Auto Routine session, a
+  // blocking confirm() about the pool popped up straight away — the toast's timer kept running behind the dialog, so by the time it was
+  // answered the toast was gone; and undoing never reverted a pool change made from that dialog. Now: no blocking dialog. The card shows a
+  // "Switched from <old> · Undo" line until the first set of the new exercise is ticked, the toast lasts 10s, and the pool question is a
+  // button ON the toast ("Swap in pool too") instead of a pop-up. The original entry is kept on the new one (switchedFrom) so undo restores
+  // it exactly; if the pool was changed too, undo puts the pool back.
+  const sw={entry:JSON.parse(JSON.stringify(ex)),name:oldName,poolBefore:null};
+  activeWorkout.exercises[exIdx]={exId:newExId,sets,supersetGroup:ex.supersetGroup,repRange,useRIR,switchedFrom:sw};
   pefPanelOpenIdxs.delete(exIdx);delete pefDraft[exIdx]; // stale feedback state belonged to the old exercise
   renderActiveWorkout();updateWorkoutEstimate();
-  showUndoToast('Switched to '+newExData.name,()=>{
-    activeWorkout.exercises[exIdx]={...ex};
-    renderActiveWorkout();updateWorkoutEstimate();
-  });
-  // AUTO ROUTINE POOL SYNC (2026-09-06, user's explicit request): "if an exercise is altered
-  // slightly during an auto routine we should ask if the exercise should be replaced in the
-  // exercise pool" — a mid-session switch only ever affected TODAY's workout; the pool itself
-  // stayed on the old exercise, so the very next Auto Routine session would just pick the old one
-  // right back. Only prompts when the OLD exercise was actually in the pool (swapping something
-  // that was never pool-sourced has nothing to sync) and this is a genuine Auto Routine session.
-  if(isActiveAutoRoutineSession()&&Array.isArray(state.autoRoutinePool)&&state.autoRoutinePool.includes(ex.exId)){
-    if(confirm('Replace "'+(oldExData?oldExData.name:'this exercise')+'" with "'+newExData.name+'" in your Auto Routine Pool too, so future sessions use the new one?')){
+  const canSwapPool=isActiveAutoRoutineSession()&&Array.isArray(state.autoRoutinePool)&&state.autoRoutinePool.includes(ex.exId);
+  const opts={duration:10000};
+  if(canSwapPool){
+    opts.extraLabel='Swap in pool too';
+    opts.extraFn=()=>{
+      sw.poolBefore=state.autoRoutinePool.slice();
       state.autoRoutinePool=state.autoRoutinePool.filter(id=>id!==ex.exId);
       if(!state.autoRoutinePool.includes(newExId))state.autoRoutinePool.push(newExId);
       save();
-    }
+      showUndoToast('Auto Routine pool: '+newExData.name+' now replaces '+oldName,()=>{state.autoRoutinePool=sw.poolBefore.slice();sw.poolBefore=null;save();},{duration:8000});
+    };
   }
+  showUndoToast('Switched to '+newExData.name,()=>undoExerciseSwitch(sw),opts);
+}
+// Restores the exercise a Switch Exercise replaced (looked up by its switchedFrom record, so it still works after other exercises were
+// added/removed and the indexes moved), and puts the Auto Routine pool back if "Swap in pool too" was used.
+function undoExerciseSwitch(ref){
+  const idx=typeof ref==='number'?ref:activeWorkout.exercises.findIndex(e=>e&&e.switchedFrom===ref);
+  const cur=activeWorkout.exercises[idx];
+  if(!cur||!cur.switchedFrom)return;
+  const sw=cur.switchedFrom;
+  activeWorkout.exercises[idx]=sw.entry;
+  if(sw.poolBefore){state.autoRoutinePool=sw.poolBefore.slice();save();}
+  pefPanelOpenIdxs.clear();pefDraft={};
+  renderActiveWorkout();updateWorkoutEstimate();
 }
 
 // ============================================================
@@ -9705,10 +9750,23 @@ function getAutoRoutineMusclePriorityMultiplier(muscle){
 // above, still used as-is by the real meso's computeVolumeProgressIncrement/getMuscleReadinessScore —
 // same "don't touch a shared function for a system-specific ask" precedent as
 // getAutoRoutineProgressIncrement vs computeVolumeProgressIncrement.
-const AUTO_ROUTINE_DAY_BOUNDARY_HOUR_GMT=4.5; // 4:30am GMT
+// (AUTO_ROUTINE_DAY_BOUNDARY_HOUR_GMT moved to the CONSTANTS block at the top of the script, 2026-09-21 — startup code now needs it.)
 function getGMT430DayIndex(ms){
   return Math.floor((ms-AUTO_ROUTINE_DAY_BOUNDARY_HOUR_GMT*36e5)/864e5);
 }
+// ── GMT-ONLY DAY / WEEK RULES (2026-09-21, user's explicit request) ──
+// "4:30am is basically when the app should consider it being a new day — review and volume adjustments, all of it, only after
+// 4:30am. And I'm only ever bothered about GMT, this app is purely for me." Until now only Auto Routine's rest-gap eligibility used
+// this boundary; every "this week" / "today" in Review, the week plan and Home's weekly chart used the PHONE's local midnight (so
+// Monday's week began at 00:00 local, i.e. 23:00 GMT Sunday in summer, and a 3am Monday workout already counted as the new week).
+// Now the whole app's week runs Monday 04:30 GMT -> next Monday 04:30 GMT, always GMT (never BST, never the phone's zone): before
+// 04:30 GMT Monday it is still last week (Review still shows it, volume/plan still work on it), and the new week — its Review
+// totals, its volume aims, and the "Plan my week" chooser — only starts at 04:30. Everything below is built on the one day index.
+function getAppDayIndex(ms){return getGMT430DayIndex(ms==null?Date.now():ms);}
+function getAppWeekdayMon0(dayIdx){return (((dayIdx+3)%7)+7)%7;} // day index 0 = Thu 1 Jan 1970 -> Monday=0 ... Sunday=6
+function getAppDayStartMs(ms){return getAppDayIndex(ms)*864e5+AUTO_ROUTINE_DAY_BOUNDARY_HOUR_GMT*36e5;}
+function getAppWeekStartMs(ms){const i=getAppDayIndex(ms);return (i-getAppWeekdayMon0(i))*864e5+AUTO_ROUTINE_DAY_BOUNDARY_HOUR_GMT*36e5;}
+function getAppWeekDaysLeft(ms){return 6-getAppWeekdayMon0(getAppDayIndex(ms));} // days AFTER today before the week ends (Mon=6 ... Sun=0)
 function getAutoRoutineDaysSinceMuscleTrained(muscle){
   // Newest workout by DATE (2026-09-20): this used to return the first match in array order, which is only the newest
   // workout while history is kept newest-first. Same answer for every well-ordered history; correct for any other.
@@ -10441,16 +10499,15 @@ function getMuscleNearestExpiryDays(muscle,horizonDays,directOnly){
 // Monday 00:00 local of the current calendar week, and how many days come AFTER today before it
 // ends (Mon=6 ... Sun=0). Independent of state.reviewWindowMode on purpose.
 function getCalendarWeekStart(){
-  const now=new Date();const day=now.getDay();
-  return new Date(now.getFullYear(),now.getMonth(),now.getDate()+(day===0?-6:1-day));
+  return new Date(getAppWeekStartMs()); // Monday 04:30 GMT (see the GMT-ONLY DAY / WEEK RULES)
 }
-function getCalendarWeekDaysLeft(){const day=new Date().getDay();return day===0?0:7-day;}
+function getCalendarWeekDaysLeft(){return getAppWeekDaysLeft();}
 // Distinct days with a logged workout so far this calendar week.
 function getCalendarWeekSessionsDone(){
   const start=getCalendarWeekStart(),days=new Set();
   (state.history||[]).forEach(w=>{
     if(!w)return;const t=new Date(w.date);
-    if(t>=start)days.add(t.getFullYear()+'-'+t.getMonth()+'-'+t.getDate());
+    if(t>=start)days.add(getAppDayIndex(t.getTime()));
   });
   return days.size;
 }
@@ -10487,8 +10544,7 @@ function getAutoRoutineGymDaysPerWeek(){
     if(!w)return;
     const ms=new Date(w.date).getTime();
     if(!(ms>=cutoff)||ms>Date.now())return;
-    const t=new Date(ms);
-    days.add(t.getFullYear()+'-'+t.getMonth()+'-'+t.getDate());
+    days.add(getAppDayIndex(ms));
     weeks.add(Math.floor((ms-cutoff)/(7*864e5)));
   });
   if(days.size<2||weeks.size<1)return 3;
@@ -10531,7 +10587,7 @@ function getAutoRoutineAttendRatePerWeek(minGapDays){
     if(!w)return;
     const ms=new Date(w.date).getTime();
     if(!(ms>=cutoff)||ms>Date.now())return;
-    const t=new Date(ms),k=new Date(t.getFullYear(),t.getMonth(),t.getDate()).getTime();
+    const k=getAppDayIndex(ms);
     if(!seen.has(k)){seen.add(k);keys.push(k);}
     weeks.add(Math.floor((ms-cutoff)/(7*864e5)));
   });
@@ -10539,7 +10595,7 @@ function getAutoRoutineAttendRatePerWeek(minGapDays){
   keys.sort((a,b)=>a-b);
   const gap=Math.max(1,Math.ceil(minGapDays));
   let last=null,n=0;
-  keys.forEach(k=>{if(last===null||Math.round((k-last)/864e5)>=gap){n++;last=k;}});
+  keys.forEach(k=>{if(last===null||(k-last)>=gap){n++;last=k;}});
   return Math.min(7,n/weeks.size);
 }
 function getAutoRoutineSessionsLeftThisWeek(minGapDays){
@@ -11866,6 +11922,7 @@ function buildExerciseCard(exIdx){
     +'<button class="btn btn-ghost btn-sm" onclick="openNoteModal(\''+ex.exId+'\')">📌</button>'
     +'<button class="btn btn-ghost btn-sm" onclick="openSwitchExerciseModal('+exIdx+')" title="Switch Exercise">🔁</button>'
     +'<button class="btn btn-danger btn-sm" onclick="removeExercise('+exIdx+')">✕</button></div></div>'
+    +((ex.switchedFrom&&!(ex.sets||[]).some(x=>x&&x.done))?'<div class="small" style="padding:0 16px 8px;color:var(--text2)">\u21A9 Switched from '+escHtml(ex.switchedFrom.name)+' \u00B7 <span style="color:var(--accent);font-weight:700;cursor:pointer" onclick="undoExerciseSwitch('+exIdx+')">Undo</span></div>':'')
     +noteHtml
     +injuredExHtml
     +autoSkipHtml
@@ -11877,7 +11934,7 @@ function buildExerciseCard(exIdx){
     +'<th>#</th><th>Type</th><th style="color:var(--text3)">Prev</th>'
     +(isBW?'':'<th>kg</th>')+(isUni?'<th>L Reps</th><th>R Reps</th>':'<th>Reps</th>')+'<th>'+effortHdr+'</th><th>✓</th><th>Trend</th>'
     +'</tr></thead><tbody id="sets-body-'+exIdx+'"></tbody></table>'
-    +'<div class="small text3" style="padding:4px 16px 0">Swipe a set left to delete it</div>'
+    +'<div class="small text3" style="padding:4px 16px 0">Swipe a set left to delete it (Undo appears)</div>'
     +'<div class="exercise-actions">'
     +'<div class="add-set-pill" role="group" aria-label="Add a set">'
     +'<button class="add-set-pill-half add-set-pill-routine" onclick="addSet('+exIdx+',true)" title="Carries forward — future workouts from this routine will start with this set too">＋ Routine Set</button>'
@@ -12007,10 +12064,15 @@ function setSwipeStart(e,tr,exIdx,setIdx){
   // button, set-type button, weight/reps/RPE inputs) — otherwise the small incidental movement
   // of pressing one of those can register as a leftward swipe and delete the set instead of (or
   // as well as) completing it. A real delete-swipe should start from plain row space.
-  if(e.target.closest('button, input, select'))return;
+  // (2026-09-21, user report: "I can't swipe left on a set to remove it on auto routine".) Swipes used to be ignored when they started on
+  // the row's own controls — and the weight / reps / RIR boxes and the two buttons are ~70% of the row, so only the three narrow plain
+  // cells (# / Prev / Trend) could start one and swiping "on the set" from its numbers did nothing. Now a swipe may start anywhere on
+  // the row; one that starts ON a control just has to show clearer horizontal intent first (14px and clearly more sideways than
+  // up/down, vs 8px on plain space), so tapping a button or a box still never deletes anything. Tested with real touch events.
+  const onControl=!!e.target.closest('button, input, select');
   const t=e.touches[0];
   tr.style.transition='none';
-  swipeState={active:true,startX:t.clientX,startY:t.clientY,dx:0,tr,exIdx,setIdx,decided:false,horizontal:false};
+  swipeState={active:true,startX:t.clientX,startY:t.clientY,dx:0,tr,exIdx,setIdx,decided:false,horizontal:false,onControl};
 }
 function setSwipeMove(e){
   if(!swipeState.active)return;
@@ -12018,8 +12080,11 @@ function setSwipeMove(e){
   const dx=t.clientX-swipeState.startX;
   const dy=t.clientY-swipeState.startY;
   if(!swipeState.decided){
-    if(Math.abs(dx)>8||Math.abs(dy)>8)swipeState.decided=true,swipeState.horizontal=Math.abs(dx)>Math.abs(dy);
-    else return;
+    const startAt=swipeState.onControl?14:8;
+    if(Math.abs(dx)>startAt||Math.abs(dy)>startAt){
+      swipeState.decided=true;
+      swipeState.horizontal=swipeState.onControl?(Math.abs(dx)>Math.abs(dy)*1.5):(Math.abs(dx)>Math.abs(dy));
+    }else return;
   }
   if(!swipeState.horizontal)return;
   if(e.cancelable)e.preventDefault();
@@ -12051,7 +12116,9 @@ function setSwipeEnd(){
 }
 function removeSetAt(exIdx,setIdx){
   const sets=activeWorkout.exercises[exIdx]&&activeWorkout.exercises[exIdx].sets;
-  if(!sets||sets.length<=1){renderSets(exIdx);return;}
+  if(!sets)return;
+  // The only set left: swiping it away used to snap back with no message. It now removes the exercise (Removed <name> + Undo).
+  if(sets.length<=1){removeExercise(exIdx);return;}
   const removed=sets[setIdx];
   sets.splice(setIdx,1);
   renderSets(exIdx);updateWorkoutStats();updateWorkoutEstimate();
@@ -12352,7 +12419,8 @@ function removeLastSet(exIdx){
   }
 }
 let undoToastTimer=null;
-function showUndoToast(message,restoreFn){
+function showUndoToast(message,restoreFn,opts){
+  const o=opts||{};
   clearTimeout(undoToastTimer);
   let toast=document.getElementById('undo-toast');
   if(!toast){
@@ -12362,13 +12430,19 @@ function showUndoToast(message,restoreFn){
     document.body.appendChild(toast);
   }
   toast.style.display='flex';
-  toast.innerHTML='<span style="font-size:13px;color:var(--text)">'+escHtml(message)+'</span><button style="background:none;border:none;color:var(--accent);font-weight:700;font-size:13px;padding:4px 8px;flex-shrink:0" id="undo-toast-btn">UNDO</button>';
+  const btn='background:none;border:none;color:var(--accent);font-weight:700;font-size:13px;padding:4px 8px;flex-shrink:0';
+  toast.innerHTML='<span style="font-size:13px;color:var(--text)">'+escHtml(message)+'</span>'
+    +'<span style="display:flex;gap:2px;flex-shrink:0">'
+    +(o.extraLabel?'<button style="'+btn+'" id="undo-toast-extra">'+escHtml(o.extraLabel)+'</button>':'')
+    +'<button style="'+btn+'" id="undo-toast-btn">UNDO</button></span>';
   document.getElementById('undo-toast-btn').onclick=()=>{
     clearTimeout(undoToastTimer);
     toast.style.display='none';
     restoreFn();
   };
-  undoToastTimer=setTimeout(()=>{toast.style.display='none';},5000);
+  const ex=document.getElementById('undo-toast-extra');
+  if(ex)ex.onclick=()=>{clearTimeout(undoToastTimer);toast.style.display='none';o.extraFn();};
+  undoToastTimer=setTimeout(()=>{toast.style.display='none';},o.duration||5000);
 }
 function removeExercise(exIdx){
   const removed=activeWorkout.exercises[exIdx];
@@ -15105,9 +15179,7 @@ function getDaysSinceLastTrained(muscle){
 function getReviewWindowStart(){
   const now=new Date();
   if(state.reviewWindowMode==='calendar'){
-    const day=now.getDay();
-    const diffToMonday=(day===0?-6:1-day);
-    return new Date(now.getFullYear(),now.getMonth(),now.getDate()+diffToMonday);
+    return new Date(getAppWeekStartMs()); // Monday 04:30 GMT (2026-09-21) — was the phone's local Monday midnight
   }
   return new Date(now-7*864e5);
 }
@@ -15115,8 +15187,7 @@ function getReviewWindowStart(){
 // sets over the last 3 days" early in a calendar week, rather than misleadingly saying 7).
 function getReviewWindowDays(){
   if(state.reviewWindowMode==='calendar'){
-    const day=new Date().getDay();
-    return day===0?7:day; // Monday=1 day in, ... Sunday=7 (full week elapsed)
+    return getAppWeekdayMon0(getAppDayIndex())+1; // Monday=1 day in, ... Sunday=7 (full week elapsed) — days counted from 04:30 GMT
   }
   return 7;
 }
@@ -15223,7 +15294,7 @@ function getMuscleWeekPlan(muscle){
 // high for muscles like arms) and assume the sessions are spread evenly — treat the times as "about".
 function getCalendarWeekKey(){
   const w=getCalendarWeekStart();
-  return w.getFullYear()+'-'+(w.getMonth()+1)+'-'+w.getDate();
+  return 'gmt-'+w.getUTCFullYear()+'-'+(w.getUTCMonth()+1)+'-'+w.getUTCDate();
 }
 function getActiveWeekPlan(){
   const p=state.autoRoutineWeekPlan;
@@ -15236,12 +15307,12 @@ function getWeekPlanSessionsLeft(){
   const p=getActiveWeekPlan();
   if(!p||!p.sessions)return null;
   const madeAt=new Date(p.madeAt).getTime();
-  const today=new Date();today.setHours(0,0,0,0);
+  const todayStart=getAppDayStartMs();
   const days=new Set();
   (state.history||[]).forEach(w=>{
     if(!w)return;
     const t=new Date(w.date).getTime();
-    if(t>=madeAt&&t<today.getTime()){const d=new Date(t);days.add(d.getFullYear()+'-'+d.getMonth()+'-'+d.getDate());}
+    if(t>=madeAt&&t<todayStart)days.add(getAppDayIndex(t));
   });
   return Math.max(1,p.sessions-days.size);
 }
@@ -15317,6 +15388,8 @@ function getWeekPlanOptions(){
   return{options,maxN,items:items.length,daysLeft};
 }
 function needsWeekPlanPrompt(){
+  // Sunday (nothing left to plan — the week is over at 04:30 GMT Monday): don't ask, the new week's chooser only appears then
+  if(getCalendarWeekDaysLeft()===0)return false;
   if(getActiveWeekPlan())return false; // already chosen, or "use my usual pace" already picked, this week
   return getWeekPlanOptions().items>0;
 }
@@ -15442,7 +15515,9 @@ function getWeekPlanCardHtml(){
     +'<div class="small text3" style="margin-top:6px;line-height:1.5">'+s.sessionsDone+' session'+pl(s.sessionsDone)+' so far this week \u00B7 '+(s.planned?'your plan: '+s.planTotal+' sessions this week':'you usually do ~'+(Math.round(s.avg*2)/2)+'/week')+' \u00B7 '+dayWord+'</div>'
     +(hungriest.length?'<div style="margin-top:8px"><span class="small text3">Driving it: </span>'+hungriest.map(p=>'<span class="muscle-tag">'+p.muscle+' \u00B7 '+p.sessions+'</span>').join('')+'</div>':'')
     +'<div class="small text3" style="margin-top:8px">At aim \u2014 previous 7 days: '+s.hitRolling+'/'+s.total+' muscles \u00B7 this week so far: '+s.hitWeek+'/'+s.total+'</div>'
-    +'<div style="margin-top:10px"><button class="btn btn-ghost btn-sm" onclick="openWeekPlanModal()">\uD83D\uDCC5 '+(s.planned?'Change week plan':'Plan my week')+'</button></div>';
+    +(s.daysLeft===0
+      ?'<div class="small text3" style="margin-top:10px">A new week starts Monday 04:30 GMT \u2014 that\u2019s when you can plan it.</div>'
+      :'<div style="margin-top:10px"><button class="btn btn-ghost btn-sm" onclick="openWeekPlanModal()">\uD83D\uDCC5 '+(s.planned?'Change week plan':'Plan my week')+'</button></div>');
 }
 // Single-gauge visual for one muscle's Review row (2026-09-10, replacing the earlier three-bars
 // version — see CSS comment on .lm-gauge for why). Four colour zones with fixed meaning across
@@ -15495,8 +15570,8 @@ function renderReview(){
   const ms=getMuscleGroupVolumesForReview(); // muscle-vs-landmark comparisons, windowed the same way as the toggle above (see getMuscleVolumeForReview) — separate from getMuscleGroupVolumes/getMuscleVolume, which stay on the fixed rolling MUSCLE_VOLUME_WINDOW_DAYS and keep driving Auto Session/ramp decisions untouched by this toggle.
   const now=new Date();
   let vol=0,sets=0,rpeAll=[];const days=new Set();let consec=0;
-  ww.forEach(w=>{if(!w)return;days.add(new Date(w.date).toDateString());(w.exercises||[]).forEach(ex=>{if(!ex)return;const useRIR=!!ex.useRIR;(ex.sets||[]).forEach(s=>{if(s&&s.done&&s.type!=='partials'){sets++;vol+=(s.weight||0)*(s.reps||0);if(s.rpe!=null)rpeAll.push(useRIR?(10-s.rpe):s.rpe);}});});});
-  for(let i=0;i<7;i++){const d=new Date(now-i*864e5);if(days.has(d.toDateString()))consec++;else break;}
+  ww.forEach(w=>{if(!w)return;days.add(getAppDayIndex(new Date(w.date).getTime()));(w.exercises||[]).forEach(ex=>{if(!ex)return;const useRIR=!!ex.useRIR;(ex.sets||[]).forEach(s=>{if(s&&s.done&&s.type!=='partials'){sets++;vol+=(s.weight||0)*(s.reps||0);if(s.rpe!=null)rpeAll.push(useRIR?(10-s.rpe):s.rpe);}});});});
+  {const todayIdx=getAppDayIndex();for(let i=0;i<7;i++){if(days.has(todayIdx-i))consec++;else break;}}
   const avgRPE=rpeAll.length?(rpeAll.reduce((a,b)=>a+b,0)/rpeAll.length).toFixed(1):'—';
   const toggleHtml='<div class="review-window-toggle">'
     +'<div class="sort-chip'+(state.reviewWindowMode!=='calendar'?' active':'')+'" onclick="setReviewWindowMode(\'trailing\')">Trailing 7 Days</div>'
