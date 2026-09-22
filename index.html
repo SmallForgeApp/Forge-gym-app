@@ -724,7 +724,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-21.2</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-22.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -6678,6 +6678,88 @@ function getMesoReviewData(m){
 }
 let mesoReviewOpenMuscles=new Set();
 // reviewPRsOpenMuscles moved up near the startup render list (2026-09-12 audit fix).
+// ── E1RM TREND CHARTS (2026-09-22, user's explicit request: "Review should have a graph for each
+// muscle to show if it's improving e1rm over time. Also each exercise should do the same.") ──
+// One exercise's e1RM history, chronological, one point per day it was trained — the actual trend,
+// not capped at the all-time best. Same "normal-type sets only" rule getPR uses for the PR numbers
+// shown next to these charts (a dropset/myo-rep set isn't a fresh max attempt any more than it is a
+// record attempt), so the two agree on what counts as a real effort. But getPR keeps the best value
+// EVER logged, while this keeps every session's value, so the chart's last point is the most RECENT
+// session, which can sit below the PR line if the current best happened earlier — that gap is
+// exactly what tells the user whether they're still improving or have slipped from their peak.
+// Confirmed on the user's own data: about a third of exercises currently show below their PR.
+function getExerciseOrmSeries(exId){
+  const points=[];
+  (state.history||[]).slice().reverse().forEach(w=>{
+    if(!w)return;
+    const found=(w.exercises||[]).find(e=>e&&e.exId===exId);if(!found)return;
+    const done=(found.sets||[]).filter(s=>s&&s.done&&(!s.type||s.type==='normal'));
+    if(!done.length)return;
+    const val=Math.max(...done.map(s=>calcORM(s.weight||0,repsMetricOf(s))));
+    if(val>0)points.push({date:new Date(w.date),val});
+  });
+  return points;
+}
+// A MUSCLE has no single e1RM \u2014 its exercises sit at completely different absolute weights (a
+// barbell row's e1RM vs a cable curl's aren't comparable), and which exercise gets trained on a
+// given day rotates (confirmed on the user's own data: most muscles have 3-7 different exercises in
+// rotation). Charting the raw max across them would just track whichever exercise happened to be
+// heaviest that day, not whether the muscle is improving. Instead this is a composite INDEX \u2014
+// the same technique a stock index uses for dissimilar stocks: each exercise's e1RM is rebased to
+// 100 at its own first logged value, then the muscle's point on any given date is the average of
+// every exercise's latest rebased value as of that date (forward-filled, so an exercise not trained
+// that day still contributes its last known value). exIds should be exercises already known to have
+// at least one real PR for this muscle (the caller passes the Personal Records list it already
+// built, so this never redoes that "does it have real history" filtering).
+function getMuscleOrmIndexSeries(exIds){
+  const byExId={};
+  (exIds||[]).forEach(exId=>{const pts=getExerciseOrmSeries(exId);if(pts.length)byExId[exId]=pts;});
+  const list=Object.keys(byExId);
+  if(!list.length)return{index:[],byExId};
+  const bases=list.map(id=>byExId[id][0].val);
+  const allDates=[...new Set(list.flatMap(id=>byExId[id].map(p=>p.date.getTime())))].sort((a,b)=>a-b);
+  const ptr=list.map(()=>-1); // forward-fill pointer per exercise \u2014 dates and points are both ascending, so this is O(dates+points), not O(dates\u00d7points)
+  const index=allDates.map(t=>{
+    let sum=0,n=0;
+    list.forEach((id,i)=>{
+      const pts=byExId[id];
+      while(ptr[i]+1<pts.length&&pts[ptr[i]+1].date.getTime()<=t)ptr[i]++;
+      if(ptr[i]>=0){sum+=pts[ptr[i]].val/bases[i]*100;n++;}
+    });
+    return n?{date:new Date(t),val:sum/n}:null;
+  }).filter(Boolean);
+  return{index,byExId};
+}
+// Shared canvas line-chart renderer for both the muscle composite index and each exercise's own
+// sparkline \u2014 same visual language as the existing History-detail trend sparkline
+// (drawHistoryTrendSparkline), just parameterised on height/color instead of copy-pasted, since this
+// feature needs the same drawing twice (once bigger for the muscle index, once compact per exercise).
+function drawOrmTrendCanvas(canvasId,points,opts){
+  opts=opts||{};
+  const canvas=document.getElementById(canvasId);if(!canvas)return;
+  const ctx=canvas.getContext('2d');
+  const wrap=canvas.parentElement;
+  const h=opts.height||36;
+  canvas.width=(wrap&&wrap.clientWidth)||280;canvas.height=h;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(points.length<2){
+    ctx.fillStyle='rgba(136,136,170,0.6)';ctx.font='10px DM Sans';ctx.textAlign='left';
+    ctx.fillText(opts.emptyText||'Not enough history yet',2,h/2+4);
+    return;
+  }
+  const vals=points.map(p=>p.val);
+  const mn=Math.min(...vals),mx=Math.max(...vals);
+  const pad=opts.pad!=null?opts.pad:3;
+  const w=canvas.width-pad*2,ih=h-pad*2;
+  const xS=w/(points.length-1);
+  const rgb=opts.rgb||(getComputedStyle(document.documentElement).getPropertyValue('--accent-rgb')||'217,119,87').trim();
+  const yOf=v=>pad+ih-(mx===mn?ih/2:ih*(v-mn)/(mx-mn));
+  ctx.beginPath();ctx.strokeStyle='rgb('+rgb+')';ctx.lineWidth=opts.lineWidth||1.5;ctx.lineJoin='round';
+  points.forEach((p,i)=>{const x=pad+i*xS,y=yOf(p.val);if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);});
+  ctx.stroke();
+  const lastX=pad+(points.length-1)*xS,lastY=yOf(points[points.length-1].val);
+  ctx.beginPath();ctx.fillStyle='rgb('+rgb+')';ctx.arc(lastX,lastY,opts.dotR||2.5,0,Math.PI*2);ctx.fill();
+}
 function renderReviewPRBody(){
   const body=document.getElementById('review-prs-body');if(!body)return;
   let byMuscle;
@@ -6686,28 +6768,51 @@ function renderReviewPRBody(){
   const muscles=Object.keys(byMuscle).sort();
   if(!muscles.length){body.innerHTML='<div class="small text2" style="text-align:center;padding:14px 0">Complete workouts to start setting records</div>';return;}
   let html='';
+  const trendTargets=[]; // {id,points,height} — canvases are drawn after body.innerHTML actually exists in the DOM
+  const sanitizeId=s=>String(s).replace(/[^a-zA-Z0-9_-]/g,'_');
   muscles.forEach(muscle=>{
     const exs=byMuscle[muscle];
     const open=reviewPRsOpenMuscles.has(muscle);
+    const {index,byExId}=getMuscleOrmIndexSeries(exs.map(s=>s.exId));
     // Muscle names are a fixed internal set (MUSCLE_GROUPS/'Other'), not free text — safe to
     // interpolate directly into the onclick, same convention as toggleMesoReviewMuscle.
     html+='<div class="muscle-group-header" onclick="toggleReviewPRMuscle(\''+muscle+'\')">'
       +'<span class="bold" style="font-size:13px">'+escHtml(muscle)+'</span>'
       +'<span style="display:flex;align-items:center;gap:6px"><span class="text3 small">'+exs.length+' exercise'+(exs.length!==1?'s':'')+'</span><span class="text3">'+(open?'\u25be':'\u25b8')+'</span></span>'
       +'</div>';
+    // The composite e1RM trend always shows, collapsed or not — it's the direct answer to "is this
+    // muscle improving", where the exercise-by-exercise breakdown below is the detail behind it.
+    if(index.length>=2){
+      const change=Math.round(index[index.length-1].val-100); // baseline is rebased to exactly 100
+      const chartId='muscle-orm-'+sanitizeId(muscle);
+      html+='<div style="padding:6px 0 10px">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center"><span class="small text3">Est. 1RM trend (all '+exs.length+' exercises, indexed)</span>'
+        +'<span class="small" style="color:'+(change>=0?'var(--green)':'var(--red)')+';font-weight:700">'+(change>=0?'+':'')+change+'%</span></div>'
+        +'<canvas id="'+chartId+'" style="width:100%;height:54px;display:block;margin-top:4px"></canvas>'
+        +'</div>';
+      trendTargets.push({id:chartId,points:index,height:54});
+    }else if(exs.length>1){
+      html+='<div class="small text3" style="padding:2px 0 8px">Not enough shared history yet to trend '+escHtml(muscle)+' as a whole \u2014 keep logging.</div>';
+    }
     if(open){
       html+='<div style="padding:0 0 4px 2px">'+exs.map(s=>{
         const loadStr=s.isBW?s.reps+' reps':s.weight+'kg \u00d7 '+s.reps;
+        const pts=byExId[s.exId]||[];
+        const exChange=pts.length>=2?Math.round((pts[pts.length-1].val-pts[0].val)/pts[0].val*100):null;
+        const chartId='ex-orm-'+sanitizeId(s.exId);
+        if(pts.length>=2)trendTargets.push({id:chartId,points:pts,height:28});
         return '<div class="pr-row-link" style="padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="openProgressModal(\''+s.exId+'\')">'
           +'<div style="display:flex;justify-content:space-between;align-items:center">'
           +'<span class="bold" style="font-size:13px">'+escHtml(s.name)+'</span>'
           +'<span class="small" style="color:var(--accent)">\u203a</span></div>'
-          +'<div class="small text3">Best: '+loadStr+(s.orm?' \u00b7 ~'+s.orm+'kg e1RM':'')+'</div>'
+          +'<div class="small text3">Best: '+loadStr+(s.orm?' \u00b7 ~'+s.orm+'kg e1RM':'')+(exChange!=null?' \u00b7 '+(exChange>=0?'+':'')+exChange+'% since first logged':'')+'</div>'
+          +(pts.length>=2?'<canvas id="'+chartId+'" style="width:100%;height:28px;display:block;margin-top:4px"></canvas>':'')
           +'</div>';
       }).join('')+'</div>';
     }
   });
   body.innerHTML=html;
+  trendTargets.forEach(t=>drawOrmTrendCanvas(t.id,t.points,{height:t.height}));
 }
 function toggleReviewPRMuscle(muscle){
   if(reviewPRsOpenMuscles.has(muscle))reviewPRsOpenMuscles.delete(muscle);else reviewPRsOpenMuscles.add(muscle);
@@ -12168,9 +12273,12 @@ function finishSetSlot(exIdx,setIdx,opts){
   opts=opts||{};
   const ex=activeWorkout.exercises[exIdx];
   const set=ex.sets[setIdx];
+  // Hoisted so the rest-timer block below (2026-09-21) can reuse the SAME rotation position the
+  // jump-to-next-exercise logic already uses, instead of recomputing a second definition of "rotation".
+  let groupIdxs=null,myPos=-1;
   if(ex.supersetGroup!=null){
-    const groupIdxs=activeWorkout.exercises.map((e,i)=>({e,i})).filter(x=>x.e.supersetGroup===ex.supersetGroup).map(x=>x.i);
-    const myPos=groupIdxs.indexOf(exIdx);
+    groupIdxs=activeWorkout.exercises.map((e,i)=>({e,i})).filter(x=>x.e.supersetGroup===ex.supersetGroup).map(x=>x.i);
+    myPos=groupIdxs.indexOf(exIdx);
     const nextGroupIdx=groupIdxs[(myPos+1)%groupIdxs.length];
     const nextEx=activeWorkout.exercises[nextGroupIdx];
     const nextSetIdx=nextEx.sets.findIndex((s,si)=>!s.done&&si>=setIdx)||nextEx.sets.findIndex(s=>!s.done);
@@ -12197,13 +12305,30 @@ function finishSetSlot(exIdx,setIdx,opts){
   if(!(opts.chainComplete&&ex.supersetGroup!=null)){
     const exId=ex.exId;
     const exDat=getExercise(exId);
+    // AUTO ROUTINE REST TIMING (2026-09-21, user's explicit request): "90 seconds for non-compounds, 2
+    // minutes for compounds, and no timer between exercises within a superset \u2014 only between one
+    // rotation of the superset and the next." Only changes Auto Routine sessions; other workouts keep
+    // their existing 90/150s split and the old "capped at 60s, fires every set" superset behaviour.
+    const isAutoSession=isActiveAutoRoutineSession();
+    const isCompound=!!(exDat&&COMPOUND_MUSCLES.includes(exDat.muscle));
     let restSecs=90;
     if(set.type==='warmup')restSecs=45;
     else if(set.type==='dropset'||set.type==='myo')restSecs=45;
     else if(set.type==='failure'||set.type==='1rm')restSecs=180;
-    else if(exDat&&COMPOUND_MUSCLES.includes(exDat.muscle))restSecs=150;
-    if(ex.supersetGroup!=null)restSecs=Math.min(restSecs,60);
-    startRestTimer(restSecs);
+    else if(isCompound)restSecs=isAutoSession?120:150;
+    let fireTimer=true;
+    if(ex.supersetGroup!=null){
+      if(isAutoSession){
+        // groupIdxs/myPos: the same rotation position computed above, at the top of this function.
+        // myPos is the LAST position once every exercise in the group has taken its turn for this
+        // round, so that is the only moment a rest timer should start \u2014 finishing any earlier
+        // exercise in the rotation moves straight to the next one, no rest in between.
+        fireTimer=groupIdxs&&myPos===groupIdxs.length-1;
+      }else{
+        restSecs=Math.min(restSecs,60);
+      }
+    }
+    if(fireTimer)startRestTimer(restSecs);
   }
   checkExerciseFeedbackTrigger(exIdx);
   try{reconcileRampExtraSets();}catch(e){console.error('reconcileRampExtraSets failed, skipping:',e);}
