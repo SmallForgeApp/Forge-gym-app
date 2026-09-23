@@ -307,6 +307,10 @@ the exact count, instead of three separate bars each needing its own read.*/
 as the existing .sort-chip segmented controls used elsewhere in the app. */
 .review-window-toggle{display:flex;gap:6px;padding:12px 16px 0;}
 .review-window-toggle .sort-chip{flex:1;text-align:center;}
+/* E1RM trend window chips (2026-09-22) — same segmented-control language as .review-window-toggle,
+sized for 5 short labels inside the Personal Records card rather than 2 across the full page width. */
+.orm-window-toggle{display:flex;gap:4px;margin-bottom:10px;}
+.orm-window-toggle .sort-chip{flex:1;text-align:center;padding:5px 4px;font-size:11px;}
 .muscle-bar-wrap{padding:5px 0;}.muscle-bar-label{display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px;}
 .status-chip{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:10px;font-size:10.5px;font-weight:700;white-space:nowrap;flex-shrink:0;}
 .priority-pill{padding:8px 14px;border-radius:14px;border:1px solid var(--border);background:var(--bg);color:var(--text2);font-size:13px;font-weight:600;}
@@ -724,7 +728,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-22.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-22.2</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -6688,6 +6692,37 @@ let mesoReviewOpenMuscles=new Set();
 // session, which can sit below the PR line if the current best happened earlier — that gap is
 // exactly what tells the user whether they're still improving or have slipped from their peak.
 // Confirmed on the user's own data: about a third of exercises currently show below their PR.
+// TIME WINDOW FOR THE E1RM TREND (2026-09-22, user's explicit request). Rebasing every chart to the
+// very FIRST thing ever logged for an exercise means the line only gets more trivially "impressive"
+// with age \u2014 after a year or two it will nearly always read positive even during a genuine
+// plateau or dip, since it's being compared to the weakest point that will ever exist. The user also
+// pointed out a real, separate problem this same fix happens to solve: some exercises have been
+// deliberately re-baselined (form corrected to better target the muscle), so their early numbers
+// aren't a fair comparison for "how am I doing now" either. A selectable window answers "how have I
+// progressed in THIS period" instead: filtering each exercise's points to the window BEFORE handing
+// them to getMuscleOrmIndexSeries makes it rebase to the first point inside that window, for free.
+// '1w'/'1m'/'6m'/'1y' are approximations (7/30/182/365 days) — precise calendar months/years aren't
+// worth the complexity for a trend chart. 'all' (the default, unchanged prior behaviour) keeps the
+// original full-history view for anyone who wants it.
+const ORM_WINDOW_OPTIONS=[['1w','1W',7],['1m','1M',30],['6m','6M',182],['1y','1Y',365],['all','All',null]];
+function getOrmWindowDays(){
+  const opt=ORM_WINDOW_OPTIONS.find(o=>o[0]===(state.reviewOrmWindow||'all'));
+  return opt?opt[2]:null;
+}
+function getOrmWindowCutoffMs(){
+  const days=getOrmWindowDays();
+  return days==null?null:Date.now()-days*864e5;
+}
+function getOrmWindowLabel(){
+  const opt=ORM_WINDOW_OPTIONS.find(o=>o[0]===(state.reviewOrmWindow||'all'));
+  return opt?opt[1]:'All';
+}
+function setOrmWindow(key){
+  if((state.reviewOrmWindow||'all')===key)return;
+  state.reviewOrmWindow=key;
+  save();
+  renderReviewPRBody();
+}
 function getExerciseOrmSeries(exId){
   const points=[];
   (state.history||[]).slice().reverse().forEach(w=>{
@@ -6698,7 +6733,8 @@ function getExerciseOrmSeries(exId){
     const val=Math.max(...done.map(s=>calcORM(s.weight||0,repsMetricOf(s))));
     if(val>0)points.push({date:new Date(w.date),val});
   });
-  return points;
+  const cutoff=getOrmWindowCutoffMs();
+  return cutoff==null?points:points.filter(p=>p.date.getTime()>=cutoff);
 }
 // A MUSCLE has no single e1RM \u2014 its exercises sit at completely different absolute weights (a
 // barbell row's e1RM vs a cable curl's aren't comparable), and which exercise gets trained on a
@@ -6761,13 +6797,15 @@ function drawOrmTrendCanvas(canvasId,points,opts){
   ctx.beginPath();ctx.fillStyle='rgb('+rgb+')';ctx.arc(lastX,lastY,opts.dotR||2.5,0,Math.PI*2);ctx.fill();
 }
 function renderReviewPRBody(){
+  const windowChipsHtml='<div class="orm-window-toggle">'+ORM_WINDOW_OPTIONS.map(o=>
+    '<div class="sort-chip'+((state.reviewOrmWindow||'all')===o[0]?' active':'')+'" onclick="setOrmWindow(\''+o[0]+'\')">'+o[1]+'</div>').join('')+'</div>';
   const body=document.getElementById('review-prs-body');if(!body)return;
   let byMuscle;
   try{byMuscle=getAllExercisePRs();}
   catch(e){console.error('renderReviewPRBody failed:',e);body.innerHTML='<div class="small text2" style="text-align:center;padding:14px 0">Couldn\'t load records</div>';return;}
   const muscles=Object.keys(byMuscle).sort();
   if(!muscles.length){body.innerHTML='<div class="small text2" style="text-align:center;padding:14px 0">Complete workouts to start setting records</div>';return;}
-  let html='';
+  let html=windowChipsHtml;
   const trendTargets=[]; // {id,points,height} — canvases are drawn after body.innerHTML actually exists in the DOM
   const sanitizeId=s=>String(s).replace(/[^a-zA-Z0-9_-]/g,'_');
   muscles.forEach(muscle=>{
@@ -6805,7 +6843,7 @@ function renderReviewPRBody(){
           +'<div style="display:flex;justify-content:space-between;align-items:center">'
           +'<span class="bold" style="font-size:13px">'+escHtml(s.name)+'</span>'
           +'<span class="small" style="color:var(--accent)">\u203a</span></div>'
-          +'<div class="small text3">Best: '+loadStr+(s.orm?' \u00b7 ~'+s.orm+'kg e1RM':'')+(exChange!=null?' \u00b7 '+(exChange>=0?'+':'')+exChange+'% since first logged':'')+'</div>'
+          +'<div class="small text3">Best: '+loadStr+(s.orm?' \u00b7 ~'+s.orm+'kg e1RM':'')+(exChange!=null?' \u00b7 '+(exChange>=0?'+':'')+exChange+'%'+((state.reviewOrmWindow||'all')==='all'?' since first logged':' '+getOrmWindowLabel().toLowerCase()):'')+'</div>'
           +(pts.length>=2?'<canvas id="'+chartId+'" style="width:100%;height:28px;display:block;margin-top:4px"></canvas>':'')
           +'</div>';
       }).join('')+'</div>';
