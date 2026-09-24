@@ -728,7 +728,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-22.2</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-24.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -3892,6 +3892,11 @@ function savePoolExerciseEdit(){
       if(state.autoRoutineMuscleTracker[mu]===oldExId)state.autoRoutineMuscleTracker[mu]=resolved.id;
     });
   }
+  // Same transfer for remembered Auto Routine supersets (2026-09-24) — a pairing shouldn't be lost
+  // just because one of its exercises got edited into a new id.
+  if(resolved.id!==oldExId&&Array.isArray(state.autoRoutineSupersetPairs)){
+    state.autoRoutineSupersetPairs=state.autoRoutineSupersetPairs.map(pr=>pr.map(id=>id===oldExId?resolved.id:id)).filter(pr=>pr[0]!==pr[1]);
+  }
   save();
   editingPoolExId=null;
   closeModal('modal-edit-exercise');
@@ -6751,7 +6756,7 @@ function getMuscleOrmIndexSeries(exIds){
   const byExId={};
   (exIds||[]).forEach(exId=>{const pts=getExerciseOrmSeries(exId);if(pts.length)byExId[exId]=pts;});
   const list=Object.keys(byExId);
-  if(!list.length)return{index:[],byExId};
+  if(!list.length)return{index:[],byExId,avgKg:0};
   const bases=list.map(id=>byExId[id][0].val);
   const allDates=[...new Set(list.flatMap(id=>byExId[id].map(p=>p.date.getTime())))].sort((a,b)=>a-b);
   const ptr=list.map(()=>-1); // forward-fill pointer per exercise \u2014 dates and points are both ascending, so this is O(dates+points), not O(dates\u00d7points)
@@ -6764,7 +6769,13 @@ function getMuscleOrmIndexSeries(exIds){
     });
     return n?{date:new Date(t),val:sum/n}:null;
   }).filter(Boolean);
-  return{index,byExId};
+  // 2026-09-24, user's explicit request ("percentages don't mean as much as weight in kg"): the same
+  // composite also reports its change in real kg. Each exercise's e1RM is already in kg (calcORM), so
+  // the kg counterpart of the indexed % is simply the average, across the same exercises and the same
+  // windowed baselines the index uses, of (latest e1RM - first e1RM in window). An exercise with only
+  // one point in the window contributes 0, exactly as it contributes 100 to the index.
+  const avgKg=list.reduce((a,id)=>a+(byExId[id][byExId[id].length-1].val-byExId[id][0].val),0)/list.length;
+  return{index,byExId,avgKg};
 }
 // Shared canvas line-chart renderer for both the muscle composite index and each exercise's own
 // sparkline \u2014 same visual language as the existing History-detail trend sparkline
@@ -6811,7 +6822,7 @@ function renderReviewPRBody(){
   muscles.forEach(muscle=>{
     const exs=byMuscle[muscle];
     const open=reviewPRsOpenMuscles.has(muscle);
-    const {index,byExId}=getMuscleOrmIndexSeries(exs.map(s=>s.exId));
+    const {index,byExId,avgKg}=getMuscleOrmIndexSeries(exs.map(s=>s.exId));
     // Muscle names are a fixed internal set (MUSCLE_GROUPS/'Other'), not free text — safe to
     // interpolate directly into the onclick, same convention as toggleMesoReviewMuscle.
     html+='<div class="muscle-group-header" onclick="toggleReviewPRMuscle(\''+muscle+'\')">'
@@ -6822,10 +6833,11 @@ function renderReviewPRBody(){
     // muscle improving", where the exercise-by-exercise breakdown below is the detail behind it.
     if(index.length>=2){
       const change=Math.round(index[index.length-1].val-100); // baseline is rebased to exactly 100
+      const avgKgR=Math.round(avgKg*10)/10; // one decimal — an average of whole-kg changes can land between kg
       const chartId='muscle-orm-'+sanitizeId(muscle);
       html+='<div style="padding:6px 0 10px">'
-        +'<div style="display:flex;justify-content:space-between;align-items:center"><span class="small text3">Est. 1RM trend (all '+exs.length+' exercises, indexed)</span>'
-        +'<span class="small" style="color:'+(change>=0?'var(--green)':'var(--red)')+';font-weight:700">'+(change>=0?'+':'')+change+'%</span></div>'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="small text3">Est. 1RM trend (all '+exs.length+' exercises, indexed)</span>'
+        +'<span class="small" style="color:'+(change>=0?'var(--green)':'var(--red)')+';font-weight:700;white-space:nowrap;text-align:right;line-height:1.3">'+(avgKgR>=0?'+':'')+avgKgR+'kg avg<br>'+(change>=0?'+':'')+change+'%</span></div>'
         +'<canvas id="'+chartId+'" style="width:100%;height:54px;display:block;margin-top:4px"></canvas>'
         +'</div>';
       trendTargets.push({id:chartId,points:index,height:54});
@@ -6837,13 +6849,17 @@ function renderReviewPRBody(){
         const loadStr=s.isBW?s.reps+' reps':s.weight+'kg \u00d7 '+s.reps;
         const pts=byExId[s.exId]||[];
         const exChange=pts.length>=2?Math.round((pts[pts.length-1].val-pts[0].val)/pts[0].val*100):null;
+        const exKg=pts.length>=2?pts[pts.length-1].val-pts[0].val:null; // e1RM points are already whole kg (calcORM rounds)
         const chartId='ex-orm-'+sanitizeId(s.exId);
         if(pts.length>=2)trendTargets.push({id:chartId,points:pts,height:28});
         return '<div class="pr-row-link" style="padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="openProgressModal(\''+s.exId+'\')">'
           +'<div style="display:flex;justify-content:space-between;align-items:center">'
           +'<span class="bold" style="font-size:13px">'+escHtml(s.name)+'</span>'
           +'<span class="small" style="color:var(--accent)">\u203a</span></div>'
-          +'<div class="small text3">Best: '+loadStr+(s.orm?' \u00b7 ~'+s.orm+'kg e1RM':'')+(exChange!=null?' \u00b7 '+(exChange>=0?'+':'')+exChange+'%'+((state.reviewOrmWindow||'all')==='all'?' since first logged':' '+getOrmWindowLabel().toLowerCase()):'')+'</div>'
+          +'<div class="small text3">Best: '+loadStr+(s.orm?' \u00b7 ~'+s.orm+'kg e1RM':'')+'</div>'
+          +(exChange!=null?'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:2px">'
+            +'<span class="small text3">e1RM '+pts[0].val+' \u2192 '+pts[pts.length-1].val+'kg '+((state.reviewOrmWindow||'all')==='all'?'since first logged':'past '+getOrmWindowLabel())+'</span>'
+            +'<span class="small" style="color:'+(exKg>=0?'var(--green)':'var(--red)')+';font-weight:700;white-space:nowrap">'+(exKg>=0?'+':'')+exKg+'kg \u00b7 '+(exChange>=0?'+':'')+exChange+'%</span></div>':'')
           +(pts.length>=2?'<canvas id="'+chartId+'" style="width:100%;height:28px;display:block;margin-top:4px"></canvas>':'')
           +'</div>';
       }).join('')+'</div>';
@@ -11218,7 +11234,61 @@ const WARN_SESSION_MINUTES_THRESHOLD=120; // 2026-08-21, user's explicit ask: wa
 // Routine session, they're linked the same way here too. Never invents a new pairing the user
 // hasn't already validated by setting it up in a real routine; purely recognizes and reapplies
 // what's already known to work.
+// 2026-09-24, user's explicit request ("can supersets made in an auto routine be remembered so if they
+// happen to appear in an auto routine workout together in the future they can be linked"): a superset
+// the user builds BY HAND inside an Auto Routine session now counts as validated too, even though it
+// never lived in a saved routine. Remembered as exercise PAIRS (state.autoRoutineSupersetPairs =
+// [[exIdA,exIdB],...], order-independent) rather than groups, so a 3-way superset is just its three
+// pairs and ungrouping one pair later forgets exactly that pair. autoLinkKnownSupersets' existing
+// pairwise chaining then rebuilds a trio when all three show up, and links just the pair when only
+// two do. Lazy-created like the other autoRoutine* stores (no top-level declaration to hit a TDZ).
+function isAutoRoutineSupersetPairRemembered(exIdA,exIdB){
+  const pairs=state.autoRoutineSupersetPairs;
+  if(!Array.isArray(pairs))return false;
+  return pairs.some(pr=>Array.isArray(pr)&&((pr[0]===exIdA&&pr[1]===exIdB)||(pr[0]===exIdB&&pr[1]===exIdA)));
+}
+// Returns only the pairs that were NEWLY remembered (already-known ones aren't re-added), so a caller
+// can undo exactly what it just did.
+function rememberAutoRoutineSuperset(exIds){
+  const ids=[...new Set((exIds||[]).filter(Boolean))];
+  const added=[];
+  if(ids.length<2)return added;
+  if(!Array.isArray(state.autoRoutineSupersetPairs))state.autoRoutineSupersetPairs=[];
+  for(let i=0;i<ids.length;i++)for(let j=i+1;j<ids.length;j++){
+    if(isAutoRoutineSupersetPairRemembered(ids[i],ids[j]))continue;
+    const pr=[ids[i],ids[j]];
+    state.autoRoutineSupersetPairs.push(pr);added.push(pr);
+  }
+  if(added.length)save();
+  return added;
+}
+function restoreAutoRoutineSupersetPairs(pairs){
+  if(!pairs||!pairs.length)return;
+  if(!Array.isArray(state.autoRoutineSupersetPairs))state.autoRoutineSupersetPairs=[];
+  pairs.forEach(pr=>{if(!isAutoRoutineSupersetPairRemembered(pr[0],pr[1]))state.autoRoutineSupersetPairs.push([pr[0],pr[1]]);});
+  save();
+}
+function removeAutoRoutineSupersetPairs(pairs){
+  if(!Array.isArray(state.autoRoutineSupersetPairs)||!pairs||!pairs.length)return[];
+  const removed=[];
+  state.autoRoutineSupersetPairs=state.autoRoutineSupersetPairs.filter(pr=>{
+    const hit=Array.isArray(pr)&&pairs.some(q=>(q[0]===pr[0]&&q[1]===pr[1])||(q[0]===pr[1]&&q[1]===pr[0]));
+    if(hit)removed.push(pr);
+    return!hit;
+  });
+  if(removed.length)save();
+  return removed;
+}
+// Forgets every remembered pair whose BOTH ends are among exIds — what "Ungroup" means inside an Auto
+// Routine session. Returns what it removed (for the undo toast).
+function forgetAutoRoutineSupersetAmong(exIds){
+  if(!Array.isArray(state.autoRoutineSupersetPairs))return[];
+  const set=new Set(exIds||[]);
+  const hits=state.autoRoutineSupersetPairs.filter(pr=>Array.isArray(pr)&&set.has(pr[0])&&set.has(pr[1]));
+  return removeAutoRoutineSupersetPairs(hits);
+}
 function areExercisesSupersettedTogether(exIdA,exIdB){
+  if(isAutoRoutineSupersetPairRemembered(exIdA,exIdB))return true;
   return(state.routines||[]).some(r=>{
     if(!r.supersetGroups)return false;
     const idxA=(r.exerciseIds||[]).indexOf(exIdA);
@@ -12917,7 +12987,16 @@ function confirmSuperset(){
   const sel=[];checks.forEach(c=>{if(c.dataset.selected==='1')sel.push(parseInt(c.dataset.idx));});
   if(sel.length<2){alert('Select at least 2 exercises.');return;}
   const gid=uid();sel.forEach(i=>activeWorkout.exercises[i].supersetGroup=gid);
+  // 2026-09-24: a superset built by hand inside an Auto Routine session is remembered, so the same
+  // exercises get linked automatically whenever a later Auto Routine session lands them together.
+  // Sessions from a real routine are left alone (those pairings already live in the routine itself).
+  let remembered=[];
+  if(isActiveAutoRoutineSession()){
+    try{remembered=rememberAutoRoutineSuperset(sel.map(i=>activeWorkout.exercises[i].exId));}
+    catch(e){console.error('remembering superset failed:',e);}
+  }
   closeModal('modal-superset');renderActiveWorkout();
+  if(remembered.length)showUndoToast('Remembered for future Auto Routines',()=>{removeAutoRoutineSupersetPairs(remembered);});
 }
 function ungroupSuperset(gid){
   // BUG FIX (2026-09-19, user-reported: "I can't ungroup supersets"): the header's Ungroup button passes the
@@ -12926,8 +13005,24 @@ function ungroupSuperset(gid){
   // are auto-linked into an Auto Routine session (autoLinkKnownSupersets) use NUMERIC ids (1, 2, ...) —
   // and 1 === '1' is false, so the strict comparison silently matched nothing. Compare as strings.
   const g=String(gid);
-  activeWorkout.exercises.forEach(e=>{if(e.supersetGroup!=null&&String(e.supersetGroup)===g)e.supersetGroup=null;});
+  const members=[]; // {exId,gid} — matched back by exId (not index) if the undo below fires after a reorder
+  activeWorkout.exercises.forEach(e=>{if(e.supersetGroup!=null&&String(e.supersetGroup)===g){members.push({exId:e.exId,gid:e.supersetGroup});e.supersetGroup=null;}});
+  // 2026-09-24: ungrouping inside an Auto Routine session also un-remembers that pairing, otherwise a
+  // pair the user has decided against would be re-linked every session with no way to stop it. Only
+  // the remembered pairs are touched — a pairing that comes from a saved routine is unaffected.
+  let forgotten=[];
+  if(isActiveAutoRoutineSession()&&members.length>1){
+    try{forgotten=forgetAutoRoutineSupersetAmong(members.map(m=>m.exId));}
+    catch(e){console.error('forgetting superset failed:',e);}
+  }
   renderActiveWorkout();
+  if(forgotten.length)showUndoToast('Won\'t auto-link these in future',()=>{
+    restoreAutoRoutineSupersetPairs(forgotten);
+    if(activeWorkout){
+      activeWorkout.exercises.forEach(e=>{const m=members.find(x=>x.exId===e.exId);if(m&&e.supersetGroup==null)e.supersetGroup=m.gid;});
+      renderActiveWorkout();
+    }
+  });
 }
 
 // ── ADD EXERCISE ──
@@ -14670,6 +14765,14 @@ function performExerciseMerge(sourceId,targetId){
     if(activeWorkout.originalExerciseIds){
       activeWorkout.originalExerciseIds=activeWorkout.originalExerciseIds.map(id=>id===sourceId?targetId:id);
     }
+  }
+  // Remembered Auto Routine supersets (2026-09-24): point at the surviving exercise; a pair that would
+  // collapse into an exercise paired with itself is dropped.
+  if(Array.isArray(state.autoRoutineSupersetPairs)){
+    const seen=new Set();
+    state.autoRoutineSupersetPairs=state.autoRoutineSupersetPairs
+      .map(pr=>pr.map(id=>id===sourceId?targetId:id))
+      .filter(pr=>{if(pr[0]===pr[1])return false;const k=[pr[0],pr[1]].sort().join('|');if(seen.has(k))return false;seen.add(k);return true;});
   }
   const idx=state.exercises.findIndex(e=>e.id===sourceId);
   if(idx!==-1)state.exercises.splice(idx,1);
