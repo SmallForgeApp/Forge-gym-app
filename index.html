@@ -728,7 +728,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-24.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-24.3</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -957,10 +957,23 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <div class="small text3 mt4" id="auto-session-default-estimate"></div>
       <div class="input-label mt8">Sets budget (optional)</div>
       <input id="auto-session-sets" type="number" min="1" inputmode="numeric" placeholder="Total sets across the whole session" oninput="document.getElementById('auto-session-minutes').value=''"/>
+      <div id="auto-session-supersets-row" style="display:none"></div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost flex-1" onclick="closeModal('modal-auto-session')">Cancel</button>
       <button class="btn btn-primary flex-1" onclick="confirmAutoSession()">Build & Start</button>
+    </div>
+  </div>
+</div>
+<div class="modal-overlay" id="modal-auto-supersets">
+  <div class="modal"><div class="modal-handle"></div>
+    <div class="modal-title">Remembered supersets</div>
+    <div class="modal-body">
+      <div class="small text3 mb8">Supersets you built by hand in an Auto Routine session. Whenever a later Auto Routine session includes these exercises together, they're linked automatically. Forget one here, or tap Ungroup on it during a session.</div>
+      <div id="auto-supersets-list" style="max-height:52vh;overflow-y:auto"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary flex-1" onclick="closeModal('modal-auto-supersets')">Done</button>
     </div>
   </div>
 </div>
@@ -6728,6 +6741,117 @@ function setOrmWindow(key){
   save();
   renderReviewPRBody();
 }
+// 2026-09-24.2 (user-approved suggestion #2): the trend's kg numbers used to come from calcORM, which
+// rounds every set to a WHOLE kg — so two sessions 0.2kg apart could read as "+1kg" purely from where
+// they happened to land against a rounding boundary — and which lets a 15-20 rep set claim a huge
+// 1RM (Epley is linear in reps well beyond where it's believable), so switching an exercise's rep
+// range made the trend jump on nothing. Trend-only version: keeps full precision (the display rounds
+// to the nearest 0.5kg) and counts at most 12 reps of any set. Capped rather than dropping those sets
+// on purpose — dropping them would blank the trend for calves/lateral raises/curls trained at 15-20;
+// the cap keeps them on the chart, they just stop being inflated. PRs, targets and every other e1RM in
+// the app keep using calcORM untouched.
+function calcTrendORM(weight,reps){
+  if(!weight||!(reps>=1))return 0;
+  const r=Math.min(reps,12);
+  return r===1?weight:weight*(1+r/30);
+}
+function roundOrmKg(v){return Math.round(v*2)/2;} // nearest 0.5kg — the resolution an e1RM estimate honestly has
+// All-time best on the same basis as the trend, so the "Best" line and the trend line on one row agree.
+function getExerciseBestTrendOrm(exId){
+  let best=0;
+  (state.history||[]).forEach(w=>{
+    if(!w)return;
+    (w.exercises||[]).forEach(e=>{
+      if(!e||e.exId!==exId)return;
+      (e.sets||[]).forEach(st=>{
+        if(!st||!st.done||(st.type&&st.type!=='normal'))return;
+        const v=calcTrendORM(st.weight||0,repsMetricOf(st));
+        if(v>best)best=v;
+      });
+    });
+  });
+  return best;
+}
+// 2026-09-24.3 (user-approved suggestion #4): bodyweight and resistance-band exercises log no weight,
+// so they have no e1RM and used to get no trend at all. Their trend is the best reps of each session
+// instead — the same "best set per session, normal sets only, same window" rule as the e1RM trend.
+// An exercise counts as reps-only only if NO normal set in its whole history ever logged a weight (a
+// weighted dip/pull-up is a weighted movement and keeps its e1RM trend). Deliberately kept OUT of the
+// muscle composite: reps and kg can't be averaged, so the muscle's "+Nkg avg" stays kg-only.
+function getExerciseRepsSeries(exId){
+  const points=[];let weighted=false;
+  (state.history||[]).slice().reverse().forEach(w=>{
+    if(!w)return;
+    const found=(w.exercises||[]).find(e=>e&&e.exId===exId);if(!found)return;
+    const done=(found.sets||[]).filter(st=>st&&st.done&&(!st.type||st.type==='normal'));
+    if(!done.length)return;
+    if(done.some(st=>(st.weight||0)>0))weighted=true;
+    const val=Math.max(...done.map(st=>repsMetricOf(st)));
+    if(val>0)points.push({date:new Date(w.date),val});
+  });
+  if(weighted)return[];
+  const cutoff=getOrmWindowCutoffMs();
+  return cutoff==null?points:points.filter(pt=>pt.date.getTime()>=cutoff);
+}
+// One pass over history -> {exId:[{t,orm,maxW,reps}...]} ascending, one entry per logged session
+// (normal, done sets only; orm on the trend basis).
+function getExerciseSessionSummaries(){
+  const byEx={};
+  (state.history||[]).forEach(w=>{
+    if(!w)return;
+    const t=new Date(w.date).getTime();if(!isFinite(t))return;
+    (w.exercises||[]).forEach(e=>{
+      if(!e||!e.exId)return;
+      const done=(e.sets||[]).filter(st=>st&&st.done&&(!st.type||st.type==='normal'));
+      if(!done.length)return;
+      let orm=0,maxW=0,reps=0;
+      done.forEach(st=>{
+        orm=Math.max(orm,calcTrendORM(st.weight||0,repsMetricOf(st)));
+        maxW=Math.max(maxW,st.weight||0);
+        reps=Math.max(reps,repsMetricOf(st));
+      });
+      (byEx[e.exId]=byEx[e.exId]||[]).push({t,orm,maxW,reps});
+    });
+  });
+  Object.keys(byEx).forEach(k=>byEx[k].sort((a,b)=>a.t-b.t));
+  return byEx;
+}
+// 2026-09-24.3 (user-approved suggestion — "flag exercises whose e1RM has been flat for a few weeks",
+// in keeping with "push me forward, don't let me stagnate"): an exercise is STALLED when it's being
+// trained (3+ sessions in the last 28 days) but hasn't beaten what it did in the 56 days BEFORE that
+// (2+ sessions there for a fair baseline). "Beaten" = best e1RM up by at least 1%, OR a heavier weight
+// than ever lifted in that earlier stretch (same rule as getPerfHopDirection: a genuine weight PR is
+// progress even when reps dipped) — reps-only exercises need +1 rep. Baseline is the previous 8 weeks
+// on purpose, NOT all-time, so an old inflated or deliberately re-baselined number can't flag an
+// exercise forever. Skips exercises marked resting/injured and ones that no longer exist. Pure read:
+// nothing here changes any Auto Routine decision.
+function getStalledExercises(){
+  const DAY=864e5,now=Date.now();
+  const recentStart=now-28*DAY,priorStart=now-84*DAY;
+  const byEx=getExerciseSessionSummaries();
+  const out={};
+  Object.keys(byEx).forEach(exId=>{
+    const exData=getExercise(exId);
+    if(!exData||isExerciseInjured(exId))return;
+    const ses=byEx[exId];
+    const repsOnly=ses.every(x=>x.maxW===0);
+    const recent=ses.filter(x=>x.t>=recentStart&&x.t<=now+DAY);
+    const prior=ses.filter(x=>x.t>=priorStart&&x.t<recentStart);
+    if(recent.length<3||prior.length<2)return;
+    const metric=x=>repsOnly?x.reps:x.orm;
+    const bestRecent=Math.max(...recent.map(metric)),bestPrior=Math.max(...prior.map(metric));
+    if(!(bestPrior>0))return;
+    const progressed=repsOnly
+      ?bestRecent>=bestPrior+1
+      :(bestRecent>=bestPrior*1.01||Math.max(...recent.map(x=>x.maxW))>Math.max(...prior.map(x=>x.maxW)));
+    if(progressed)return;
+    const peak=prior.concat(recent).reduce((a,b)=>metric(b)>=metric(a)?b:a); // latest session at the top value
+    out[exId]={name:exData.name,muscle:exData.muscle||'Other',repsOnly,
+      weeks:Math.max(4,Math.floor((now-peak.t)/(7*DAY))),
+      best:metric(peak),last:metric(ses[ses.length-1]),sessions:recent.length};
+  });
+  return out;
+}
 function getExerciseOrmSeries(exId){
   const points=[];
   (state.history||[]).slice().reverse().forEach(w=>{
@@ -6735,7 +6859,7 @@ function getExerciseOrmSeries(exId){
     const found=(w.exercises||[]).find(e=>e&&e.exId===exId);if(!found)return;
     const done=(found.sets||[]).filter(s=>s&&s.done&&(!s.type||s.type==='normal'));
     if(!done.length)return;
-    const val=Math.max(...done.map(s=>calcORM(s.weight||0,repsMetricOf(s))));
+    const val=Math.max(...done.map(s=>calcTrendORM(s.weight||0,repsMetricOf(s))));
     if(val>0)points.push({date:new Date(w.date),val});
   });
   const cutoff=getOrmWindowCutoffMs();
@@ -6798,13 +6922,23 @@ function drawOrmTrendCanvas(canvasId,points,opts){
   const mn=Math.min(...vals),mx=Math.max(...vals);
   const pad=opts.pad!=null?opts.pad:3;
   const w=canvas.width-pad*2,ih=h-pad*2;
-  const xS=w/(points.length-1);
+  // 2026-09-24.2 (user-approved suggestion #3): x is now the DATE of each point (first point at the left
+  // edge, latest at the right), not its position in the list — evenly spaced points made a three-week
+  // gap read the same as two days, and with random training days gaps are the norm. Falls back to
+  // even spacing only if the points carry no usable dates.
+  const t0=points[0].date instanceof Date?points[0].date.getTime():NaN;
+  const t1=points[points.length-1].date instanceof Date?points[points.length-1].date.getTime():NaN;
+  const byDate=isFinite(t0)&&isFinite(t1)&&t1>t0;
+  const xOf=(p,i)=>pad+(byDate?(p.date.getTime()-t0)/(t1-t0):i/(points.length-1))*w;
   const rgb=opts.rgb||(getComputedStyle(document.documentElement).getPropertyValue('--accent-rgb')||'217,119,87').trim();
   const yOf=v=>pad+ih-(mx===mn?ih/2:ih*(v-mn)/(mx-mn));
   ctx.beginPath();ctx.strokeStyle='rgb('+rgb+')';ctx.lineWidth=opts.lineWidth||1.5;ctx.lineJoin='round';
-  points.forEach((p,i)=>{const x=pad+i*xS,y=yOf(p.val);if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);});
+  points.forEach((p,i)=>{const x=xOf(p,i),y=yOf(p.val);if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);});
   ctx.stroke();
-  const lastX=pad+(points.length-1)*xS,lastY=yOf(points[points.length-1].val);
+  // a small dot per real session, so the spacing (i.e. the gaps) is readable on the line itself
+  ctx.fillStyle='rgba('+rgb+',0.55)';
+  points.forEach((p,i)=>{if(i===points.length-1)return;ctx.beginPath();ctx.arc(xOf(p,i),yOf(p.val),1.6,0,Math.PI*2);ctx.fill();});
+  const lastX=xOf(points[points.length-1],points.length-1),lastY=yOf(points[points.length-1].val);
   ctx.beginPath();ctx.fillStyle='rgb('+rgb+')';ctx.arc(lastX,lastY,opts.dotR||2.5,0,Math.PI*2);ctx.fill();
 }
 function renderReviewPRBody(){
@@ -6816,6 +6950,8 @@ function renderReviewPRBody(){
   catch(e){console.error('renderReviewPRBody failed:',e);body.innerHTML='<div class="small text2" style="text-align:center;padding:14px 0">Couldn\'t load records</div>';return;}
   const muscles=Object.keys(byMuscle).sort();
   if(!muscles.length){body.innerHTML='<div class="small text2" style="text-align:center;padding:14px 0">Complete workouts to start setting records</div>';return;}
+  let stalls={};
+  try{stalls=getStalledExercises();}catch(e){console.error('getStalledExercises failed:',e);}
   let html=windowChipsHtml;
   const trendTargets=[]; // {id,points,height} — canvases are drawn after body.innerHTML actually exists in the DOM
   const sanitizeId=s=>String(s).replace(/[^a-zA-Z0-9_-]/g,'_');
@@ -6823,11 +6959,13 @@ function renderReviewPRBody(){
     const exs=byMuscle[muscle];
     const open=reviewPRsOpenMuscles.has(muscle);
     const {index,byExId,avgKg}=getMuscleOrmIndexSeries(exs.map(s=>s.exId));
+    const stallN=exs.filter(x=>stalls[x.exId]).length;
+    const stallBadge=stallN?'<span class="small" style="color:var(--orange);font-weight:600">\u23f8\ufe0f '+stallN+'</span>':'';
     // Muscle names are a fixed internal set (MUSCLE_GROUPS/'Other'), not free text — safe to
     // interpolate directly into the onclick, same convention as toggleMesoReviewMuscle.
     html+='<div class="muscle-group-header" onclick="toggleReviewPRMuscle(\''+muscle+'\')">'
       +'<span class="bold" style="font-size:13px">'+escHtml(muscle)+'</span>'
-      +'<span style="display:flex;align-items:center;gap:6px"><span class="text3 small">'+exs.length+' exercise'+(exs.length!==1?'s':'')+'</span><span class="text3">'+(open?'\u25be':'\u25b8')+'</span></span>'
+      +'<span style="display:flex;align-items:center;gap:6px">'+stallBadge+'<span class="text3 small">'+exs.length+' exercise'+(exs.length!==1?'s':'')+'</span><span class="text3">'+(open?'\u25be':'\u25b8')+'</span></span>'
       +'</div>';
     // The composite e1RM trend always shows, collapsed or not — it's the direct answer to "is this
     // muscle improving", where the exercise-by-exercise breakdown below is the detail behind it.
@@ -6847,20 +6985,29 @@ function renderReviewPRBody(){
     if(open){
       html+='<div style="padding:0 0 4px 2px">'+exs.map(s=>{
         const loadStr=s.isBW?s.reps+' reps':s.weight+'kg \u00d7 '+s.reps;
-        const pts=byExId[s.exId]||[];
+        const bestOrm=getExerciseBestTrendOrm(s.exId);
+        let pts=byExId[s.exId]||[];let unit='kg';
+        // Bodyweight/band exercises have no e1RM (zero weight) — their trend is best reps per session.
+        if(!pts.length){const rp=getExerciseRepsSeries(s.exId);if(rp.length){pts=rp;unit='reps';}}
         const exChange=pts.length>=2?Math.round((pts[pts.length-1].val-pts[0].val)/pts[0].val*100):null;
-        const exKg=pts.length>=2?pts[pts.length-1].val-pts[0].val:null; // e1RM points are already whole kg (calcORM rounds)
+        // values shown to the nearest 0.5 and the change taken between the SHOWN values, so the row's own
+        // arithmetic always adds up; the % stays computed from the unrounded values.
+        const exFirst=pts.length>=2?roundOrmKg(pts[0].val):null,exLast=pts.length>=2?roundOrmKg(pts[pts.length-1].val):null;
+        const exKg=pts.length>=2?exLast-exFirst:null; // the change in the row's own unit (kg or reps)
+        const stall=stalls[s.exId];
+        const fmtU=v=>roundOrmKg(v)+(stall&&stall.repsOnly?' reps':'kg');
         const chartId='ex-orm-'+sanitizeId(s.exId);
         if(pts.length>=2)trendTargets.push({id:chartId,points:pts,height:28});
         return '<div class="pr-row-link" style="padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="openProgressModal(\''+s.exId+'\')">'
           +'<div style="display:flex;justify-content:space-between;align-items:center">'
-          +'<span class="bold" style="font-size:13px">'+escHtml(s.name)+'</span>'
+          +'<span class="bold" style="font-size:13px">'+escHtml(s.name)+(stall?' <span class="small" style="color:var(--orange);font-weight:600">\u23f8\ufe0f flat</span>':'')+'</span>'
           +'<span class="small" style="color:var(--accent)">\u203a</span></div>'
-          +'<div class="small text3">Best: '+loadStr+(s.orm?' \u00b7 ~'+s.orm+'kg e1RM':'')+'</div>'
+          +'<div class="small text3">Best: '+loadStr+(bestOrm>0?' \u00b7 ~'+roundOrmKg(bestOrm)+'kg e1RM':'')+'</div>'
           +(exChange!=null?'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:2px">'
-            +'<span class="small text3">e1RM '+pts[0].val+' \u2192 '+pts[pts.length-1].val+'kg '+((state.reviewOrmWindow||'all')==='all'?'since first logged':'past '+getOrmWindowLabel())+'</span>'
-            +'<span class="small" style="color:'+(exKg>=0?'var(--green)':'var(--red)')+';font-weight:700;white-space:nowrap">'+(exKg>=0?'+':'')+exKg+'kg \u00b7 '+(exChange>=0?'+':'')+exChange+'%</span></div>':'')
+            +'<span class="small text3">'+(unit==='kg'?'e1RM '+exFirst+' \u2192 '+exLast+'kg ':'Reps '+exFirst+' \u2192 '+exLast+' ')+((state.reviewOrmWindow||'all')==='all'?'since first logged':'past '+getOrmWindowLabel())+'</span>'
+            +'<span class="small" style="color:'+(exKg>=0?'var(--green)':'var(--red)')+';font-weight:700;white-space:nowrap">'+(exKg>=0?'+':'')+exKg+(unit==='kg'?'kg':(Math.abs(exKg)===1?' rep':' reps'))+' \u00b7 '+(exChange>=0?'+':'')+exChange+'%</span></div>':'')
           +(pts.length>=2?'<canvas id="'+chartId+'" style="width:100%;height:28px;display:block;margin-top:4px"></canvas>':'')
+          +(stall?'<div class="small" style="color:var(--orange);margin-top:3px">\u23f8\ufe0f No new best in '+(stall.weeks>=12?'12+':stall.weeks)+' weeks \u00b7 last '+fmtU(stall.last)+' vs best '+fmtU(stall.best)+(stall.repsOnly?'':' e1RM')+'</div>':'')
           +'</div>';
       }).join('')+'</div>';
     }
@@ -11287,6 +11434,76 @@ function forgetAutoRoutineSupersetAmong(exIds){
   const hits=state.autoRoutineSupersetPairs.filter(pr=>Array.isArray(pr)&&set.has(pr[0])&&set.has(pr[1]));
   return removeAutoRoutineSupersetPairs(hits);
 }
+// 2026-09-24.3 (user-approved suggestion #5): the remembered pairs grouped for display — connected
+// groups, so a remembered trio reads as ONE line (its three pairs would be noise), and matching how
+// autoLinkKnownSupersets chains them at build time. Order = order first remembered.
+function getRememberedSupersetGroups(){
+  const pairs=(Array.isArray(state.autoRoutineSupersetPairs)?state.autoRoutineSupersetPairs:[]).filter(pr=>Array.isArray(pr)&&pr.length===2&&pr[0]&&pr[1]);
+  const parent={};
+  const find=x=>{while(parent[x]!==x){parent[x]=parent[parent[x]];x=parent[x];}return x;};
+  pairs.forEach(pr=>{
+    const a=pr[0],b=pr[1];
+    if(!(a in parent))parent[a]=a;
+    if(!(b in parent))parent[b]=b;
+    const ra=find(a),rb=find(b);
+    if(ra!==rb)parent[ra]=rb;
+  });
+  const groups={},order=[];
+  Object.keys(parent).forEach(id=>{const r=find(id);if(!groups[r]){groups[r]=[];order.push(r);}groups[r].push(id);});
+  return order.map(r=>groups[r]);
+}
+function renderAutoSupersetsList(){
+  const el=document.getElementById('auto-supersets-list');if(!el)return;
+  const groups=getRememberedSupersetGroups();
+  if(!groups.length){
+    el.innerHTML='<div class="small text3" style="padding:14px 0;text-align:center">Nothing remembered yet. Build a superset in an Auto Routine session and it shows up here.</div>';
+    return;
+  }
+  el.innerHTML=groups.map((ids,gi)=>{
+    const names=ids.map(id=>{const e=getExercise(id);return escHtml(e?e.name:'(deleted exercise)');});
+    return '<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">'
+      +'<div style="flex:1;min-width:0"><div class="bold" style="font-size:13px;line-height:1.35">'+names.join(' <span class="text3">+</span> ')+'</div>'
+      +'<div class="small text3">'+(ids.length>2?ids.length+'-exercise superset':'Pair')+'</div></div>'
+      +'<button class="btn btn-ghost btn-sm" style="flex-shrink:0" onclick="removeRememberedSupersetGroup('+gi+')">Forget</button></div>';
+  }).join('');
+}
+function renderAutoSessionSupersetsRow(){
+  const el=document.getElementById('auto-session-supersets-row');if(!el)return;
+  const n=getRememberedSupersetGroups().length;
+  if(!n){el.style.display='none';el.innerHTML='';return;}
+  el.style.display='';
+  el.innerHTML='<div onclick="openAutoSupersetsModal()" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;margin-top:12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg3);font-size:13px"><span>\uD83D\uDD17 Remembered supersets <span class="text3">\u00b7 '+n+'</span></span><span style="color:var(--accent)">\u203a</span></div>';
+}
+function openAutoSupersetsModal(){
+  renderAutoSupersetsList();
+  openModal('modal-auto-supersets');
+}
+function removeRememberedSupersetGroup(gi){
+  const ids=getRememberedSupersetGroups()[gi];if(!ids)return;
+  const removed=forgetAutoRoutineSupersetAmong(ids);
+  renderAutoSupersetsList();renderAutoSessionSupersetsRow();
+  if(removed.length)showUndoToast('Forgot this superset',()=>{
+    restoreAutoRoutineSupersetPairs(removed);
+    renderAutoSupersetsList();renderAutoSessionSupersetsRow();
+  });
+}
+// ── B2: a remembered/known pairing also links when an exercise is ADDED to an Auto Routine session
+// after it was built (Extend Session, or the manual Add Exercise button) and a partner is already in
+// the session. Joins the partner's existing superset group, or starts one. Same test the build-time
+// linking uses (areExercisesSupersettedTogether), and only for Auto Routine sessions.
+function autoLinkNewSessionExercise(newIdx){
+  if(!activeWorkout||!isActiveAutoRoutineSession())return null;
+  const exs=activeWorkout.exercises,me=exs[newIdx];
+  if(!me||me.supersetGroup!=null)return null;
+  const partners=[];
+  exs.forEach((e,i)=>{if(i!==newIdx&&areExercisesSupersettedTogether(me.exId,e.exId))partners.push(i);});
+  if(!partners.length)return null;
+  const existing=partners.map(i=>exs[i].supersetGroup).find(g=>g!=null);
+  const gid=existing!=null?existing:uid();
+  me.supersetGroup=gid;
+  partners.forEach(i=>{if(exs[i].supersetGroup==null)exs[i].supersetGroup=gid;});
+  return gid;
+}
 function areExercisesSupersettedTogether(exIdA,exIdB){
   if(isAutoRoutineSupersetPairRemembered(exIdA,exIdB))return true;
   return(state.routines||[]).some(r=>{
@@ -11485,6 +11702,7 @@ function appendAutoRoutineSets(exId,muscle,count){
     const repRange=findFallbackRepRange(exId,null)||{min:8,max:12};
     activeWorkout.exercises.push({exId,sets:[],supersetGroup:null,repRange,useRIR:true});
     exIdx=activeWorkout.exercises.length-1;
+    try{autoLinkNewSessionExercise(exIdx);}catch(e){console.error('auto-link of extended exercise failed:',e);}
   }
   const ex=activeWorkout.exercises[exIdx];
   const repRange=ex.repRange||findFallbackRepRange(exId,null)||{min:8,max:12};
@@ -11782,6 +12000,7 @@ function openAutoSessionModal(mesoIdx){
   renderAutoSessionEstimate();
   openModal('modal-auto-session');
   renderAutoSessionWeekPlanRow();
+  try{renderAutoSessionSupersetsRow();}catch(e){console.error('supersets row failed:',e);}
   // First time the Auto Session screen is opened in a calendar week (no plan chosen yet, and there is still
   // volume to plan): put the week-plan chooser on top. Wrapped so a planning failure can never stop a session starting.
   try{if(needsWeekPlanPrompt())openWeekPlanModal();}catch(e){console.error('week plan prompt failed:',e);}
@@ -12591,6 +12810,7 @@ function addExerciseToWorkout(exId){
   const prev=getLastSets(exId,activeWorkout.sourceRoutineId);
   const sets=prev.length?prev.map(s=>({...s,done:false})):[newSet()];
   activeWorkout.exercises.push({exId,sets,supersetGroup:null,repRange:null,useRIR:false});
+  try{autoLinkNewSessionExercise(activeWorkout.exercises.length-1);}catch(e){console.error('auto-link of added exercise failed:',e);}
   renderActiveWorkout();
   updateWorkoutEstimate();
   // Scroll to new exercise
@@ -14731,6 +14951,94 @@ function confirmMergeExercise(targetId){
 // now-unused source record. Deliberately does NOT touch mesocycle-level nested overrides (per-slot
 // rep-range overrides, RIR-anchor baselines, skip logs) — those are rarer, mid-cycle-only, and
 // migrating them safely would need much more certainty about which cycle/slot they came from.
+// 2026-09-24.2 (user-approved suggestion #1): a merge or delete used to leave the Auto Routine pool,
+// its 📌 pins, its 🎯 trackers and any flagged-resting status pointing at an exercise that no longer
+// exists — an orphaned injury flag in particular kept feeding the Review "still resting?" nudge with
+// nothing left in the Exercises tab to clear it. Same orphan invariants the pool edit already keeps
+// (pool membership implied by a pin/tracker; a tracker only for the exercise's own muscle).
+// MERGE: the surviving exercise takes over the source's slot in each of them.
+function rewireAutoRoutineExerciseRefs(oldId,newId){
+  if(!oldId||!newId||oldId===newId)return;
+  const target=getExercise(newId);
+  if(Array.isArray(state.autoRoutinePool)){
+    const i=state.autoRoutinePool.indexOf(oldId);
+    if(i>=0){
+      if(state.autoRoutinePool.includes(newId))state.autoRoutinePool.splice(i,1);
+      else state.autoRoutinePool[i]=newId;
+    }
+  }
+  if(Array.isArray(state.autoRoutineFixedExIds)){
+    const i=state.autoRoutineFixedExIds.indexOf(oldId);
+    if(i>=0){
+      if(state.autoRoutineFixedExIds.includes(newId))state.autoRoutineFixedExIds.splice(i,1);
+      else state.autoRoutineFixedExIds[i]=newId;
+      // a pin implies pool membership (toggleAutoRoutineFixed's own rule)
+      if(!Array.isArray(state.autoRoutinePool))state.autoRoutinePool=[];
+      if(!state.autoRoutinePool.includes(newId))state.autoRoutinePool.push(newId);
+    }
+  }
+  if(state.autoRoutineMuscleTracker){
+    Object.keys(state.autoRoutineMuscleTracker).forEach(mu=>{
+      if(state.autoRoutineMuscleTracker[mu]!==oldId)return;
+      // a tracker belongs to ONE muscle, so it only carries over to a target of that same muscle
+      if(target&&target.muscle===mu&&Array.isArray(state.autoRoutinePool)&&state.autoRoutinePool.includes(newId))state.autoRoutineMuscleTracker[mu]=newId;
+      else delete state.autoRoutineMuscleTracker[mu];
+    });
+  }
+  // Resting status carries over to the survivor (never silently dropped — that would put an injured
+  // exercise straight back into Auto Routine).
+  if(state.injuredExercises&&state.injuredExercises[oldId]){
+    if(!state.injuredExercises[newId])state.injuredExercises[newId]=state.injuredExercises[oldId];
+    delete state.injuredExercises[oldId];
+  }
+}
+// DELETE: takes every reference out and returns a snapshot so the delete's UNDO can put each one back
+// exactly where it was.
+function detachExerciseReferences(exId){
+  const snap={exId,pool:-1,fixed:-1,tracker:[],pairs:[],injured:null};
+  if(Array.isArray(state.autoRoutinePool)){
+    const i=state.autoRoutinePool.indexOf(exId);
+    if(i>=0){snap.pool=i;state.autoRoutinePool.splice(i,1);}
+  }
+  if(Array.isArray(state.autoRoutineFixedExIds)){
+    const i=state.autoRoutineFixedExIds.indexOf(exId);
+    if(i>=0){snap.fixed=i;state.autoRoutineFixedExIds.splice(i,1);}
+  }
+  if(state.autoRoutineMuscleTracker){
+    Object.keys(state.autoRoutineMuscleTracker).forEach(mu=>{
+      if(state.autoRoutineMuscleTracker[mu]===exId){snap.tracker.push(mu);delete state.autoRoutineMuscleTracker[mu];}
+    });
+  }
+  if(Array.isArray(state.autoRoutineSupersetPairs)){
+    snap.pairs=removeAutoRoutineSupersetPairs(state.autoRoutineSupersetPairs.filter(pr=>Array.isArray(pr)&&(pr[0]===exId||pr[1]===exId)));
+  }
+  if(state.injuredExercises&&state.injuredExercises[exId]){
+    snap.injured=state.injuredExercises[exId];
+    delete state.injuredExercises[exId];
+  }
+  return snap;
+}
+function restoreExerciseReferences(snap){
+  if(!snap)return;
+  const id=snap.exId;
+  if(snap.pool>=0){
+    if(!Array.isArray(state.autoRoutinePool))state.autoRoutinePool=[];
+    if(!state.autoRoutinePool.includes(id))state.autoRoutinePool.splice(Math.min(snap.pool,state.autoRoutinePool.length),0,id);
+  }
+  if(snap.fixed>=0){
+    if(!Array.isArray(state.autoRoutineFixedExIds))state.autoRoutineFixedExIds=[];
+    if(!state.autoRoutineFixedExIds.includes(id))state.autoRoutineFixedExIds.splice(Math.min(snap.fixed,state.autoRoutineFixedExIds.length),0,id);
+  }
+  if(snap.tracker.length){
+    if(!state.autoRoutineMuscleTracker)state.autoRoutineMuscleTracker={};
+    snap.tracker.forEach(mu=>{if(!state.autoRoutineMuscleTracker[mu])state.autoRoutineMuscleTracker[mu]=id;});
+  }
+  if(snap.pairs.length)restoreAutoRoutineSupersetPairs(snap.pairs);
+  if(snap.injured){
+    if(!state.injuredExercises)state.injuredExercises={};
+    if(!state.injuredExercises[id])state.injuredExercises[id]=snap.injured;
+  }
+}
 function performExerciseMerge(sourceId,targetId){
   (state.history||[]).forEach(w=>{
     if(!w)return;
@@ -14766,6 +15074,7 @@ function performExerciseMerge(sourceId,targetId){
       activeWorkout.originalExerciseIds=activeWorkout.originalExerciseIds.map(id=>id===sourceId?targetId:id);
     }
   }
+  rewireAutoRoutineExerciseRefs(sourceId,targetId);
   // Remembered Auto Routine supersets (2026-09-24): point at the surviving exercise; a pair that would
   // collapse into an exercise paired with itself is dropped.
   if(Array.isArray(state.autoRoutineSupersetPairs)){
@@ -14803,9 +15112,11 @@ function deleteLibraryExercise(rowIdx){
   if(idx<0)return;
   const removed=state.exercises[idx];
   state.exercises.splice(idx,1);
+  const refSnap=detachExerciseReferences(removed.id); // 2026-09-24.2 — pool/pin/tracker/remembered-superset/resting-flag leftovers
   save();renderExerciseDB();
   showUndoToast('Deleted '+removed.name,()=>{
     state.exercises.splice(idx,0,removed);
+    restoreExerciseReferences(refSnap);
     save();renderExerciseDB();
   });
 }
@@ -15949,6 +16260,15 @@ function renderReview(){
     }
     if(!sugg.length)sugg.push({i:'🏆',t:'Excellent week! Great muscle balance and consistent frequency. Keep it up.'});
   }
+  // Stalled exercises (2026-09-24.3) — after the block above so it never changes the "Excellent week" logic.
+  try{
+    const stalled=Object.values(getStalledExercises()).sort((a,b)=>b.weeks-a.weeks);
+    if(stalled.length){
+      const names=stalled.slice(0,3).map(x=>escHtml(x.name));
+      const more=stalled.length-names.length;
+      sugg.push({i:'⏸️',t:'No new best in 4+ weeks on '+names.join(', ')+(more>0?' and '+more+' more':'')+' (see Personal Records). Worth a rep-range change, a swap, or a lighter week.'});
+    }
+  }catch(e){console.error('stalled-exercise insight failed:',e);}
   c.innerHTML=statsHtml
     +'<div class="section-label">Volume Plan \u00B7 by Sunday</div>'
     +'<div class="review-card" style="margin:0 16px 10px">'+getWeekPlanCardHtml()+'</div>'
