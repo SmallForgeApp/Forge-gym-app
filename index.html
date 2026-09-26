@@ -10731,6 +10731,18 @@ const AUTO_ROUTINE_BREAK_SCALE_FLOOR=0.5;
 // of reactive + pulled-forward dosing — however often checked — can push it past that ceiling.
 // Simulated result at 1.1: holds flat at ~9 sets against an 8-set target, indefinitely, no drift.
 const AUTO_ROUTINE_LOOKAHEAD_ROLLING_CEILING=1.1;
+// HANDOVER SPEC (2026-09-26, user's explicit request): irregular/unplanned attendance made the
+// calendar-week horizon (deliveredWeek/remainingWeek/getAutoRoutineSessionsLeftThisWeek) spike hard
+// on a late-week return from a gap — sessionsLeft collapses toward 1 the fewer calendar days are
+// left before the Monday reset, regardless of how consistently the user actually trains, and because
+// rollingBound already binds horizons 1+2 to within 1 set of the week-goal horizon, that horizon's
+// number IS the dose almost every time remainingWeek>0. AUTO_ROUTINE_LONG_WINDOW_DAYS replaces that
+// calendar deadline with a bounded rolling window (no Monday cliff to spike against) for anyone who
+// hasn't explicitly picked a week plan; AUTO_ROUTINE_CATCHUP_MULTIPLE is a hard per-session backstop
+// on top of that, since even a smoothed window can still owe a genuinely large amount after a long
+// enough gap. See getMuscleExposureDose.
+const AUTO_ROUTINE_LONG_WINDOW_DAYS=21;
+const AUTO_ROUTINE_CATCHUP_MULTIPLE=1.5;
 // SESSION-WIDE CAP (2026-09-13, user's explicit request): the most total pulled-forward volume any
 // one session will admit across ALL muscles combined — see buildAutoSession's own comment for why
 // this exists (several muscles trained together expire together, and each one's individual
@@ -10832,11 +10844,16 @@ function getMuscleVolumeBreakdownSince(muscle,startDate){
 }
 // What the scheduler treats as "already delivered from history" for ONE window. Priority muscles:
 // direct only. Everyone else: direct + indirect. windowKind 'rolling' (default) = the previous 7
-// days, exactly as before; 'week' = this calendar week. Live in-session picks are added on top by
-// getAutoRoutineDeliveredSoFar.
+// days, exactly as before; 'week' = this calendar week; 'long' = the bounded rolling window used by
+// the no-plan catch-up horizon (AUTO_ROUTINE_LONG_WINDOW_DAYS — handover spec, 2026-09-26). Live
+// in-session picks are added on top by getAutoRoutineDeliveredSoFar.
 function getAutoRoutineHistDelivered(muscle,isPriority,windowKind){
   if(windowKind==='week'){
     const b=getMuscleVolumeBreakdownSince(muscle,getCalendarWeekStart());
+    return isPriority?b.direct:Math.round((b.direct+b.indirect)*10)/10;
+  }
+  if(windowKind==='long'){
+    const b=getMuscleVolumeBreakdownSince(muscle,new Date(Date.now()-AUTO_ROUTINE_LONG_WINDOW_DAYS*864e5));
     return isPriority?b.direct:Math.round((b.direct+b.indirect)*10)/10;
   }
   return isPriority?getMuscleVolumeBreakdown(muscle).direct:getMuscleVolume(muscle).sets;
@@ -10988,9 +11005,17 @@ function getMuscleExposureDose(muscle,activeSet,picks){
   // getMuscleVolumeBreakdown correctly return 0, so delivered=0 and remaining=weeklyTargetNow
   // automatically — no special-casing "first session" needed or wanted here.
   const delivered=getAutoRoutineDeliveredSoFar(muscle,activeSet,picks,'rolling'); // previous 7 days
-  const deliveredWeek=getAutoRoutineDeliveredSoFar(muscle,activeSet,picks,'week'); // this calendar week (2026-09-19)
+  // HANDOVER SPEC (2026-09-26): calendar-week horizon replaced by a bounded rolling window when no
+  // week plan is active — see AUTO_ROUTINE_LONG_WINDOW_DAYS above. When the user HAS picked a week
+  // plan (getWeekPlanOptions), that's still a far better signal than any window guess, so this branch
+  // keeps the original calendar-week behavior for that case, unchanged.
+  const weekPlanned=getWeekPlanSessionsLeft()!=null;
+  const deliveredLongOrWeek=weekPlanned
+    ?getAutoRoutineDeliveredSoFar(muscle,activeSet,picks,'week')
+    :getAutoRoutineDeliveredSoFar(muscle,activeSet,picks,'long');
+  const longWindowTarget=weekPlanned?weeklyTargetNow:weeklyTargetNow*(AUTO_ROUTINE_LONG_WINDOW_DAYS/7);
   const remaining=Math.max(0,weeklyTargetNow-delivered);
-  const remainingWeek=Math.max(0,weeklyTargetNow-deliveredWeek);
+  const remainingLongOrWeek=Math.max(0,longWindowTarget-deliveredLongOrWeek);
   // LOOK-AHEAD (see REVISION 2 in the comment above getMuscleExpiringVolume): the horizon is this
   // muscle's OWN minGapDays — how much of `delivered` will expire before a second session could
   // possibly happen at all — not a fixed constant. If that's non-zero there is no session to split
@@ -11037,7 +11062,7 @@ function getMuscleExposureDose(muscle,activeSet,picks){
   const runwayDays=unrecoverableNeed>0?getMuscleNearestExpiryDays(muscle,info.minGapDays,isPriority):info.minGapDays;
   const pullForwardRaw=runwayDays<=1?unrecoverableNeed:unrecoverableNeed/Math.max(1,Math.round(runwayDays));
   const pullForward=Math.min(unrecoverableNeed>0?Math.ceil(pullForwardRaw):0,maxAllowedTotal);
-  if(remaining<=0&&pullForward<=0&&remainingWeek<=0)return{...info,weeklyTargetNow,dose:0}; // genuinely nothing needed in ANY window (previous 7 days, next few days, this week), or the ceiling's already full
+  if(remaining<=0&&pullForward<=0&&remainingLongOrWeek<=0)return{...info,weeklyTargetNow,dose:0}; // genuinely nothing needed in ANY window (previous 7 days, next few days, this week or long window), or the ceiling's already full
   // Cadence the dose is spread over. A muscle's OBSERVED training rhythm is a symptom of how it happened to be trained (on the
   // real backup: Chest, Triceps, Quads, Hamstrings, Calves had each been hit about once a week by fixed routines, so their
   // "ideal gap" read 7 days) — dosing at that cadence meant "the whole week's volume every visit": a blank Monday came out
@@ -11046,21 +11071,25 @@ function getMuscleExposureDose(muscle,activeSet,picks){
   // more often than its history shows. Never slower than before.
   const attendRate=getAutoRoutineAttendRatePerWeek(info.minGapDays);
   const idealSessionsPerWeek=Math.max(7/info.idealGapDays,attendRate||0);
-  // MULTI-HORIZON DOSE (2026-09-19, user's explicit request — random weekly schedule, so no single
-  // window and no fixed weekday pattern can be trusted). Three horizons feed ONE dose, whichever asks
-  // for the MOST (never summed — they describe the same missing volume seen through different windows):
+  // MULTI-HORIZON DOSE (2026-09-19, revised 2026-09-26 — handover spec §1). Three horizons feed ONE
+  // dose, whichever asks for the MOST (never summed — they describe the same missing volume seen
+  // through different windows):
   //  1. PREVIOUS 7 DAYS: `remaining` vs the rolling window, spread at the muscle's steady-state cadence
   //     (the original formula, untouched).
   //  2. NEXT FEW DAYS: the roll-off look-ahead pullForward above (untouched).
-  //  3. THIS WEEK'S GOAL: `remainingWeek` vs the calendar week, split over the sessions the user can
-  //     realistically still do before Sunday (getAutoRoutineSessionsLeftThisWeek: spacing capacity,
-  //     capped by their usual gym days per week). CEIL so per-session rounding can never compound into a
-  //     shortfall. This is what closes a gap that the rolling window can't see — e.g. Monday, when last
-  //     week's late sets still fill the rolling window but this week's count is still zero.
-  // Ceiling for the week-driven part: 1.1x aim for the calendar week, plus MRV as the safety net on the
+  //  3. LONGER-TERM GOAL: `remainingLongOrWeek` vs either (a) THIS CALENDAR WEEK, split over the
+  //     sessions still possible before Sunday (getAutoRoutineSessionsLeftThisWeek), if the user has
+  //     picked a week plan (getWeekPlanOptions) — original behavior, unchanged — or (b) a bounded
+  //     AUTO_ROUTINE_LONG_WINDOW_DAYS rolling window otherwise, since anchoring to the Sunday-night
+  //     deadline spiked hard whenever an irregular-attendance return happened to land late in the
+  //     week (sessionsLeft collapsing toward 1 regardless of how consistently the user actually
+  //     trains). CEIL so per-session rounding can never compound into a shortfall. This is what closes
+  //     a gap the rolling window alone can't see — e.g. a fresh Monday, when last week's late sets
+  //     still fill the rolling window but this week's own count is still zero.
+  // Ceiling for the long/week-driven part: 1.1x aim for that window, plus MRV as the safety net on the
   // rolling window — the rolling window legitimately runs well above the aim when a big session late
-  // last week sits next to the first sessions of this one (simulated: a tighter 1.5x-aim net there
-  // silently blocked exactly the catch-up the week's goal needed), so it can't use the tight 1.1x.
+  // in the previous window sits next to the first sessions of this one (simulated: a tighter 1.5x-aim
+  // net there silently blocked exactly the catch-up the goal needed), so it can't use the tight 1.1x.
   const scaleFactor=getAutoRoutineBreakScale(info.daysSince,info.idealGapDays);
   const baseDose=getAutoRoutineReactiveBaseDose(remaining,info.exposureCap,idealSessionsPerWeek,false,null);
   const reactiveDoseRaw=remaining>0?Math.max(1,Math.round(baseDose*scaleFactor)):0;
@@ -11071,16 +11100,17 @@ function getMuscleExposureDose(muscle,activeSet,picks){
   // The COMBINED total is capped against maxAllowedTotal (the projected-after-expiry reference) since
   // that's the number that actually determines where the rolling total settles once expiry happens.
   const rollingPlusPull=Math.min(reactiveDose+pullForward,maxAllowedTotal);
-  let weekDose=0,weekShare=0;
-  if(remainingWeek>0){
-    const sessionsLeft=getAutoRoutineSessionsLeftThisWeek(info.minGapDays);
-    const weekBase=getAutoRoutineReactiveBaseDose(remainingWeek,info.exposureCap,idealSessionsPerWeek,true,sessionsLeft);
-    const weekRaw=Math.max(1,Math.round(weekBase*scaleFactor));
-    const weekCeiling=Math.max(0,Math.min(
-      Math.round(weeklyTargetNow*AUTO_ROUTINE_LOOKAHEAD_ROLLING_CEILING-deliveredWeek),
+  let longDose=0,longShare=0;
+  if(remainingLongOrWeek>0){
+    const longBase=weekPlanned
+      ?getAutoRoutineReactiveBaseDose(remainingLongOrWeek,info.exposureCap,idealSessionsPerWeek,true,getAutoRoutineSessionsLeftThisWeek(info.minGapDays))
+      :getAutoRoutineReactiveBaseDose(remainingLongOrWeek,info.exposureCap,idealSessionsPerWeek,false,null);
+    const longRaw=Math.max(1,Math.round(longBase*scaleFactor));
+    const longCeiling=Math.max(0,Math.min(
+      Math.round(longWindowTarget*AUTO_ROUTINE_LOOKAHEAD_ROLLING_CEILING-deliveredLongOrWeek),
       Math.round(getMuscleLandmarks(muscle).mrv-delivered)));
-    weekDose=Math.min(weekRaw,weekCeiling);
-    weekShare=weekBase;
+    longDose=Math.min(longRaw,longCeiling);
+    longShare=longBase;
   }
   // Same exposureCap ceiling as always — no horizon can push a single session past this muscle's
   // per-exposure safety limit.
@@ -11092,14 +11122,43 @@ function getMuscleExposureDose(muscle,activeSet,picks){
   // muscle above its per-session share of this week's remaining volume by at most ONE set (tested against +25% and +50%: same
   // aim-hit rate, but +1 overshoots least and matches the chooser's promised session lengths best); once the week's goal is met they
   // no longer add anything (the volume you do this week is what fills the next rolling window anyway).
-  const rollingBound=weekShare>0?weekShare+1:0;
-  const dose=Math.min(info.exposureCap,Math.max(Math.min(rollingPlusPull,rollingBound),weekDose));
+  const rollingBound=longShare>0?longShare+1:0;
+  const doseBeforeCatchupCap=Math.min(info.exposureCap,Math.max(Math.min(rollingPlusPull,rollingBound),longDose));
+  // HANDOVER SPEC §2 (2026-09-26): no single session may ask a muscle for more than
+  // AUTO_ROUTINE_CATCHUP_MULTIPLE × its own normal per-session dose, however large the horizons above
+  // computed. Anything beyond that is left genuinely still-owed — nothing here pretends it was
+  // delivered, so remaining/remainingLongOrWeek will show it again next time this function runs. This
+  // is what keeps a single session approachable; the window above only bounds how much debt can exist
+  // in total.
+  const catchupCeiling=Math.max(1,Math.round(getAutoRoutineNormalSessionDose(weeklyTargetNow,info)*AUTO_ROUTINE_CATCHUP_MULTIPLE));
+  const dose=Math.min(doseBeforeCatchupCap,catchupCeiling);
   // pulledForward = ONLY the part of the dose that nothing else asked for: buildAutoSession budgets it
   // per session (AUTO_ROUTINE_MAX_PULLFORWARD_PER_SESSION) and defers the excess, so anything the
-  // reactive rate or THIS WEEK's goal already needs must never be mistaken for pull-forward and
-  // trimmed by that budget (simulated in a 2-day week: Quads' whole week-driven dose was labelled
+  // reactive rate or the week/long-window goal already needs must never be mistaken for pull-forward
+  // and trimmed by that budget (simulated in a 2-day week: Quads' whole week-driven dose was labelled
   // pull-forward, got deferred behind other muscles' look-ahead, and the muscle ended the week at 2/8).
-  return{...info,weeklyTargetNow,dose,pulledForward:Math.max(0,dose-Math.max(Math.min(reactiveDose,rollingBound),weekDose))};
+  return{...info,weeklyTargetNow,dose,pulledForward:Math.max(0,dose-Math.max(Math.min(reactiveDose,rollingBound),longDose))};
+}
+// HANDOVER SPEC §3 (2026-09-26, user's explicit request): pure read, same spirit as
+// getStalledExercises — never changes Auto Routine's own dosing, only surfaces a suggestion. The
+// 5-week window is doing double duty as the "sustained, not a blip" filter, same principle as
+// AUTO_ROUTINE_LONG_WINDOW_DAYS above, so no separate streak-counter is needed: a single rough week
+// can't drag a 5-week average below the threshold on its own. A muscle whose target reads 0 (fully
+// resting, no eligible exercises) is skipped the same way getMuscleExposureDose already skips it.
+const AUTO_ROUTINE_CHRONIC_WINDOW_WEEKS=5;
+const AUTO_ROUTINE_CHRONIC_LOW_RATIO=0.65;
+function getUnderdeliveredMuscles(){
+  const activeSet=getAutoRoutineActiveMuscles();
+  const since=new Date(Date.now()-AUTO_ROUTINE_CHRONIC_WINDOW_WEEKS*7*864e5);
+  return MUSCLE_GROUPS.filter(m=>m!=='Full Body').map(m=>{
+    const target=getAutoRoutineMuscleTargetNow(m)*AUTO_ROUTINE_CHRONIC_WINDOW_WEEKS;
+    if(target<=0)return null;
+    const isPriority=activeSet.has(m);
+    const b=getMuscleVolumeBreakdownSince(m,since);
+    const delivered=isPriority?b.direct:b.direct+b.indirect;
+    const ratio=delivered/target;
+    return ratio<AUTO_ROUTINE_CHRONIC_LOW_RATIO?{muscle:m,ratio:Math.round(ratio*100)/100}:null;
+  }).filter(Boolean);
 }
 // 2026-08-29: mesoIdx is now OPTIONAL (nullable) — Auto Routine no longer needs an active meso for
 // its volume targets or priority (see the standing progress/priority section above); a real meso,
