@@ -728,7 +728,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-26.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-26.4</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -6158,6 +6158,10 @@ function getMesoVolumeSuggestions(m,routineId,liveMode){
     groups[muscle].exIds.push(exId);
   });
   const suggestions=[];
+  // Mirrors grantMuscleVolumeProgress's own freeze-once pattern exactly (2026-09-26 — see that
+  // function's comment): under Continuous Volume Mode, "priority" here means "in the active set,"
+  // computed once for this whole call so it can't shift muscle-to-muscle while this loop runs.
+  const activeSet=m.continuousVolumeMode?getActiveGrowthMuscles(m):null;
   Object.keys(groups).forEach(muscle=>{
     const g=groups[muscle];
     if(!g.exIds.length)return;
@@ -6170,18 +6174,26 @@ function getMesoVolumeSuggestions(m,routineId,liveMode){
     // genuine safety flags (pain/fatigue) still do. Back-burner's ceiling is MEV, not MRV, so an
     // extended Phase B pass can't quietly let a deprioritized muscle creep all the way up toward
     // MRV — it holds at MEV the same way Phase A already capped it there.
-    const isMesoPriority=mesoIsPriorityMuscle(m,muscle);
-    const isBackBurner=mesoHasActivePriority(m)&&!isMesoPriority;
+    // 2026-09-26: same definition grantMuscleVolumeProgress commits progress against — otherwise the
+    // suggestion shown here and the progress actually recorded a few lines later, at workout start,
+    // could disagree on which ceiling (MEV vs MRV) a muscle is even climbing toward.
+    const isMesoPriority=activeSet?activeSet.has(muscle):mesoIsPriorityMuscle(m,muscle);
+    const isBackBurner=(mesoHasActivePriority(m)||m.continuousVolumeMode)&&!isMesoPriority;
     const overreached=isMesoPriority
       ?(rec.status==='pain-flag'||rec.status==='high-fatigue')
       :(rec.status==='at-or-above-mrv'||rec.status==='pain-flag'||rec.status==='high-fatigue');
     // PER-MUSCLE PHASE A/B HANDOFF (2026-08-15 redesign): a priority/back-burner muscle switches
     // into Phase B individually, the moment ITS OWN stored progress (m.muscleVolumeProgress)
     // reaches its Phase A ceiling — not when the whole pass exhausts a shared rotationsPerMeso
-    // count (the old getMesoExtraRotationIndex gate). A meso where the feature hasn't activated
-    // yet (mesoHasActivePriority false) always falls through to the original Phase A block below,
-    // unchanged.
-    if(mesoHasActivePriority(m)){
+    // count (the old getMesoExtraRotationIndex gate). A meso where NEITHER this NOR Continuous
+    // Volume Mode has activated always falls through to the original Phase A block below, unchanged.
+    // 2026-09-26: widened from mesoHasActivePriority(m) alone — grantMuscleVolumeProgress already
+    // runs this same Phase A/B tracking under Continuous Volume Mode on its own (its own gate is an
+    // OR of the two), including stamping phaseBSince, regardless of whether a static priority list is
+    // ALSO set. Gating the suggestion on the static list only meant a pure Continuous-Volume-Mode
+    // meso (no priorityMuscles set at all — nothing keeps the two in sync) could be tracking Phase A/B
+    // progress that never once surfaced as a suggestion.
+    if(mesoHasActivePriority(m)||m.continuousVolumeMode){
       const lm=getMuscleLandmarks(muscle);
       const phaseACeiling=isMesoPriority?lm.mrv:lm.mev;
       const stored=(m.muscleVolumeProgress&&m.muscleVolumeProgress[muscle]&&m.muscleVolumeProgress[muscle].current!=null)?m.muscleVolumeProgress[muscle].current:(isMesoPriority?lm.mev:lm.mv);
@@ -6821,10 +6833,14 @@ function getExerciseSessionSummaries(){
 // trained (3+ sessions in the last 28 days) but hasn't beaten what it did in the 56 days BEFORE that
 // (2+ sessions there for a fair baseline). "Beaten" = best e1RM up by at least 1%, OR a heavier weight
 // than ever lifted in that earlier stretch (same rule as getPerfHopDirection: a genuine weight PR is
-// progress even when reps dipped) — reps-only exercises need +1 rep. Baseline is the previous 8 weeks
-// on purpose, NOT all-time, so an old inflated or deliberately re-baselined number can't flag an
-// exercise forever. Skips exercises marked resting/injured and ones that no longer exist. Pure read:
-// nothing here changes any Auto Routine decision.
+// progress even when reps dipped), OR more reps than ever at any weight (2026-09-26: the e1RM here runs
+// on calcTrendORM, which caps at 12 reps for the trend's own good reasons — see calcTrendORM — but that
+// means past 12 reps, more reps at the same weight moves the e1RM by nothing at all, so a real rep PR
+// on a 15-20 rep accessory lift read as "stalled." This is reps' own equivalent of the weight-PR
+// condition right before it) — reps-only exercises still just need +1 rep, uncapped, same as before.
+// Baseline is the previous 8 weeks on purpose, NOT all-time, so an old inflated or deliberately
+// re-baselined number can't flag an exercise forever. Skips exercises marked resting/injured and ones
+// that no longer exist. Pure read: nothing here changes any Auto Routine decision.
 function getStalledExercises(){
   const DAY=864e5,now=Date.now();
   const recentStart=now-28*DAY,priorStart=now-84*DAY;
@@ -6843,7 +6859,9 @@ function getStalledExercises(){
     if(!(bestPrior>0))return;
     const progressed=repsOnly
       ?bestRecent>=bestPrior+1
-      :(bestRecent>=bestPrior*1.01||Math.max(...recent.map(x=>x.maxW))>Math.max(...prior.map(x=>x.maxW)));
+      :(bestRecent>=bestPrior*1.01
+        ||Math.max(...recent.map(x=>x.maxW))>Math.max(...prior.map(x=>x.maxW))
+        ||Math.max(...recent.map(x=>x.reps))>Math.max(...prior.map(x=>x.reps)));
     if(progressed)return;
     const peak=prior.concat(recent).reduce((a,b)=>metric(b)>=metric(a)?b:a); // latest session at the top value
     out[exId]={name:exData.name,muscle:exData.muscle||'Other',repsOnly,
@@ -14610,10 +14628,17 @@ function revertGrantedPhaseBCredits(){
   // redesign) — same discard-safety reasoning as the credits above. Floors back at the muscle's
   // current floor (not below), and clears a phaseBSince stamp if the revert drops progress back
   // under its ceiling, so a discarded session can't leave a phantom "already in Phase B" state.
+  // 2026-09-26: isPriority must mirror grantMuscleVolumeProgress's OWN definition exactly, not just
+  // mesoIsPriorityMuscle — under Continuous Volume Mode, "priority" there means "currently in the
+  // active set" (getActiveGrowthMuscles), which can genuinely disagree with the fixed m.priorityMuscles
+  // list. Using the fixed list unconditionally used the wrong floor/ceiling for any muscle where the
+  // two differ, which could leave phaseBSince exactly wrong after a discard — the very phantom state
+  // this function exists to prevent.
   if(hasProgress&&m.muscleVolumeProgress){
+    const activeSet=m.continuousVolumeMode?getActiveGrowthMuscles(m):null;
     activeWorkout.grantedVolumeProgress.forEach(({muscle,delta})=>{
       const p=m.muscleVolumeProgress[muscle];if(!p)return;
-      const isPriority=mesoIsPriorityMuscle(m,muscle);
+      const isPriority=activeSet?activeSet.has(muscle):mesoIsPriorityMuscle(m,muscle);
       const lm=getMuscleLandmarks(muscle);
       const floor=isPriority?lm.mev:lm.mv;
       const ceiling=isPriority?lm.mrv:lm.mev;
