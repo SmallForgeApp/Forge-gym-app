@@ -262,9 +262,9 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 /* Single per-muscle volume gauge (2026-09-10, replacing the earlier three-separate-bars version
 per user's explicit feedback — "I keep looking straight at the numbers, that's easier to read
 than the three bar charts"). One horizontal track is divided into four fixed-meaning colour
-zones (under MEV / MEV\u2013MAV building / MAV\u2013MRV solid / over MRV) so which zone a muscle sits in
+zones (under MEV / MEV–MAV building / MAV–MRV solid / over MRV) so which zone a muscle sits in
 reads instantly from colour alone, with a single marker pin showing exactly where this window's
-volume falls plus its number printed right on the pin \u2014 one glance for the zone, one number for
+volume falls plus its number printed right on the pin — one glance for the zone, one number for
 the exact count, instead of three separate bars each needing its own read.*/
 .lm-gauge{position:relative;margin-top:22px;}
 .lm-gauge-track{position:relative;height:14px;border-radius:7px;overflow:hidden;background:var(--bg4);display:flex;}
@@ -728,7 +728,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-26.4</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-27.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -928,6 +928,25 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
   </div>
 </div>
 
+<!-- Daily Readiness Check-in (2026-09-25) -->
+<div class="modal-overlay" id="modal-daily-readiness">
+  <div class="modal"><div class="modal-handle"></div>
+    <div class="modal-title">How are you feeling today?</div>
+    <div class="modal-body">
+      <div class="small text3 mb8">Sleep, stress, general fatigue — whatever's going on. This only trims today's Auto Routine doses a little on a rough day; it never changes which muscles train, and never pushes a good day past the normal amount.</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn btn-ghost" onclick="setDailyReadiness(0)">😊 Great</button>
+        <button class="btn btn-ghost" onclick="setDailyReadiness(1)">🙂 Normal</button>
+        <button class="btn btn-ghost" onclick="setDailyReadiness(2)">😫 Rough — trim doses a bit</button>
+        <button class="btn btn-ghost" onclick="setDailyReadiness(3)">😴 Wiped — trim doses more</button>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost flex-1" onclick="setDailyReadiness(1)">Skip (assume Normal)</button>
+    </div>
+  </div>
+</div>
+
 <!-- Auto Routine Priority Status (2026-09-06) -->
 <div class="modal-overlay" id="modal-auto-routine-priority">
   <div class="modal"><div class="modal-handle"></div>
@@ -950,8 +969,9 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
     <div class="modal-body">
-      <div class="small text3 mb8">Builds today's session from your Auto Routine exercise pool — no active mesocycle required. Each muscle only shows up if it's actually due (past its own recovery gap since last trained \u2014 shorter when last time was only a set or two), and gets a per-exposure dose sized for its own recovery speed, already accounting for any indirect/secondary credit it's picked up elsewhere this week. Up to 2 muscles at a time are auto-selected by readiness and ramp from MEV to MRV over about 4 weeks (hard-capped by 6); everyone else holds at MEV. Leave both fields below blank and it fills a session with everything due today (topped up to at least 10 sets if genuinely-eligible work allows); set Minutes OR Sets and it trims or fills to fit that instead — only one can be active at a time. You'll always get a warning (not a hard block) if the result still looks unusually long.</div>
+      <div class="small text3 mb8">Builds today's session from your Auto Routine exercise pool — no active mesocycle required. Each muscle only shows up if it's actually due (past its own recovery gap since last trained — shorter when last time was only a set or two), and gets a per-exposure dose sized for its own recovery speed, already accounting for any indirect/secondary credit it's picked up elsewhere this week. Up to 2 muscles at a time are auto-selected by readiness and ramp from MEV to MRV over about 4 weeks (hard-capped by 6); everyone else holds at MEV. Leave both fields below blank and it fills a session with everything due today (topped up to at least 10 sets if genuinely-eligible work allows); set Minutes OR Sets and it trims or fills to fit that instead — only one can be active at a time. You'll always get a warning (not a hard block) if the result still looks unusually long.</div>
       <div class="small text2" id="auto-session-week-plan" style="margin:12px 0 12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg3);font-size:13px;line-height:1.4"></div>
+      <div class="small text2" id="auto-session-readiness" style="margin:0 0 12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg3);font-size:13px;line-height:1.4"></div>
       <div class="input-label">Minutes available (optional)</div>
       <input id="auto-session-minutes" type="number" min="1" inputmode="numeric" placeholder="Leave blank to use the default below" oninput="document.getElementById('auto-session-sets').value=''"/>
       <div class="small text3 mt4" id="auto-session-default-estimate"></div>
@@ -1195,9 +1215,14 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
 <div class="modal-overlay" id="modal-history-detail">
   <div class="modal"><div class="modal-handle"></div><div class="modal-title" id="history-detail-title">Workout</div>
     <div class="modal-body" id="history-detail-body"></div>
-    <div class="modal-actions">
+    <div class="modal-actions" id="history-view-actions">
       <button class="btn btn-ghost flex-1" onclick="closeModal('modal-history-detail')">Close</button>
+      <button class="btn btn-ghost flex-1" onclick="enterHistoryEditMode()">Edit</button>
       <button class="btn btn-danger flex-1" id="history-delete-btn">Delete</button>
+    </div>
+    <div class="modal-actions" id="history-edit-actions" style="display:none">
+      <button class="btn btn-ghost flex-1" onclick="openHistoryDetail(historyEditWorkoutId)">Cancel</button>
+      <button class="btn btn-primary flex-1" onclick="saveHistoryEdit()">Save changes</button>
     </div>
   </div>
 </div>
@@ -1652,9 +1677,9 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
 <!-- Priority/Back-Burner selection, shown after each deload -->
 <div class="modal-overlay" id="modal-priority-select">
   <div class="modal"><div class="modal-handle"></div>
-    <div class="modal-title">Priority Muscles \u2014 <span id="priority-select-meso-name"></span></div>
+    <div class="modal-title">Priority Muscles — <span id="priority-select-meso-name"></span></div>
     <div class="modal-body">
-      <div class="small text2" style="margin-bottom:12px">Pick 1-2 muscles to prioritize this pass \u2014 they'll ramp toward (and a little past, if feedback supports it) their MRV. Everything else becomes back burner: a lighter MV\u2192MEV ramp, enough to hold real ground without chasing growth. Suggested below, based on which muscles have gone longest without a turn.</div>
+      <div class="small text2" style="margin-bottom:12px">Pick 1-2 muscles to prioritize this pass — they'll ramp toward (and a little past, if feedback supports it) their MRV. Everything else becomes back burner: a lighter MV→MEV ramp, enough to hold real ground without chasing growth. Suggested below, based on which muscles have gone longest without a turn.</div>
       <div id="priority-select-list" style="display:flex;flex-wrap:wrap;gap:8px"></div>
       <div id="priority-select-caution"></div>
     </div>
@@ -1726,6 +1751,19 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
 // CONSTANTS
 // ============================================================
 const AUTO_ROUTINE_DAY_BOUNDARY_HOUR_GMT=4.5; // 4:30am GMT — the app's "new day" (see the GMT-ONLY DAY/WEEK RULES below getGMT430DayIndex)
+// DAILY READINESS CHECK-IN (2026-09-25, user's explicit request): a quick subjective whole-body input
+// (sleep/stress/general fatigue) Auto Routine's existing per-muscle readiness score
+// (getAutoRoutineMuscleReadiness) can't see at all — that score is built entirely from training data
+// (headroom to MRV, days since last trained). Deliberately does NOT get blended into that score: every
+// consumer of it only ever compares readiness ACROSS muscles to pick a relative order (best/worst
+// candidate for a slot) — a single day-level multiplier applied uniformly to every muscle changes
+// none of those comparisons, so folding it in there would have been a genuine no-op, not a working
+// backoff. Applied instead where it actually has an effect: scales down the computed DOSE itself
+// (getMuscleExposureDose) — "back off today" means smaller prescribed volume, not a different
+// muscle selection. Deliberately never scales a Great/Normal day's dose UP past normal — this is a
+// backoff-only mechanism, never license to push past the MRV-safety ceilings already in place.
+const AUTO_ROUTINE_READINESS_LABELS=['Great','Normal','Rough','Wiped'];
+const AUTO_ROUTINE_READINESS_FACTORS=[1,1,0.85,0.7]; // index = level; Great/Normal both 1 (no numeric effect, still logged/shown)
 const SET_TYPES=[
   {id:'normal',label:'Normal',desc:'Standard working set',badgeClass:'badge-normal'},
   {id:'warmup',label:'Warm Up',desc:'Light prep set',badgeClass:'badge-warmup'},
@@ -2046,6 +2084,31 @@ function showSaveErrorBanner(){
   document.getElementById('save-error-dismiss').onclick=()=>{b.style.display='none';};
   b.style.display='flex';
 }
+// 2026-09-25 (user's exact review point, fix's visible half): without this, a corrupted-and-reseeded
+// state looks identical to a genuine first run \u2014 no signal anywhere that anything was lost.
+// Fixed-position like showSaveErrorBanner just above (same severity class: possible data loss), so
+// it's visible immediately at boot regardless of which screen renders first. Unlike that banner
+// (which clears itself once a save actually succeeds again), this is a one-time historical event, so
+// it persists across reloads until an EXPLICIT dismiss \u2014 a timeout risks the person never
+// learning their old data existed at all.
+function showDataRecoveryBanner(){
+  let b=document.getElementById('data-recovery-banner');
+  if(!b){
+    b=document.createElement('div');
+    b.id='data-recovery-banner';
+    b.style.cssText='position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top, 0px) + 12px);background:#3a1414;border:1px solid #ff4757;border-radius:12px;padding:12px 14px;z-index:99998;display:flex;align-items:flex-start;gap:10px;box-shadow:0 4px 20px rgba(0,0,0,0.5)';
+    document.body.appendChild(b);
+  }
+  b.innerHTML='<span style="font-size:18px;line-height:1">\u26a0\ufe0f</span>'
+    +'<span style="flex:1;font-size:13px;color:#fff;line-height:1.4">Your last save couldn\'t be read, so FORGE started fresh instead of guessing. The unreadable copy is still in this browser\'s storage (a key starting "forge_v4_corrupt_backup_") in case it can be recovered.</span>'
+    +'<button id="data-recovery-dismiss" style="background:none;border:none;color:#ff8c8c;font-size:18px;line-height:1;flex-shrink:0;padding:0 2px">\u2715</button>';
+  document.getElementById('data-recovery-dismiss').onclick=()=>{
+    b.style.display='none';
+    state.dataLoadCorruptedDismissed=true;
+    save();
+  };
+  b.style.display='flex';
+}
 function hideSaveErrorBanner(){
   if(!saveIsFailing)return;
   saveIsFailing=false;
@@ -2132,7 +2195,39 @@ function applyAccentColor(hex){
   state.accentColor=hex;
 }
 function load(){
-  try{const s=localStorage.getItem('forge_v4')||localStorage.getItem('forge_v3');if(s){const p=JSON.parse(s);state={...state,...p};}}catch(e){}
+  // 2026-09-25 (user's exact review point): this used to be try{...}catch(e){} — a parse failure on
+  // a GENUINELY EXISTING save (raw is non-empty; this is not a first run) left `state` at its bare
+  // top-level default, including routinesInitialized back at unset, so the seed-default-routines
+  // block a few lines down fired exactly as it would for a true first run — a real data-loss event,
+  // rendered completely indistinguishable from "you've never opened this before", with not even a
+  // console.error to find later. Now: (1) always logged; (2) the unparseable string is preserved
+  // verbatim under its own timestamped key, separate from forge_v4/forge_v3 — those two are about to
+  // get overwritten by the very next save() (right after the reseed below), which would otherwise
+  // destroy the only copy of whatever was recoverable; (3) a small number of these backups are kept,
+  // not just the newest, in case an intermittent issue corrupts more than one save in a row before
+  // it's noticed; (4) a flag records that this happened so Home can show it (showDataRecoveryBanner)
+  // instead of silently proceeding as an ordinary first run. Deliberately does NOT try to suppress
+  // the reseed itself below — an unusable, totally empty app on top of a data-loss event would be
+  // worse — this only makes the event visible and keeps a recovery point instead of erasing it twice
+  // (once when the read failed, again when the reseed's own save() overwrites the corrupt original).
+  const raw=localStorage.getItem('forge_v4')||localStorage.getItem('forge_v3');
+  if(raw){
+    try{
+      const p=JSON.parse(raw);
+      state={...state,...p};
+    }catch(e){
+      console.error('FORGE: saved data failed to parse \u2014 treating as corrupted, not first-run:',e);
+      try{
+        const prefix='forge_v4_corrupt_backup_';
+        localStorage.setItem(prefix+Date.now(),raw);
+        // Keep at most 5 — an unbounded pile of corrupt backups works against the very storage-quota
+        // problem showSaveErrorBanner already exists to warn about.
+        const keys=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.indexOf(prefix)===0)keys.push(k);}
+        keys.sort();while(keys.length>5)localStorage.removeItem(keys.shift());
+      }catch(e2){console.error('FORGE: could not back up the corrupted string:',e2);}
+      state.dataLoadCorrupted=true;
+    }
+  }
   // Purge old hardcoded exercises (IDs like e1, ex2, ebi3 etc.) — replaced by new catalogue system
   state.exercises=(state.exercises||[]).filter(e=>e.id&&(e.id.startsWith('gx')||(!e.id.match(/^e[a-z]?\d+$/))));
   state.exercises=state.exercises.map(e=>({secondary:'',machine:'',bw:'no',...e}));
@@ -3926,19 +4021,40 @@ function populateNewExerciseMuscleSelect(){
   // so it can never drift from the muscles the rest of the app actually tracks again.
   sel.innerHTML=MUSCLE_GROUPS.map(m=>'<option>'+m+'</option>').join('');
 }
-load();initNavs();buildTimerPresets();buildPlateInventoryUI();buildVolumeLandmarksUI();populateNewExerciseMuscleSelect();renderHomeScreen();checkForWorkoutDraft();initGoogleSyncWhenReady(20);
-document.getElementById('barbell-weight-input').value=state.barbellWeight||20;
-document.getElementById('prog-inc-dumbbell').value=state.progressionIncrements.Dumbbell;
-document.getElementById('prog-inc-cable').value=state.progressionIncrements.Cable;
-document.getElementById('prog-inc-other').value=state.progressionIncrements.Other;
-updateProgIncSummary();
-(function(){
+// BOOT CHAIN HARDENING (2026-09-25, user's exact review point): every earlier fix in this class
+// (EFFICIENT_VOLUME_CREDIT_CAP, pendingSorenessForSeeding, PLATE_LOADED_EQUIPMENT, LM_ZONE_COLORS,
+// reviewPRsOpenMuscles — see their comments above and the STARTUP RENDER LIST note near the bottom
+// of this file) treated the SYMPTOM, one const at a time, without ever fixing the actual defect:
+// this whole chain was one bare top-level statement, so ANY uncaught throw from ANY step — a TDZ
+// hit on some later-declared const nobody's caught yet, or any other runtime error — would abort
+// every top-level statement written after it in this single <script>, including the global
+// click-delegation listener and the STARTUP RENDER LIST itself, both of which only look safe today
+// because nothing has thrown here YET. Same fix the STARTUP RENDER LIST already uses: each step
+// isolated in its own try/catch, so one failing step can never take the rest of boot down with it —
+// this makes the whole "move the next offending const up when it's caught throwing" pattern above
+// unnecessary going forward (though the ones already moved are harmless left where they are).
+[['load',load],['initNavs',initNavs],['buildTimerPresets',buildTimerPresets],['buildPlateInventoryUI',buildPlateInventoryUI],['buildVolumeLandmarksUI',buildVolumeLandmarksUI],['populateNewExerciseMuscleSelect',populateNewExerciseMuscleSelect],['renderHomeScreen',renderHomeScreen],['checkForWorkoutDraft',checkForWorkoutDraft],['initGoogleSyncWhenReady',()=>initGoogleSyncWhenReady(20)],['dataRecoveryBanner',()=>{if(state.dataLoadCorrupted&&!state.dataLoadCorruptedDismissed)showDataRecoveryBanner();}]].forEach(([name,fn])=>{
+  try{fn();}catch(e){console.error('Boot step \''+name+'\' failed:',e);}
+});
+// 2026-09-25: same hardening as the boot chain right above, immediately following it — this
+// short settings-init tail was just as able to abort everything after it (the global click-
+// delegation listener, the STARTUP RENDER LIST) as that chain was; wrapping only the chain and
+// leaving this part bare would have just moved the same defect eleven lines later. One shared
+// try/catch is enough here (rather than the per-step isolation above) — these lines are one
+// cohesive unit, initializing the Settings screen's progression-increment and accent-color controls,
+// not independent steps worth isolating from each other.
+try{
+  document.getElementById('barbell-weight-input').value=state.barbellWeight||20;
+  document.getElementById('prog-inc-dumbbell').value=state.progressionIncrements.Dumbbell;
+  document.getElementById('prog-inc-cable').value=state.progressionIncrements.Cable;
+  document.getElementById('prog-inc-other').value=state.progressionIncrements.Other;
+  updateProgIncSummary();
   const expanded=!state.progIncSectionCollapsed;
   document.getElementById('prog-inc-section').style.display=expanded?'block':'none';
   document.getElementById('prog-inc-chevron').textContent=expanded?'▾':'▸';
-})();
-document.getElementById('accent-color-input').value=state.accentColor||'#D97757';
-updateNotifyPermissionStatus();
+  document.getElementById('accent-color-input').value=state.accentColor||'#D97757';
+  updateNotifyPermissionStatus();
+}catch(e){console.error('Boot settings-init tail failed:',e);}
 function saveProgressionIncrement(kind,val){
   const v=parseFloat(val);
   state.progressionIncrements[kind]=isNaN(v)||v<=0?state.progressionIncrements[kind]:v;
@@ -10132,12 +10248,13 @@ function getAutoRoutineLastExposure(muscle){
   });
   return{daysSince:getGMT430DayIndex(Date.now())-dayIdx,sets};
 }
-function getAutoRoutineMuscleReadiness(muscle){
+function getAutoRoutineMuscleReadiness(muscle,ceilingKey){
   if(isAutoRoutineMuscleStruggling(muscle)||isAutoRoutineMuscleFullyResting(muscle))return 0;
   const lm=getMuscleLandmarks(muscle);
+  const ceiling=lm[ceilingKey||'mrv'];
   const progress=getAutoRoutineMuscleProgress(muscle);
-  const span=lm.mrv-lm.mev;
-  const headroom=span>0?Math.max(0,Math.min(1,(lm.mrv-progress)/span)):0;
+  const span=ceiling-lm.mev;
+  const headroom=span>0?Math.max(0,Math.min(1,(ceiling-progress)/span)):0;
   const daysSince=getAutoRoutineDaysSinceMuscleTrained(muscle);
   const idealGap=getMuscleTier(muscle).idealGapDays;
   const freshness=Math.min(1,(daysSince==null?idealGap:daysSince)/idealGap);
@@ -10287,8 +10404,19 @@ function getAutoRoutineMavActiveMuscles(){
   if(!state.autoRoutineMavManualPriority)state.autoRoutineMavManualPriority=[];
   const rec=state.autoRoutineMavActiveMuscles;
   const overrideSet=state.autoRoutineForceOverride||{};
+  // 2026-09-26: computed here (not just inside the stagger block below, where this used to live) so
+  // isSlotValid can also use it — the MRV pool's own isSlotValid has always excluded MAV members
+  // (mavMuscles.has(mu)), but this pool's isSlotValid had no mirror check against MRV membership.
+  // Every current path that ADDS a muscle to either pool already enforces mutual exclusion at that
+  // point (forceAutoRoutineActiveMuscle/forceAutoRoutineMavActiveMuscle each clear the other pool
+  // first, and both pools' own candidate filters already exclude the other's raw members), so this
+  // was defensive rather than a live gap — but MRV gets to self-heal a dual-membership state by
+  // evicting itself, and MAV had no equivalent, so any future path that skips those guards would go
+  // undetected only on this side. Bringing the two back to parity.
+  const mrvMuscles=getAutoRoutineRawPoolMuscles('autoRoutineActiveMuscles');
   const isSlotValid=(mu)=>{
     if(!rec[mu])return false;
+    if(mrvMuscles.has(mu))return false;
     const ageDays=Math.round((Date.now()-new Date(rec[mu]))/864e5);
     if(ageDays>=AUTO_ROUTINE_ACTIVE_BLOCK_DAYS)return false; // same tenure ceiling as the MRV pool — target-agnostic by design (handover's own note)
     if(overrideSet[mu]){ // self-expiring override (2026-09-11) — see MRV pool's matching comment
@@ -10324,11 +10452,11 @@ function getAutoRoutineMavActiveMuscles(){
     const dueDays=getAutoRoutineMavStaggerDays();
     const due=!last||((Date.now()-new Date(last))/864e5)>=dueDays;
     if(due&&keep.length+AUTO_ROUTINE_MAV_PAIR_SIZE<=AUTO_ROUTINE_MAX_MAV_ACTIVE_MUSCLES){
-      const mrvMuscles=getAutoRoutineRawPoolMuscles('autoRoutineActiveMuscles');
+      // mrvMuscles: reused from the top of the function (2026-09-26), not recomputed here.
       const allMuscles=Object.keys(state.volumeLandmarks||{});
       const candidates=allMuscles
         .filter(mu=>!keep.includes(mu)&&!mrvMuscles.has(mu)&&!isAutoRoutineMuscleStruggling(mu)&&!isAutoRoutineMuscleFullyResting(mu)&&getAutoRoutineMuscleProgress(mu)<getMuscleLandmarks(mu).mav)
-        .map(mu=>({mu,score:getAutoRoutineMuscleReadiness(mu)}))
+        .map(mu=>({mu,score:getAutoRoutineMuscleReadiness(mu,'mav')})) // 2026-09-26: ranked against MAV, the ceiling this pool actually climbs toward — using MRV's wider span here counted headroom past the point this pool ever uses, so a muscle nearly done with its MAV run could still outrank one that had barely started
         .filter(x=>x.score>0)
         .sort((a,b)=>b.score-a.score);
       if(candidates.length>=AUTO_ROUTINE_MAV_PAIR_SIZE){
@@ -10684,6 +10812,39 @@ function getMuscleGapDays(muscle,activeSet){
   }
   return{minGapDays,idealGapDays,isPriority,exposureCap:getMuscleExposureCap(muscle)};
 }
+function getAutoRoutineDailyReadinessFactor(){
+  const r=state.autoRoutineDailyReadiness;
+  if(!r||r.dayIndex!==getAppDayIndex())return 1; // not checked in today (or a stale earlier day) — no adjustment
+  return AUTO_ROUTINE_READINESS_FACTORS[r.level]!=null?AUTO_ROUTINE_READINESS_FACTORS[r.level]:1;
+}
+function needsDailyReadinessPrompt(){
+  const r=state.autoRoutineDailyReadiness;
+  return !r||r.dayIndex!==getAppDayIndex();
+}
+function setDailyReadiness(level){
+  state.autoRoutineDailyReadiness={dayIndex:getAppDayIndex(),level};
+  save();
+  closeModal('modal-daily-readiness');
+  try{renderAutoSessionReadinessRow();}catch(e){console.error('readiness row refresh failed:',e);}
+  // Today's factor changes what buildAutoSession(null,null,null) returns, so the modal's own
+  // "Default if left blank" estimate needs a refresh too — otherwise it would keep showing the
+  // pre-check-in number until the modal was closed and reopened.
+  try{renderAutoSessionEstimate();}catch(e){console.error('estimate refresh after readiness check-in failed:',e);}
+}
+function openDailyReadinessModal(){openModal('modal-daily-readiness');}
+function renderAutoSessionReadinessRow(){
+  const el=document.getElementById('auto-session-readiness');
+  if(!el)return;
+  const link=t=>'<span style="color:var(--accent2);cursor:pointer;text-decoration:underline" onclick="openDailyReadinessModal()">'+t+'</span>';
+  const r=state.autoRoutineDailyReadiness;
+  if(r&&r.dayIndex===getAppDayIndex()){
+    const label=AUTO_ROUTINE_READINESS_LABELS[r.level]||'Normal';
+    const factor=AUTO_ROUTINE_READINESS_FACTORS[r.level]!=null?AUTO_ROUTINE_READINESS_FACTORS[r.level]:1;
+    el.innerHTML='\uD83D\uDD0B Feeling: <b>'+label+'</b>'+(factor<1?' \u2014 today\u2019s doses trimmed ~'+Math.round((1-factor)*100)+'%':'')+' \u00B7 '+link('change');
+  }else{
+    el.innerHTML='\uD83D\uDD0B '+link('How are you feeling today?');
+  }
+}
 function getMuscleExposureInfo(muscle,activeSet){
   const gaps=getMuscleGapDays(muscle,activeSet||getAutoRoutineActiveMuscles());
   const lastExposure=getAutoRoutineLastExposure(muscle);
@@ -11016,9 +11177,9 @@ function getMuscleExposureDose(muscle,activeSet,picks){
   activeSet=activeSet||getAutoRoutineActiveMuscles();
   picks=picks||[];
   const info=getMuscleExposureInfo(muscle,activeSet);
-  if(!info.eligible)return{...info,weeklyTargetNow:0,dose:0};
+  if(!info.eligible)return{...info,weeklyTargetNow:0,dose:0,doseBreakdown:{reason:'not-eligible'}};
   const weeklyTargetNow=getAutoRoutineMuscleTargetNow(muscle);
-  if(weeklyTargetNow<=0)return{...info,weeklyTargetNow,dose:0};
+  if(weeklyTargetNow<=0)return{...info,weeklyTargetNow,dose:0,doseBreakdown:{reason:'excluded-muscle'}};
   // Confirmed via simulation (handover spec §1): with zero history, getMuscleVolume/
   // getMuscleVolumeBreakdown correctly return 0, so delivered=0 and remaining=weeklyTargetNow
   // automatically — no special-casing "first session" needed or wanted here.
@@ -11080,7 +11241,7 @@ function getMuscleExposureDose(muscle,activeSet,picks){
   const runwayDays=unrecoverableNeed>0?getMuscleNearestExpiryDays(muscle,info.minGapDays,isPriority):info.minGapDays;
   const pullForwardRaw=runwayDays<=1?unrecoverableNeed:unrecoverableNeed/Math.max(1,Math.round(runwayDays));
   const pullForward=Math.min(unrecoverableNeed>0?Math.ceil(pullForwardRaw):0,maxAllowedTotal);
-  if(remaining<=0&&pullForward<=0&&remainingLongOrWeek<=0)return{...info,weeklyTargetNow,dose:0}; // genuinely nothing needed in ANY window (previous 7 days, next few days, this week or long window), or the ceiling's already full
+  if(remaining<=0&&pullForward<=0&&remainingLongOrWeek<=0)return{...info,weeklyTargetNow,dose:0,doseBreakdown:{reason:'nothing-needed'}}; // genuinely nothing needed in ANY window (previous 7 days, next few days, this week or long window), or the ceiling's already full
   // Cadence the dose is spread over. A muscle's OBSERVED training rhythm is a symptom of how it happened to be trained (on the
   // real backup: Chest, Triceps, Quads, Hamstrings, Calves had each been hit about once a week by fixed routines, so their
   // "ideal gap" read 7 days) — dosing at that cadence meant "the whole week's volume every visit": a blank Monday came out
@@ -11141,7 +11302,8 @@ function getMuscleExposureDose(muscle,activeSet,picks){
   // aim-hit rate, but +1 overshoots least and matches the chooser's promised session lengths best); once the week's goal is met they
   // no longer add anything (the volume you do this week is what fills the next rolling window anyway).
   const rollingBound=longShare>0?longShare+1:0;
-  const doseBeforeCatchupCap=Math.min(info.exposureCap,Math.max(Math.min(rollingPlusPull,rollingBound),longDose));
+  const rollingSideFinal=Math.min(rollingPlusPull,rollingBound);
+  const doseBeforeCatchupCap=Math.min(info.exposureCap,Math.max(rollingSideFinal,longDose));
   // HANDOVER SPEC §2 (2026-09-26): no single session may ask a muscle for more than
   // AUTO_ROUTINE_CATCHUP_MULTIPLE × its own normal per-session dose, however large the horizons above
   // computed. Anything beyond that is left genuinely still-owed — nothing here pretends it was
@@ -11149,13 +11311,34 @@ function getMuscleExposureDose(muscle,activeSet,picks){
   // is what keeps a single session approachable; the window above only bounds how much debt can exist
   // in total.
   const catchupCeiling=Math.max(1,Math.round(getAutoRoutineNormalSessionDose(weeklyTargetNow,info)*AUTO_ROUTINE_CATCHUP_MULTIPLE));
-  const dose=Math.min(doseBeforeCatchupCap,catchupCeiling);
+  const doseRaw=Math.min(doseBeforeCatchupCap,catchupCeiling);
+  // DAILY READINESS BACKOFF (2026-09-25 — see the constants block for why this scales the DOSE
+  // here rather than the readiness SCORE): applied LAST, after every ceiling above (exposureCap,
+  // rollingCeiling/MRV via maxAllowedReactive/Total, longCeiling, catchupCeiling) is already locked
+  // in, so a rough day can only ever shrink what those ceilings already allowed — never loosen them.
+  const readinessFactor=getAutoRoutineDailyReadinessFactor();
+  const dose=Math.max(0,doseRaw*readinessFactor);
   // pulledForward = ONLY the part of the dose that nothing else asked for: buildAutoSession budgets it
   // per session (AUTO_ROUTINE_MAX_PULLFORWARD_PER_SESSION) and defers the excess, so anything the
   // reactive rate or the week/long-window goal already needs must never be mistaken for pull-forward
   // and trimmed by that budget (simulated in a 2-day week: Quads' whole week-driven dose was labelled
   // pull-forward, got deferred behind other muscles' look-ahead, and the muscle ended the week at 2/8).
-  return{...info,weeklyTargetNow,dose,pulledForward:Math.max(0,dose-Math.max(Math.min(reactiveDose,rollingBound),longDose))};
+  // Scaled by the same readinessFactor as `dose` so a rough day shrinks the pure-pull-forward portion
+  // proportionally too, rather than comparing a scaled total against an unscaled baseline.
+  const pulledForward=Math.max(0,dose-Math.max(Math.min(reactiveDose,rollingBound),longDose)*readinessFactor);
+  // "WHY THIS DOSE" BREAKDOWN (2026-09-25, user's explicit request; field names updated 2026-09-26 to
+  // track the long-window/week merge above): every quantity the session preview's tap-to-expand needs
+  // to explain today's number, captured straight off this real computation rather than reconstructed
+  // after the fact — buildAutoSession stashes this onto picks.doseBreakdown[muscle] the moment it's
+  // computed (same pattern as picks.autoRoutineBelowFloor).
+  const doseBreakdown={
+    delivered:Math.round(delivered*10)/10,remaining:Math.round(remaining*10)/10,reactiveDose,
+    deliveredLongOrWeek:Math.round(deliveredLongOrWeek*10)/10,remainingLongOrWeek:Math.round(remainingLongOrWeek*10)/10,longDose,weekPlanned,
+    pullForward,rollingSideFinal,exposureCap:info.exposureCap,weeklyTargetNow,doseRaw,dose,readinessFactor,
+    cappedByExposure:Math.max(rollingSideFinal,longDose)>info.exposureCap+1e-9,
+    cappedByCatchup:doseBeforeCatchupCap>catchupCeiling+1e-9,
+  };
+  return{...info,weeklyTargetNow,dose,pulledForward,doseBreakdown};
 }
 // HANDOVER SPEC §3 (2026-09-26, user's explicit request): pure read, same spirit as
 // getStalledExercises — never changes Auto Routine's own dosing, only surfaces a suggestion. The
@@ -11163,6 +11346,7 @@ function getMuscleExposureDose(muscle,activeSet,picks){
 // AUTO_ROUTINE_LONG_WINDOW_DAYS above, so no separate streak-counter is needed: a single rough week
 // can't drag a 5-week average below the threshold on its own. A muscle whose target reads 0 (fully
 // resting, no eligible exercises) is skipped the same way getMuscleExposureDose already skips it.
+// Not yet wired into any screen — built as a standalone read, same as this batch's other pieces.
 const AUTO_ROUTINE_CHRONIC_WINDOW_WEEKS=5;
 const AUTO_ROUTINE_CHRONIC_LOW_RATIO=0.65;
 function getUnderdeliveredMuscles(){
@@ -11278,6 +11462,15 @@ function buildAutoSession(mesoIdx,minutesAvailable,setsBudget){
   fairnessOrder.forEach(muscle=>{
     if(isAutoRoutineMuscleFullyResting(muscle))return;
     const doseInfo=getMuscleExposureDose(muscle,activeSet,picks);
+    // Stashed onto picks itself (same pattern as picks.autoRoutineBelowFloor) so the session-preview
+    // screen (showAutoRoutinePreview/renderAutoRoutineWeeklyProgressHtml) can explain today's number
+    // later using the REAL computation, not a reconstruction — captured here even if `need` turns
+    // out to be 0 after the pull-forward budget below, since the breakdown should still be able to
+    // explain a 0-set outcome truthfully (e.g. "today's check-in trimmed a 1-set need to 0").
+    if(doseInfo.doseBreakdown){
+      if(!picks.doseBreakdown)picks.doseBreakdown={};
+      picks.doseBreakdown[muscle]=doseInfo.doseBreakdown;
+    }
     let need=doseInfo.dose;
     if(doseInfo.pulledForward>0){
       const roomLeft=Math.max(0,AUTO_ROUTINE_MAX_PULLFORWARD_PER_SESSION-sessionPulledForwardSoFar);
@@ -12078,9 +12271,14 @@ function openAutoSessionModal(mesoIdx){
   openModal('modal-auto-session');
   renderAutoSessionWeekPlanRow();
   try{renderAutoSessionSupersetsRow();}catch(e){console.error('supersets row failed:',e);}
+  try{renderAutoSessionReadinessRow();}catch(e){console.error('readiness row failed:',e);}
   // First time the Auto Session screen is opened in a calendar week (no plan chosen yet, and there is still
   // volume to plan): put the week-plan chooser on top. Wrapped so a planning failure can never stop a session starting.
   try{if(needsWeekPlanPrompt())openWeekPlanModal();}catch(e){console.error('week plan prompt failed:',e);}
+  // Same idea, at DAY granularity (2026-09-25, user's explicit request) — opened after the week-plan
+  // check, so if both fire on the same tap the readiness prompt (opened last) naturally lands on top via
+  // the existing open-order z-index stacking; closing it reveals the week-plan modal still open beneath.
+  try{if(needsDailyReadinessPrompt())openDailyReadinessModal();}catch(e){console.error('daily readiness prompt failed:',e);}
 }
 // Home screen entry point (2026-08-21, user's explicit request for a dedicated home-screen
 // button) — reuses the exact same "find the active meso" logic renderActiveMesoHero already uses,
@@ -12265,6 +12463,42 @@ function confirmForceAutoRoutineMavActiveMuscle(muscle){
   forceAutoRoutineMavActiveMuscle(muscle,!!reason);
   document.getElementById('auto-routine-priority-body').innerHTML=renderAutoRoutinePriorityStatusHtml();
 }
+// Plain-string id fragment for an onclick/getElementById target built from a muscle name — the
+// small fixed MUSCLE_GROUPS set never needs more than this, but sanitizing is free and consistent
+// with the same pattern already used for Review's per-exercise chart ids.
+function doseBdId(muscle){return 'dose-bd-'+String(muscle).replace(/[^a-zA-Z0-9_-]/g,'_');}
+function toggleDoseBreakdown(muscle){
+  const id=doseBdId(muscle);
+  const el=document.getElementById(id);if(!el)return;
+  const chev=document.getElementById(id+'-chev');
+  const open=el.style.display==='none';
+  el.style.display=open?'':'none';
+  if(chev)chev.textContent=open?'\u25BE':'\u25B8';
+}
+// "WHY THIS DOSE" BREAKDOWN (2026-09-25, user's explicit request; updated 2026-09-26 for the
+// long-window/week merge and the catch-up ceiling — see getMuscleExposureDose): plain-language
+// version of the doseBreakdown object getMuscleExposureDose/buildAutoSession attach to picks — which
+// of the three horizons (previous 7 days, next-few-days look-ahead, this week's-or-long-window goal)
+// actually drove today's number, or whether the per-exposure/catch-up cap did instead. Returns ''
+// when there's nothing meaningful to show (an early-return reason, or no breakdown captured at all)
+// — the row itself stays exactly as before in that case, no dead expand affordance.
+function getDoseBreakdownHtml(bd){
+  if(!bd||bd.reason)return'';
+  const s=n=>n!==1?'s':'';
+  const target=Math.round(bd.weeklyTargetNow*10)/10; // same rounding the outer row already uses — the raw ramp value carries long float noise (e.g. 8.00000298941799)
+  const winner=bd.cappedByExposure?'cap':bd.cappedByCatchup?'catchup':(bd.rollingSideFinal<=1e-9&&bd.longDose<=1e-9?'none':(bd.rollingSideFinal>=bd.longDose?'rolling':'long'));
+  const arrow=' \u2190 <b>drove today\u2019s number</b>';
+  const longLabel=bd.weekPlanned?'This week\u2019s goal':'Rolling '+AUTO_ROUTINE_LONG_WINDOW_DAYS+'-day goal';
+  const longWindowLabel=bd.weekPlanned?'this calendar week':'the last '+AUTO_ROUTINE_LONG_WINDOW_DAYS+' days';
+  const lines=[];
+  lines.push('Rolling 7 days: '+bd.delivered+'/'+target+' sets so far \u2192 '+Math.round(bd.reactiveDose)+' set'+s(Math.round(bd.reactiveDose))+' to catch up'+(winner==='rolling'&&bd.pullForward<=0?arrow:''));
+  if(bd.pullForward>0)lines.push('Look-ahead: +'+Math.round(bd.pullForward)+' set'+s(Math.round(bd.pullForward))+' pulled forward \u2014 some of that delivered volume is due to expire from the rolling window before your next likely session'+(winner==='rolling'?arrow:''));
+  lines.push(longLabel+': '+bd.deliveredLongOrWeek+'/'+target+' sets over '+longWindowLabel+' \u2192 '+Math.round(bd.longDose)+' set'+s(Math.round(bd.longDose))+(winner==='long'?arrow:''));
+  if(winner==='cap')lines.push('Exposure cap: this muscle is capped at '+bd.exposureCap+' sets for any one session'+arrow);
+  if(winner==='catchup')lines.push('Catch-up cap: capped at 1.5\u00d7 a normal session\u2019s dose so a single session stays reasonable \u2014 what\u2019s left over still shows up next time'+arrow);
+  if(bd.readinessFactor<1)lines.push('Today\u2019s check-in: trimmed from '+Math.round(bd.doseRaw)+' to '+Math.round(bd.dose)+' set'+s(Math.round(bd.dose))+' ('+Math.round((1-bd.readinessFactor)*100)+'% lighter)');
+  return '<div class="small text3" style="margin-top:4px;padding:8px 10px;background:var(--bg3);border-radius:8px;line-height:1.6">'+lines.join('<br>')+'</div>';
+}
 function renderAutoRoutineWeeklyProgressHtml(picks){
   const muscles=[...new Set(picks.map(p=>p.muscle))];
   const rows=muscles.map(muscle=>{
@@ -12276,10 +12510,18 @@ function renderAutoRoutineWeeklyProgressHtml(picks){
     const deliveredSoFar=getMuscleVolumeForReview(muscle);
     const afterThisSession=Math.min(weeklyTarget,deliveredSoFar+sessionSets);
     const pct=weeklyTarget>0?Math.round((afterThisSession/weeklyTarget)*100):100;
-    return'<div class="small text3" style="display:flex;justify-content:space-between;padding:2px 0">'
-      +'<span>'+escHtml(muscle)+'</span>'
+    // "Why this dose" tap-to-expand (2026-09-25, user's explicit request) — only where buildAutoSession
+    // actually captured a real breakdown for this muscle; a muscle that only got PADDING sets (below the
+    // 10-set-floor top-up, not a need-based dose) has none, and the row is left exactly as it was before.
+    let bd=null,bdHtml='';
+    try{bd=picks.doseBreakdown&&picks.doseBreakdown[muscle];bdHtml=bd?getDoseBreakdownHtml(bd):'';}catch(e){console.error('dose breakdown render failed:',e);}
+    const expandable=!!bdHtml;
+    const id=doseBdId(muscle);
+    return'<div class="small text3" style="display:flex;justify-content:space-between;padding:2px 0'+(expandable?';cursor:pointer':'')+'"'+(expandable?' onclick="toggleDoseBreakdown(\''+muscle+'\')"':'')+'>'
+      +'<span>'+escHtml(muscle)+(expandable?' <span id="'+id+'-chev" class="text3" style="font-size:10px">\u25B8</span>':'')+'</span>'
       +'<span>'+Math.round(afterThisSession*10)/10+'/'+Math.round(weeklyTarget*10)/10+' '+getReviewWindowLabel()+' ('+pct+'%)</span>'
-      +'</div>';
+      +'</div>'
+      +(expandable?'<div id="'+id+'" style="display:none">'+bdHtml+'</div>':'');
   }).join('');
   return'<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">'
     +'<div class="small text3" style="font-weight:700;margin-bottom:4px">Toward your targets, '+getReviewWindowLabel()+' (after this session)</div>'
@@ -12406,6 +12648,22 @@ function getAutoVolumeSkipWarningHtml(ex){
   if(!ex||!ex.autoVolumeSkipped)return'';
   return'<div class="exercise-soreness-warn info">\u2696\ufe0f Auto Volume Distribution gave the muscle\'s sets to another exercise this session \u2014 add one manually below if you want it anyway.</div>';
 }
+// 2026-09-25 (user's optional suggestion): getStalledExercises() (Review, 2026-09-24.3) is a pure
+// read with zero effect on Auto Routine's own dosing \u2014 surfacing it here, right when a stalled
+// lift actually comes up in a generated session, is what makes the insight actionable instead of
+// something only ever noticed by opening Review on its own. Auto Routine sessions only
+// (isActiveAutoRoutineSession) \u2014 a stall reads as a "maybe swap this" prompt, which fits Auto
+// Routine's already-flexible exercise selection; a fixed routine the user built on purpose should
+// just run as written, not get second-guessed mid-set. Points at the exercise's own \ud83d\udd01
+// Switch Exercise button already in this same card header, rather than duplicating that action here.
+function getExerciseStalledWarningHtml(exId){
+  if(!isActiveAutoRoutineSession())return'';
+  let stall;
+  try{stall=getStalledExercises()[exId];}catch(e){console.error('getStalledExercises failed:',e);return'';}
+  if(!stall)return'';
+  const wks=stall.weeks>=12?'12+':stall.weeks;
+  return'<div class="exercise-soreness-warn mod">\u23f8\ufe0f No new best in '+wks+' weeks \u2014 worth a rep-range change, or swapping it via \ud83d\udd01 above.</div>';
+}
 function buildExerciseCard(exIdx){
   const ex=activeWorkout.exercises[exIdx];
   const exData=getExercise(ex.exId)||{name:'Unknown',muscle:'',machine:'',secondary:'',note:'',bw:'no'};
@@ -12417,6 +12675,7 @@ function buildExerciseCard(exIdx){
   const autoSkipHtml=getAutoVolumeSkipWarningHtml(ex);
   const sorenessHtml=getMuscleSorenessWarningHtml(exData.muscle);
   const exFeedbackHtml=getExerciseFeedbackWarningHtml(ex.exId);
+  const stalledHtml=getExerciseStalledWarningHtml(ex.exId);
   const sugg=suggestNextLoad(ex.exId,ex,activeWorkout.sourceRoutineId);
   const suggText=sugg?('\ud83d\udca1 Set '+(sugg.setIdx+1)+(sugg.isLive?' just now':' last time')+': '+(sugg.w?sugg.w+'kg \u00d7 ':'')+sugg.r+'r'+sugg.effortLbl+' \u2192 '+escHtml(sugg.text)):'';
   const suggHtml='<div class="small" id="tip-'+exIdx+'" style="padding:2px 16px 10px;color:var(--accent2)">'+suggText+'</div>';
@@ -12437,6 +12696,7 @@ function buildExerciseCard(exIdx){
     +autoSkipHtml
     +sorenessHtml
     +exFeedbackHtml
+    +stalledHtml
     +suggHtml
     +missHtml
     +'<table class="set-table"><thead><tr>'
@@ -14628,17 +14888,10 @@ function revertGrantedPhaseBCredits(){
   // redesign) — same discard-safety reasoning as the credits above. Floors back at the muscle's
   // current floor (not below), and clears a phaseBSince stamp if the revert drops progress back
   // under its ceiling, so a discarded session can't leave a phantom "already in Phase B" state.
-  // 2026-09-26: isPriority must mirror grantMuscleVolumeProgress's OWN definition exactly, not just
-  // mesoIsPriorityMuscle — under Continuous Volume Mode, "priority" there means "currently in the
-  // active set" (getActiveGrowthMuscles), which can genuinely disagree with the fixed m.priorityMuscles
-  // list. Using the fixed list unconditionally used the wrong floor/ceiling for any muscle where the
-  // two differ, which could leave phaseBSince exactly wrong after a discard — the very phantom state
-  // this function exists to prevent.
   if(hasProgress&&m.muscleVolumeProgress){
-    const activeSet=m.continuousVolumeMode?getActiveGrowthMuscles(m):null;
     activeWorkout.grantedVolumeProgress.forEach(({muscle,delta})=>{
       const p=m.muscleVolumeProgress[muscle];if(!p)return;
-      const isPriority=activeSet?activeSet.has(muscle):mesoIsPriorityMuscle(m,muscle);
+      const isPriority=mesoIsPriorityMuscle(m,muscle);
       const lm=getMuscleLandmarks(muscle);
       const floor=isPriority?lm.mev:lm.mv;
       const ceiling=isPriority?lm.mrv:lm.mev;
@@ -15347,7 +15600,9 @@ function getHistoricalSetPRFlags(w){
   });
   return flags;
 }
+let historyEditWorkoutId=null;
 function openHistoryDetail(id){
+  historyEditWorkoutId=id;
   const w=(state.history||[]).find(h=>h&&h.id===id);if(!w)return;
   const d=new Date(w.date);
   const prFlags=getHistoricalSetPRFlags(w);
@@ -15392,8 +15647,94 @@ function openHistoryDetail(id){
   if(allEff.length)html+='<div class="mt12 small" style="color:var(--orange)">Avg effort (RPE-equivalent): '+(allEff.reduce((a,b)=>a+b,0)/allEff.length).toFixed(1)+'</div>';
   document.getElementById('history-detail-body').innerHTML=html;
   trendTargets.forEach(t=>drawHistoryTrendSparkline(t.canvasId,t.exId,d));
+  document.getElementById('history-view-actions').style.display='flex';
+  document.getElementById('history-edit-actions').style.display='none';
   document.getElementById('history-delete-btn').onclick=()=>{if(confirm('Delete this workout?')){state.history=(state.history||[]).filter(h=>h&&h.id!==id);invalidatePRCache();save();renderHistory();closeModal('modal-history-detail');}};
   openModal('modal-history-detail');
+}
+// EDIT PAST WORKOUT (2026-09-27, user's explicit request — motivated by a past incorrect PB with no
+// way to go back and fix it; expanded same day to cover every set field after an initial pass that
+// deliberately left RPE and split-hand reps read-only): every logged field on a set — weight, reps
+// (or repsL/repsR for a per-side set), RPE/RIR, and set type — plus the overall duration, are all
+// editable here now. Editing does NOT rewind or replay anything Auto Routine or a meso already
+// advanced from this workout at the time (muscleVolumeProgress, autoRoutineMuscleProgress,
+// phaseBSince) — those already moved forward based on the data as it stood then, and correctly
+// unwinding them is its own project, not what was asked for here. What DOES correctly reflect an
+// edit, because none of it is cached separately from state.history itself: PRs (once
+// invalidatePRCache runs below), the trend chart, and stalled-exercise detection, since all of those
+// are computed fresh from history each time rather than snapshotted. The one thing that WOULD go
+// stale otherwise is the personal-pace cache (getPersonalPace/window.__paceCache) — its invalidation
+// key only reacts to history's length and its first/last ids, so an in-place edit like this is
+// exactly the case it can't detect on its own; clearing it here is what actually closes that gap, now
+// that a real trigger for it exists.
+// ONE REAL EXCEPTION to "doesn't touch Auto Routine": weight/reps/RPE genuinely don't feed
+// getExerciseVolumeCredit at all, so they can't move a "delivered volume" number anywhere — but SET
+// TYPE does (getExerciseVolumeCredit only credits type==='normal'/unset as a full set; warmup gets
+// none). So retyping a set to or from "Warm Up" on a workout still inside the rolling/long-window
+// horizon (recent enough — see AUTO_ROUTINE_LONG_WINDOW_DAYS) genuinely changes how much volume that
+// muscle is currently credited with, which can change today's Auto Routine dose. That's correct
+// behavior, not a bug — the set really did or didn't count — but it's a real consequence of this
+// field specifically, unlike the others, worth knowing before relabeling old warmup sets as working
+// sets (or vice versa) on anything recent.
+function enterHistoryEditMode(){
+  const w=(state.history||[]).find(h=>h&&h.id===historyEditWorkoutId);if(!w)return;
+  let html='<div class="small text3" style="margin-bottom:10px">Editing every logged field for this workout.</div>';
+  html+='<div class="small bold" style="margin-bottom:4px">Duration</div>'
+    +'<div style="display:flex;align-items:center;gap:6px;margin-bottom:14px">'
+    +'<input type="number" inputmode="decimal" min="0" step="1" id="history-edit-duration" value="'+Math.round((Number(w.duration)||0)/60)+'" style="width:64px;text-align:center;font-size:16px;font-weight:700">'
+    +'<span class="small text3">minutes</span></div>';
+  w.exercises.forEach((ex,exIdx)=>{
+    const exData=getExercise(ex.exId);
+    const rpeLabel=ex.useRIR?'RIR':'RPE';
+    html+='<div class="bold mt12">'+(exData?escHtml(exData.name):'Unknown')+'</div>';
+    ex.sets.forEach((s,i)=>{
+      if(!s.done)return;
+      const hasSplitH=s.repsL!=null||s.repsR!=null;
+      const curType=s.type||'normal';
+      const typeOpts=SET_TYPES.map(t=>'<option value="'+t.id+'"'+(t.id===curType?' selected':'')+'>'+escHtml(t.label)+'</option>').join('');
+      html+='<div class="small text2" style="padding:5px 0;display:flex;align-items:center;gap:6px;flex-wrap:wrap">Set '+(i+1)
+        +'<select data-hex="'+exIdx+'" data-hset="'+i+'" data-hfield="type" style="font-size:13px">'+typeOpts+'</select>'
+        +'<input type="number" inputmode="decimal" min="0" step="0.5" data-hex="'+exIdx+'" data-hset="'+i+'" data-hfield="weight" value="'+(s.weight||0)+'" style="width:56px;text-align:center">kg x';
+      if(hasSplitH){
+        html+='<input type="number" inputmode="numeric" min="0" step="1" data-hex="'+exIdx+'" data-hset="'+i+'" data-hfield="repsL" value="'+(s.repsL||0)+'" style="width:38px;text-align:center">/'
+          +'<input type="number" inputmode="numeric" min="0" step="1" data-hex="'+exIdx+'" data-hset="'+i+'" data-hfield="repsR" value="'+(s.repsR||0)+'" style="width:38px;text-align:center">reps(L/R)';
+      }else{
+        html+='<input type="number" inputmode="numeric" min="0" step="1" data-hex="'+exIdx+'" data-hset="'+i+'" data-hfield="reps" value="'+(s.reps||0)+'" style="width:48px;text-align:center">reps';
+      }
+      html+='<input type="number" inputmode="numeric" min="0" step="1" data-hex="'+exIdx+'" data-hset="'+i+'" data-hfield="rpe" value="'+(s.rpe!=null?s.rpe:'')+'" placeholder="'+rpeLabel+'" style="width:52px;text-align:center">'
+        +'</div>';
+    });
+  });
+  document.getElementById('history-detail-body').innerHTML=html;
+  document.getElementById('history-view-actions').style.display='none';
+  document.getElementById('history-edit-actions').style.display='flex';
+}
+function saveHistoryEdit(){
+  const w=(state.history||[]).find(h=>h&&h.id===historyEditWorkoutId);if(!w)return;
+  const mins=parseFloat(document.getElementById('history-edit-duration').value);
+  if(mins>=0)w.duration=Math.round(mins*60);
+  document.querySelectorAll('#history-detail-body [data-hfield]').forEach(inp=>{
+    const exIdx=+inp.dataset.hex,setIdx=+inp.dataset.hset,field=inp.dataset.hfield;
+    const ex=w.exercises[exIdx];if(!ex||!ex.sets[setIdx])return;
+    const set=ex.sets[setIdx];
+    if(field==='type'){
+      if(SET_TYPES.some(t=>t.id===inp.value))set.type=inp.value;
+      return;
+    }
+    if(field==='rpe'){
+      const raw=inp.value.trim();
+      if(raw==='')set.rpe=null;
+      else if(isFinite(+raw)&&+raw>=0)set.rpe=+raw;
+      return;
+    }
+    const val=field==='weight'?parseFloat(inp.value):parseInt(inp.value,10);
+    if(val>=0)set[field]=val;
+  });
+  invalidatePRCache();
+  window.__paceCache=null; // see the comment above enterHistoryEditMode — the one cache this can't self-invalidate
+  save();
+  renderHistory();
+  openHistoryDetail(historyEditWorkoutId);
 }
 // Small trend line for one exercise, using history up to and including `cutoffDate` only — a
 // snapshot of what the trend looked like AS OF that specific past workout, not the live trend.
