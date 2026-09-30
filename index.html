@@ -728,7 +728,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-28.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-28.3</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -9687,7 +9687,7 @@ function rankCandidatesForMuscle(muscle,excludeExId){
     const daysSinceRealTurn=getDaysSinceExerciseRealTurn(id);
     const lastFeedback=getLastNExerciseFeedback(id,1)[0];
     const recentPain=!!(lastFeedback&&lastFeedback.jointPain>=2);
-    return{exId:id,name:exData.name,muscle:exData.muscle,daysSinceTrained,daysSinceRealTurn,recentPain};
+    return{exId:id,name:exData.name,muscle:exData.muscle,daysSinceTrained,daysSinceRealTurn,recentPain,isCompound:isCompoundExercise(exData)};
   });
   // FIX TO AUTO ROUTINE (2026-08-28, user's explicit request): a pinned exercise sorts ahead of
   // the normal freshness ranking, so whenever growMuscleOneSet needs to introduce a new exercise
@@ -9701,6 +9701,16 @@ function rankCandidatesForMuscle(muscle,excludeExId){
     if(a.recentPain!==b.recentPain)return a.recentPain?1:-1;
     const aFixed=isAutoRoutineFixed(a.exId),bFixed=isAutoRoutineFixed(b.exId);
     if(aFixed!==bFixed)return aFixed?-1:1;
+    // READINESS-AWARE COMPOUND AVOIDANCE (2026-09-28, user's explicit request — "hard to face [a
+    // compound] during a bad day"): only a tiebreaker BELOW a pin, same reasoning as pain being the
+    // one thing allowed to override one — this is a preference, not a safety concern, so it shouldn't
+    // undo a deliberate standing choice. On a Rough/Wiped check-in, an isolation candidate sorts ahead
+    // of a compound one; a no-op on any normal day, and a no-op whenever both candidates are the same
+    // type anyway, so it never disturbs the freshness ordering below except when it's actually
+    // relevant. Same ranking backs both growMuscleOneSet and the manual Switch Exercise picker, so
+    // this applies wherever an exercise is actually being chosen for right now, not for a routine
+    // being edited in advance.
+    if(a.isCompound!==b.isCompound&&getAutoRoutineDailyReadinessFactor()<1)return a.isCompound?1:-1;
     const aTurn=a.daysSinceRealTurn==null?Infinity:a.daysSinceRealTurn;
     const bTurn=b.daysSinceRealTurn==null?Infinity:b.daysSinceRealTurn;
     if(aTurn!==bTurn)return bTurn-aTurn; // longest since a REAL turn (2+ sets) first
@@ -10299,6 +10309,41 @@ const AUTO_ROUTINE_ACTIVE_BLOCK_DAYS=42; // UPDATED 2026-09-04: was 28 (4wk) —
 function getAutoRoutineRawPoolMuscles(recKey){
   return new Set(Object.keys(state[recKey]||{}));
 }
+// EXPOSURE-BASED TENURE (2026-09-28, user's explicit request): AUTO_ROUTINE_ACTIVE_BLOCK_DAYS used to
+// evict a muscle from either pool purely on calendar days held, regardless of how many of those days
+// were actually trained. For someone with no fixed schedule, that let a muscle occupy a scarce slot
+// for its whole tenure window while a slow attendance stretch delivered only a fraction of the real
+// exposures a consistent stretch would have — the exact guarantee specialization exists to make.
+// Tenure is now counted in genuine exposures (a session where the muscle actually got a counted set,
+// same test as getExerciseVolumeCredit: type 'normal' or unset), targeting however many sessions the
+// OLD calendar window implied at THIS muscle's own ideal cadence — the original calibration carries
+// over, just reinterpreted in sessions instead of days, and it's the raw tier gap here (not the
+// priority-shortened one), since tenure is about the pool's own guarantee, not how the muscle happens
+// to be scheduled today. AUTO_ROUTINE_TENURE_DAYS_BACKSTOP is a generous multiple of the original
+// window: a hard outer bound so a muscle barely being trained at all still eventually frees its slot,
+// rather than camping it indefinitely while never accumulating enough exposures to evict on its own.
+const AUTO_ROUTINE_TENURE_DAYS_BACKSTOP=AUTO_ROUTINE_ACTIVE_BLOCK_DAYS*3;
+function getAutoRoutineMuscleExposuresSince(muscle,sinceISO){
+  const since=new Date(sinceISO).getTime();
+  if(!isFinite(since))return 0;
+  let n=0;
+  (state.history||[]).forEach(w=>{
+    if(!w||!w.date)return;
+    if(new Date(w.date).getTime()<since)return;
+    const hit=(w.exercises||[]).some(ex=>{
+      const exData=getExercise(ex.exId);
+      return exData&&exData.muscle===muscle&&(ex.sets||[]).some(s=>s&&s.done&&(!s.type||s.type==='normal'));
+    });
+    if(hit)n++;
+  });
+  return n;
+}
+function getAutoRoutineTenureExpired(muscle,sinceISO){
+  const ageDays=Math.round((Date.now()-new Date(sinceISO))/864e5);
+  if(ageDays>=AUTO_ROUTINE_TENURE_DAYS_BACKSTOP)return true;
+  const targetExposures=Math.max(4,Math.round(AUTO_ROUTINE_ACTIVE_BLOCK_DAYS/getMuscleTier(muscle).idealGapDays));
+  return getAutoRoutineMuscleExposuresSince(muscle,sinceISO)>=targetExposures;
+}
 function getAutoRoutineMrvActiveMuscles(){
   // MRV TRACK ON/OFF (2026-09-09, user's explicit request): "switch MEV to MRV off for now" — a
   // simple kill switch rather than deleting the whole track, so it's a one-tap toggle to bring back
@@ -10339,8 +10384,7 @@ function getAutoRoutineMrvActiveMuscles(){
   const isSlotValid=(mu)=>{
     if(!rec[mu])return false;
     if(mavMuscles.has(mu))return false;
-    const ageDays=Math.round((Date.now()-new Date(rec[mu]))/864e5);
-    if(ageDays>=AUTO_ROUTINE_ACTIVE_BLOCK_DAYS)return false;
+    if(getAutoRoutineTenureExpired(mu,rec[mu]))return false;
     if(overrideSet[mu]){
       const stillBlocked=isAutoRoutineMuscleStruggling(mu)||isAutoRoutineMuscleFullyResting(mu)||getAutoRoutineMuscleProgress(mu)>=getMuscleLandmarks(mu).mrv;
       if(!stillBlocked)delete overrideSet[mu];
@@ -10381,7 +10425,13 @@ function getAutoRoutineMrvActiveMuscles(){
       .filter(x=>x.score>0)
       .sort((a,b)=>b.score-a.score);
     const needed=AUTO_ROUTINE_MAX_ACTIVE_MUSCLES-keep.length;
-    keep=keep.concat(candidates.slice(0,needed).map(x=>x.mu));
+    // READINESS-GATED BACKFILL (2026-09-28, user's explicit request): a Rough/Wiped check-in already
+    // trims dose on already-active muscles (getAutoRoutineDailyReadinessFactor, applied in
+    // getMuscleExposureDose) but never touched which NEW muscle starts a specialization block — so a
+    // bad day could still commit a muscle to a fresh MRV run it then immediately undershoots. Only the
+    // count of NEW picks is suppressed here — an existing slot is never evicted or shrunk for this.
+    const backfillN=getAutoRoutineDailyReadinessFactor()<1?0:needed;
+    keep=keep.concat(candidates.slice(0,backfillN).map(x=>x.mu));
   }
   const newRec={};
   keep.forEach(mu=>{newRec[mu]=rec[mu]||new Date().toISOString();}); // keep an existing slot's real tenure start; stamp a genuinely new slot fresh
@@ -10417,8 +10467,7 @@ function getAutoRoutineMavActiveMuscles(){
   const isSlotValid=(mu)=>{
     if(!rec[mu])return false;
     if(mrvMuscles.has(mu))return false;
-    const ageDays=Math.round((Date.now()-new Date(rec[mu]))/864e5);
-    if(ageDays>=AUTO_ROUTINE_ACTIVE_BLOCK_DAYS)return false; // same tenure ceiling as the MRV pool — target-agnostic by design (handover's own note)
+    if(getAutoRoutineTenureExpired(mu,rec[mu]))return false; // same exposure-based tenure as the MRV pool (2026-09-28) — target-agnostic by design (handover's own note)
     if(overrideSet[mu]){ // self-expiring override (2026-09-11) — see MRV pool's matching comment
       const stillBlocked=isAutoRoutineMuscleStruggling(mu)||isAutoRoutineMuscleFullyResting(mu)||getAutoRoutineMuscleProgress(mu)>=getMuscleLandmarks(mu).mav;
       if(!stillBlocked)delete overrideSet[mu];
@@ -10451,7 +10500,11 @@ function getAutoRoutineMavActiveMuscles(){
     const last=state.autoRoutineMavStaggerLastPairStart;
     const dueDays=getAutoRoutineMavStaggerDays();
     const due=!last||((Date.now()-new Date(last))/864e5)>=dueDays;
-    if(due&&keep.length+AUTO_ROUTINE_MAV_PAIR_SIZE<=AUTO_ROUTINE_MAX_MAV_ACTIVE_MUSCLES){
+    // READINESS-GATED (2026-09-28, user's explicit request): same reasoning as the MRV pool's backfill
+    // gate — a new pair simply waits, same as it already does when room isn't available (due stays
+    // true, lastPairStart only updates on success), so it starts the next time this runs on a day
+    // that isn't Rough/Wiped rather than being skipped outright.
+    if(due&&keep.length+AUTO_ROUTINE_MAV_PAIR_SIZE<=AUTO_ROUTINE_MAX_MAV_ACTIVE_MUSCLES&&getAutoRoutineDailyReadinessFactor()>=1){
       // mrvMuscles: reused from the top of the function (2026-09-26), not recomputed here.
       const allMuscles=Object.keys(state.volumeLandmarks||{});
       const candidates=allMuscles
@@ -16742,6 +16795,16 @@ function renderReview(){
       sugg.push({i:'⏸️',t:'No new best in 4+ weeks on '+names.join(', ')+(more>0?' and '+more+' more':'')+' (see Personal Records). Worth a rep-range change, a swap, or a lighter week.'});
     }
   }catch(e){console.error('stalled-exercise insight failed:',e);}
+  // Chronic under-delivery (2026-09-28, user's explicit request): getUnderdeliveredMuscles() has been
+  // computing correctly since it was built but was never actually shown anywhere — this is that.
+  try{
+    const under=getUnderdeliveredMuscles().sort((a,b)=>a.ratio-b.ratio);
+    if(under.length){
+      const names=under.slice(0,3).map(u=>escHtml(u.muscle)+' ('+Math.round(u.ratio*100)+'%)');
+      const more=under.length-names.length;
+      sugg.push({i:'\uD83D\uDCC9',t:names.join(', ')+(more>0?' and '+more+' more':'')+' '+(under.length>1?'have':'has')+' been well under target for '+AUTO_ROUTINE_CHRONIC_WINDOW_WEEKS+'+ weeks. Worth lowering the target in Settings rather than the app quietly chasing a number that isn\u2019t landing.'});
+    }
+  }catch(e){console.error('underdelivered-muscle insight failed:',e);}
   c.innerHTML=statsHtml
     +'<div class="section-label">Volume Plan \u00B7 '+(getWeekPlanSessionsLeft()!=null?'by Sunday':'rolling '+AUTO_ROUTINE_LONG_WINDOW_DAYS+'-day')+'</div>'
     +'<div class="review-card" style="margin:0 16px 10px">'+getWeekPlanCardHtml()+'</div>'
