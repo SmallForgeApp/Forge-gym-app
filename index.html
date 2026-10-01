@@ -728,7 +728,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-28.3</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-29.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -11334,9 +11334,18 @@ function getMuscleExposureDose(muscle,activeSet,picks){
   const rollingPlusPull=Math.min(reactiveDose+pullForward,maxAllowedTotal);
   let longDose=0,longShare=0;
   if(remainingLongOrWeek>0){
+    // 2026-09-29: FIX — remainingLongOrWeek is scaled to the whole AUTO_ROUTINE_LONG_WINDOW_DAYS
+    // window (3 weeks' worth of target, by default), but idealSessionsPerWeek is a per-WEEK rate.
+    // Dividing the former by the latter directly (as this did until now) divided a 3-week amount by
+    // only 1 week's worth of sessions, inflating longBase by roughly LONG_WINDOW_DAYS/7 \u2014 about 3x at
+    // the default 21 days \u2014 any time this horizon was the binding one, which, because rollingBound
+    // already ties horizons 1+2 to within 1 set of it, was most of the time. The catch-up ceiling (\u00a72)
+    // was quietly absorbing this every session rather than it being a rare safety net. Scaling the rate
+    // up to match the window it's actually dividing fixes it at the source.
+    const longIdealSessions=weekPlanned?idealSessionsPerWeek:idealSessionsPerWeek*(AUTO_ROUTINE_LONG_WINDOW_DAYS/7);
     const longBase=weekPlanned
-      ?getAutoRoutineReactiveBaseDose(remainingLongOrWeek,info.exposureCap,idealSessionsPerWeek,true,getAutoRoutineSessionsLeftThisWeek(info.minGapDays))
-      :getAutoRoutineReactiveBaseDose(remainingLongOrWeek,info.exposureCap,idealSessionsPerWeek,false,null);
+      ?getAutoRoutineReactiveBaseDose(remainingLongOrWeek,info.exposureCap,longIdealSessions,true,getAutoRoutineSessionsLeftThisWeek(info.minGapDays))
+      :getAutoRoutineReactiveBaseDose(remainingLongOrWeek,info.exposureCap,longIdealSessions,false,null);
     const longRaw=Math.max(1,Math.round(longBase*scaleFactor));
     const longCeiling=Math.max(0,Math.min(
       Math.round(longWindowTarget*AUTO_ROUTINE_LOOKAHEAD_ROLLING_CEILING-deliveredLongOrWeek),
