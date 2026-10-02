@@ -728,7 +728,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-29.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-29.3</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -10703,9 +10703,28 @@ function getAutoRoutineActiveRampTarget(muscle,tenureStartISO,targetMode){
   const lm=getMuscleLandmarks(muscle);
   const targetVal=targetMode==='mav'?lm.mav:lm.mrv; // defaults to mrv — every pre-existing caller keeps its exact original behavior
   if(!tenureStartISO)return lm.mev; // no tenure record yet — shouldn't happen for an active muscle, but never regress below MEV if it does
+  // 2026-09-29, user's explicit request: exposure-based tenure (getAutoRoutineTenureExpired) can now
+  // let a muscle stay active well past AUTO_ROUTINE_RAMP_HARD_CAP_DAYS when attendance has been
+  // sparse — but this ramp used to hard-cap at full target on the calendar clock alone, so a muscle
+  // trained only, say, once every 10 days could hit "full target" after just 3-4 real sessions, then
+  // sit there demanding max volume for however much longer the now-extended tenure allowed. Hard cap
+  // is now tied to the SAME tenure-expiry check the pool eviction itself uses, rather than a flat 42
+  // days, so the two stay aligned for any attendance pattern, same as they always were for a
+  // consistent one. Below that, frac blends a calendar fraction with an exposure fraction (using the
+  // same exposure quota the tenure check computes, scaled down by the same 28/42 ratio the calendar
+  // ramp already uses against its own hard cap) and takes whichever is LOWER: for consistent
+  // attendance the two already track each other almost exactly, so this changes nothing; for sparse
+  // attendance, the exposure fraction becomes the binding one and the ramp slows to match real
+  // sessions instead of racing ahead of them. This deliberately does NOT make the ramp exposure-only —
+  // that was tried once already and rejected (a muscle trained weekly looked "weekly forever" and
+  // never completed a climb) — calFrac is still always in the mix as the normal-attendance pace.
+  if(getAutoRoutineTenureExpired(muscle,tenureStartISO))return targetVal;
   const elapsedDays=(Date.now()-new Date(tenureStartISO))/864e5;
-  if(elapsedDays>=AUTO_ROUTINE_RAMP_HARD_CAP_DAYS)return targetVal; // hard cap — no more waiting on pace
-  const frac=Math.max(0,Math.min(1,elapsedDays/AUTO_ROUTINE_RAMP_TARGET_DAYS));
+  const calFrac=Math.max(0,Math.min(1,elapsedDays/AUTO_ROUTINE_RAMP_TARGET_DAYS));
+  const targetExposures=Math.max(4,Math.round(AUTO_ROUTINE_ACTIVE_BLOCK_DAYS/getMuscleTier(muscle).idealGapDays));
+  const rampExposures=targetExposures*(AUTO_ROUTINE_RAMP_TARGET_DAYS/AUTO_ROUTINE_RAMP_HARD_CAP_DAYS);
+  const exposureFrac=rampExposures>0?Math.max(0,Math.min(1,getAutoRoutineMuscleExposuresSince(muscle,tenureStartISO)/rampExposures)):1;
+  const frac=Math.min(calFrac,exposureFrac);
   return lm.mev+frac*(targetVal-lm.mev);
 }
 function advanceAutoRoutineMuscleProgress(trainedMuscles){
@@ -11347,9 +11366,18 @@ function getMuscleExposureDose(muscle,activeSet,picks){
       ?getAutoRoutineReactiveBaseDose(remainingLongOrWeek,info.exposureCap,longIdealSessions,true,getAutoRoutineSessionsLeftThisWeek(info.minGapDays))
       :getAutoRoutineReactiveBaseDose(remainingLongOrWeek,info.exposureCap,longIdealSessions,false,null);
     const longRaw=Math.max(1,Math.round(longBase*scaleFactor));
-    const longCeiling=Math.max(0,Math.min(
+    // 2026-09-29: FIX, same root cause as longBase above — this was comparing a WINDOW-TOTAL headroom
+    // figure (sets of room left across the whole 21-day window) directly against longRaw, a
+    // PER-SESSION dose. For the unplanned case that made the ceiling about 7x looser than it needed to
+    // be (as many sessions as the window expects), so it essentially never bound — it wasn't wrong, it
+    // just wasn't actually constraining anything anymore once longBase stopped being inflated by the
+    // longBase bug. Dividing by the same longIdealSessions brings it back to per-session terms so it's
+    // finally comparable to what it's capping, matching what it already was for a week-planned week
+    // (where the window IS one session-scale week, so this correction is a no-op there).
+    const longWindowHeadroom=Math.min(
       Math.round(longWindowTarget*AUTO_ROUTINE_LOOKAHEAD_ROLLING_CEILING-deliveredLongOrWeek),
-      Math.round(getMuscleLandmarks(muscle).mrv-delivered)));
+      Math.round(getMuscleLandmarks(muscle).mrv-delivered));
+    const longCeiling=Math.max(0,weekPlanned?longWindowHeadroom:Math.round(longWindowHeadroom/longIdealSessions));
     longDose=Math.min(longRaw,longCeiling);
     longShare=longBase;
   }
