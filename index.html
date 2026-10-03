@@ -735,7 +735,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-29.4</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-29.5</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -976,7 +976,13 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
     <div class="modal-body">
-      <div class="small text3 mb8">Builds today's session from your Auto Routine exercise pool — no active mesocycle required. Each muscle only shows up if it's actually due (past its own recovery gap since last trained — shorter when last time was only a set or two), and gets a per-exposure dose sized for its own recovery speed, already accounting for any indirect/secondary credit it's picked up elsewhere this week. Up to 2 muscles at a time are auto-selected by readiness and ramp from MEV to MRV over about 4 weeks (hard-capped by 6); everyone else holds at MEV. Leave both fields below blank and it fills a session with everything due today (topped up to at least 10 sets if genuinely-eligible work allows); set Minutes OR Sets and it trims or fills to fit that instead — only one can be active at a time. You'll always get a warning (not a hard block) if the result still looks unusually long.</div>
+      <!-- 2026-09-29, user's explicit request: the full explanation was always-visible, dense text —
+           collapsed behind a tap now, same wording, nothing cut. -->
+      <div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:8px">
+        <div class="small text3" style="flex:1">Builds today's session from your Auto Routine exercise pool — no active mesocycle required.</div>
+        <span style="cursor:pointer;font-size:16px;line-height:1.3;flex-shrink:0" onclick="toggleAutoSessionInfo()" id="auto-session-info-toggle" role="button" aria-label="More about how this works">\u2139\uFE0F</span>
+      </div>
+      <div class="small text3 mb8" id="auto-session-info-full" style="display:none">Each muscle only shows up if it's actually due (past its own recovery gap since last trained — shorter when last time was only a set or two), and gets a per-exposure dose sized for its own recovery speed, already accounting for any indirect/secondary credit it's picked up elsewhere this week. Up to 2 muscles at a time are auto-selected by readiness and ramp from MEV to MRV over about 4 weeks (hard-capped by 6); everyone else holds at MEV. Leave both fields below blank and it fills a session with everything due today (topped up to at least 10 sets if genuinely-eligible work allows); set Minutes OR Sets and it trims or fills to fit that instead — only one can be active at a time. You'll always get a warning (not a hard block) if the result still looks unusually long.<div class="mt8" id="auto-session-pace-note"></div></div>
       <div class="small text2" id="auto-session-week-plan" style="margin:12px 0 12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg3);font-size:13px;line-height:1.4"></div>
       <div class="small text2" id="auto-session-readiness" style="margin:0 0 12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg3);font-size:13px;line-height:1.4"></div>
       <div class="input-label">Minutes available (optional)</div>
@@ -10875,10 +10881,6 @@ function getAutoRoutineDailyReadinessFactor(){
   if(!r||r.dayIndex!==getAppDayIndex())return 1; // not checked in today (or a stale earlier day) — no adjustment
   return AUTO_ROUTINE_READINESS_FACTORS[r.level]!=null?AUTO_ROUTINE_READINESS_FACTORS[r.level]:1;
 }
-function needsDailyReadinessPrompt(){
-  const r=state.autoRoutineDailyReadiness;
-  return !r||r.dayIndex!==getAppDayIndex();
-}
 function setDailyReadiness(level){
   state.autoRoutineDailyReadiness={dayIndex:getAppDayIndex(),level};
   save();
@@ -12351,10 +12353,14 @@ function openAutoSessionModal(mesoIdx){
   // First time the Auto Session screen is opened in a calendar week (no plan chosen yet, and there is still
   // volume to plan): put the week-plan chooser on top. Wrapped so a planning failure can never stop a session starting.
   try{if(needsWeekPlanPrompt())openWeekPlanModal();}catch(e){console.error('week plan prompt failed:',e);}
-  // Same idea, at DAY granularity (2026-09-25, user's explicit request) — opened after the week-plan
-  // check, so if both fire on the same tap the readiness prompt (opened last) naturally lands on top via
-  // the existing open-order z-index stacking; closing it reveals the week-plan modal still open beneath.
-  try{if(needsDailyReadinessPrompt())openDailyReadinessModal();}catch(e){console.error('daily readiness prompt failed:',e);}
+  // 2026-09-29, user's explicit request: opens every time Auto Session is entered now, not just once
+  // per calendar day — same reasoning as it ever being askable again applies to asking again, since how
+  // you're feeling can change within a day. setDailyReadiness already just overwrites today's stored
+  // level on each answer, so re-answering later the same day simply replaces the earlier one; nothing
+  // else needed changing. Opened after the week-plan check, so if both fire on the same tap the
+  // readiness prompt (opened last) naturally lands on top via the existing open-order z-index stacking;
+  // closing it reveals the week-plan modal still open beneath.
+  try{openDailyReadinessModal();}catch(e){console.error('daily readiness prompt failed:',e);}
 }
 // Home screen entry point (2026-08-21, user's explicit request for a dedicated home-screen
 // button) — reuses the exact same "find the active meso" logic renderActiveMesoHero already uses,
@@ -12667,8 +12673,14 @@ function getDefaultAutoSessionMinutes(){
 function renderAutoSessionEstimate(){
   const el=document.getElementById('auto-session-default-estimate');
   if(!el)return;
-  el.innerHTML='Default if left blank: '+formatMinutesRange(getDefaultAutoSessionEstimate())+' (everything due today, per the explanation above)'
-    +'<div style="margin-top:3px">'+getPaceNoteText()+'</div>';
+  el.innerHTML='Default if left blank: '+formatMinutesRange(getDefaultAutoSessionEstimate());
+  const paceEl=document.getElementById('auto-session-pace-note');
+  if(paceEl)paceEl.innerHTML=getPaceNoteText(); // lives inside the collapsible info panel now, not always visible
+}
+function toggleAutoSessionInfo(){
+  const el=document.getElementById('auto-session-info-full');
+  if(!el)return;
+  el.style.display=el.style.display==='none'?'block':'none';
 }
 // BUG FIX (found via external test handover, same day): this used to synthesize a numeric budget
 // even when the field was left blank (falling back to getDefaultAutoSessionMinutes()) and pass
