@@ -147,6 +147,13 @@ select option{background:var(--bg3);}textarea{resize:none;min-height:70px;}
 .workout-name-input:focus{outline:none;}
 .workout-stats{display:flex;gap:12px;margin-top:4px;flex-wrap:wrap;}
 .workout-stat{font-size:11px;color:var(--text2);}.workout-stat span{color:var(--text);font-weight:600;}
+/* 2026-09-29, user's explicit request: #workout-duration ticks every second (see the workoutTimer
+   setInterval) and, as a plain inline span with no reserved width, its own changing digit count
+   (0:05 -> 0:06, or 9:59 -> 10:00) was shifting every .workout-stat after it — Vol, Sets, Effort —
+   once a second. Tabular-nums keeps every digit the same width, and the min-width (sized for up to
+   99:59, well past any realistic session) keeps the box itself from growing when the minute count
+   gains a second digit, so nothing to its right ever moves once the workout starts. */
+#workout-duration{display:inline-block;min-width:34px;font-variant-numeric:tabular-nums;}
 .exercise-card{background:var(--bg2);margin:0 16px 12px;border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);}
 .exercise-header{padding:12px 16px 8px;display:flex;align-items:flex-start;justify-content:space-between;}
 .exercise-header{padding:12px 16px 8px;display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}
@@ -728,7 +735,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-29.3</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-09-29.4</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -9005,36 +9012,15 @@ function getSetAtSessionsAgo(exId,setIdx,n,routineId){
 // ceiling with room to spare is trusted immediately — no need to wait for a second session to
 // "confirm" it the way cross-session progression does, since we just watched it happen.
 function getLiveProgressionTarget(loggedSet,workoutEx,exData,exId,setIdx,routineId){
-  const range=(workoutEx&&workoutEx.repRange&&workoutEx.repRange.max)?workoutEx.repRange:DEFAULT_REP_RANGE;
+  // 2026-09-29, user's explicit request: a later set should prefill at exactly what the set before it
+  // actually got, not an escalating target. Reasoning given: the best set comes first by design (see
+  // getSetTarget's own set-1 comment below), so every set after it is naturally expected to come in
+  // lower as fatigue accumulates — matching the set before it is already a strong result on its own,
+  // not a floor to beat. Replaces the previous ceiling-hit weight bump and the default "+1 rep unless
+  // near failure or a historical decline" escalation with a flat carry-forward of whatever was just
+  // logged. Signature unchanged so the call site in getSetTarget needs no changes.
   const isUni=!!(exData&&exData.uni);
-  const isBW=!!(exData&&exData.bw==='bw');
-  const inc=getEquipmentIncrement(exData||{});
-  const useRIR=!!loggedSet.useRIR;
-  const raw=loggedSet.rpe;
-  const rpeEq=raw!=null?(useRIR?(10-raw):raw):null;
-  const hasRoom=rpeEq==null||rpeEq<=8;
-  const w=loggedSet.weight||0;
-  const repsMetric=repsMetricOf(loggedSet);
-  if(!isBW&&inc&&repsMetric>=range.max&&hasRoom){
-    const targetWeight=Math.round((w+inc)*100)/100;
-    return isUni?{weight:targetWeight,repsL:range.min,repsR:range.min}:{weight:targetWeight,reps:range.min};
-  }
-  // Below the ceiling — mirrors suggestNextLoad's own full logic (not just its headline "+1
-  // rep" case): a same-session live anchor is real evidence, but blindly adding a rep through
-  // set 3, 4, 5 ignores both how hard the set that was just done already felt, and how this
-  // exact slot has performed historically. Hold at today's own number (not a forced reduction —
-  // matching what was just done, on a later, more fatigued set, is still real progress) whenever
-  // either signal says to back off: near failure already (RIR<=1/RPE>=9), or this slot has
-  // historically done fewer reps than what was just hit live. Otherwise, add a rep.
-  const nearFailure=rpeEq!=null&&rpeEq>=9;
-  let holdInstead=false;
-  if(setIdx>0){
-    const priorSameSlot=getSetAtSessionsAgo(exId,setIdx,1,routineId);
-    const priorSlotReps=priorSameSlot?repsMetricOf(priorSameSlot):null;
-    if(nearFailure||(priorSlotReps!=null&&repsMetric<priorSlotReps))holdInstead=true;
-  }
-  const targetReps=holdInstead?repsMetric:repsMetric+1;
-  return isUni?{weight:w,repsL:targetReps,repsR:targetReps}:{weight:w,reps:targetReps};
+  return isUni?{weight:loggedSet.weight||0,repsL:loggedSet.repsL,repsR:loggedSet.repsR}:{weight:loggedSet.weight||0,reps:repsMetricOf(loggedSet)};
 }
 // Re-derives the SAME meso override (RIR-ramp reps / pending-reset-baseline weight+reps during
 // training, or the deload-reduced weight+reps during an active deload) that startRoutineWorkout
