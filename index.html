@@ -428,9 +428,6 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
         <div style="font-family:'Bebas Neue',sans-serif;font-size:36px;letter-spacing:3px;color:var(--accent);line-height:1;">FORGE</div>
         <div style="font-size:13px;color:var(--text2);margin-top:4px;">Home</div>
       </div>
-      <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
-        <button class="icon-btn" onclick="toggleTheme()" id="theme-btn">🌙</button>
-      </div>
     </div>
   </div>
   <div class="scroll pb" id="home-scroll" style="display:flex;flex-direction:column;">
@@ -650,8 +647,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
       <div class="section-label">Display</div>
       <div style="padding:0 16px 14px">
-        <button class="btn btn-ghost btn-full" onclick="toggleTheme()">🌙 Toggle Dark / Light Mode</button>
-        <div class="input-label mt12">Accent Color</div>
+        <div class="input-label">Accent Color</div>
         <div style="display:flex;align-items:center;gap:12px;margin-top:4px">
           <input type="color" id="accent-color-input" value="#D97757" oninput="saveAccentColor(this.value)" style="width:52px;height:40px;padding:2px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);cursor:pointer"/>
           <button class="btn btn-ghost flex-1" onclick="saveAccentColor('#D97757')">Reset to Claude Orange</button>
@@ -3491,10 +3487,6 @@ function clearAllPhysioHistory(){
     renderPhysioHistoryList();
   },{okLabel:'Clear All',danger:true});
 }
-function toggleTheme(){
-  document.body.classList.toggle('light-mode',state.lightMode);
-  document.getElementById('theme-btn').textContent=state.lightMode?'☀️':'🌙';
-}
 
 // ── INIT ──
 // ── INLINE SVG ICONS (fully offline) ──
@@ -4094,7 +4086,6 @@ function saveAccentColor(hex){
   save();
   renderProgressChart(); // live-refresh the chart's line color if it's currently on screen
 }
-document.getElementById('theme-btn').textContent=state.lightMode?'☀️':'🌙';
 
 // ── ROUTINE EDITOR ──
 
