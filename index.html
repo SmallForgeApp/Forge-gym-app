@@ -731,7 +731,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-10-04.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-10-05.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -919,7 +919,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
   <div class="modal"><div class="modal-handle"></div>
     <div class="modal-title">Auto Routine Exercise Pool</div>
     <div class="modal-body">
-      <div class="small text3 mb8">Only exercises checked here are ever candidates for Auto Routine — separate from what's in your fixed routines, so you control exactly what it's allowed to pick. Tap 📌 on any exercise to always use it for its muscle instead of letting freshness-rotation choose.</div>
+      <div class="small text3 mb8">Only exercises checked here are ever candidates for Auto Routine — separate from what's in your fixed routines, so you control exactly what it's allowed to pick. Tap 📌 on any exercise to always use it for its muscle instead of letting freshness-rotation choose. Tap ⇅ to make one come up more (▲) or less (▼) often than the others for its muscle — it still rotates, just weighted.</div>
       <div id="auto-routine-pool-tabs" style="display:flex;gap:6px;margin-bottom:8px"></div>
       <div id="auto-routine-pool-list" style="max-height:52vh;overflow-y:auto"></div>
     </div>
@@ -2462,6 +2462,7 @@ function load(){
   if(!state.autoRoutineMuscleProgress)state.autoRoutineMuscleProgress={};
   if(!state.autoRoutineActiveMuscles||Array.isArray(state.autoRoutineActiveMuscles.muscles))state.autoRoutineActiveMuscles={};
   if(!state.autoRoutineFixedExIds)state.autoRoutineFixedExIds=[];
+  if(!state.autoRoutineFreq)state.autoRoutineFreq={};
   Object.keys(state.volumeLandmarks).forEach(m=>{if(!state.musclePriority[m])state.musclePriority[m]='normal';});
   if(!state.homeLayout)state.homeLayout=['meso','startEmpty','chart'];
   if(state.activeMesoId===undefined)state.activeMesoId=null;
@@ -3997,6 +3998,10 @@ function savePoolExerciseEdit(){
   if(resolved.id!==oldExId&&state.autoRoutineFixedExIds&&state.autoRoutineFixedExIds.includes(oldExId)){
     state.autoRoutineFixedExIds=state.autoRoutineFixedExIds.filter(id=>id!==oldExId);
     state.autoRoutineFixedExIds.push(resolved.id);
+  }
+  if(resolved.id!==oldExId&&state.autoRoutineFreq&&state.autoRoutineFreq[oldExId]){
+    state.autoRoutineFreq[resolved.id]=state.autoRoutineFreq[oldExId];
+    delete state.autoRoutineFreq[oldExId];
   }
   // Same transfer for tracker (2026-09-11) — an exercise being tracked shouldn't lose that just
   // because it got edited/replaced with a new id.
@@ -9649,6 +9654,23 @@ function toggleAutoRoutineTracker(exId,muscle){
   save();
   renderAutoRoutinePoolList();
 }
+// FREQUENCY WEIGHT (2026-10-05, user's explicit request — "select exercises to turn up more frequently", after diamond push-ups kept
+// coming up more than wanted): a per-exercise Less / Normal / More setting, stored as state.autoRoutineFreq[exId]='less'|'more'
+// (absent = Normal). Unlike a pin it never forces anything — it only scales how long an exercise "looks" like it has waited in the
+// freshness round-robin below (More = due in about half the time, Less = about double), so within a muscle a More exercise comes
+// up roughly twice as often as a Normal one and a Less one roughly half as often. Pain and pins still win over it.
+const AUTO_ROUTINE_FREQ_WEIGHT={less:0.5,normal:1,more:2};
+function getAutoRoutineFreq(exId){
+  const v=state.autoRoutineFreq&&state.autoRoutineFreq[exId];
+  return(v==='more'||v==='less')?v:'normal';
+}
+function cycleAutoRoutineFreq(exId){
+  if(!state.autoRoutineFreq)state.autoRoutineFreq={};
+  const next={normal:'more',more:'less',less:'normal'}[getAutoRoutineFreq(exId)];
+  if(next==='normal')delete state.autoRoutineFreq[exId];else state.autoRoutineFreq[exId]=next;
+  save();
+  renderAutoRoutinePoolList();
+}
 function rankCandidatesForMuscle(muscle,excludeExId){
   const candidateIds=new Set();
   if(state.autoRoutinePool&&state.autoRoutinePool.length){
@@ -9694,13 +9716,15 @@ function rankCandidatesForMuscle(muscle,excludeExId){
     // this applies wherever an exercise is actually being chosen for right now, not for a routine
     // being edited in advance.
     if(a.isCompound!==b.isCompound&&getAutoRoutineDailyReadinessFactor()<1)return a.isCompound?1:-1;
-    const aTurn=a.daysSinceRealTurn==null?Infinity:a.daysSinceRealTurn;
-    const bTurn=b.daysSinceRealTurn==null?Infinity:b.daysSinceRealTurn;
-    if(aTurn!==bTurn)return bTurn-aTurn; // longest since a REAL turn (2+ sets) first
-    const aDays=a.daysSinceTrained==null?Infinity:a.daysSinceTrained;
-    const bDays=b.daysSinceTrained==null?Infinity:b.daysSinceTrained;
+    // Never-turned exercises count as 365 days so the frequency weight still orders them (Infinity * anything is Infinity).
+    const aW=AUTO_ROUTINE_FREQ_WEIGHT[getAutoRoutineFreq(a.exId)],bW=AUTO_ROUTINE_FREQ_WEIGHT[getAutoRoutineFreq(b.exId)];
+    const aTurn=(a.daysSinceRealTurn==null?365:a.daysSinceRealTurn)*aW;
+    const bTurn=(b.daysSinceRealTurn==null?365:b.daysSinceRealTurn)*bW;
+    if(aTurn!==bTurn)return bTurn-aTurn; // longest (frequency-weighted) since a REAL turn (2+ sets) first
+    const aDays=(a.daysSinceTrained==null?365:a.daysSinceTrained)*aW;
+    const bDays=(b.daysSinceTrained==null?365:b.daysSinceTrained)*bW;
     if(aDays!==bDays)return bDays-aDays; // then longest since ANY set (a never-trained exercise beats one that got a single set yesterday)
-    return 0;
+    return bW-aW; // still tied (e.g. both trained today): the More one goes first
   });
   return list;
 }
@@ -12219,6 +12243,7 @@ function toggleAutoRoutinePoolExercise(exId){
         if(state.autoRoutineMuscleTracker[mu]===exId)delete state.autoRoutineMuscleTracker[mu];
       });
     }
+    if(state.autoRoutineFreq)delete state.autoRoutineFreq[exId]; // frequency setting only means something for a pool candidate
   }else{
     state.autoRoutinePool.push(exId);
   }
@@ -12309,11 +12334,15 @@ function renderAutoRoutinePoolList(){
       const checked=pool.has(ex.id);
       const fixed=isAutoRoutineFixed(ex.id);
       const tracked=isAutoRoutineTracker(ex.id,muscle);
+      const freq=getAutoRoutineFreq(ex.id);
+      const freqLabel={more:'▲ More',less:'▼ Less',normal:'⇅'}[freq];
+      const freqBtn=checked?'<button class="btn btn-ghost btn-sm" style="flex-shrink:0;padding:4px 8px'+(freq!=='normal'?';color:var(--accent)':'')+'" onclick="event.stopPropagation();cycleAutoRoutineFreq(\''+ex.id+'\')" title="How often this comes up vs other '+escHtml(muscle)+' exercises — tap to cycle Normal / More / Less">'+freqLabel+'</button>':'';
       return'<div style="display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid var(--border)">'
         +'<div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0" onclick="toggleAutoRoutinePoolExercise(\''+ex.id+'\')">'
           +'<input type="checkbox" '+(checked?'checked':'')+' style="width:auto;pointer-events:none;flex-shrink:0"/>'
           +'<div class="small" style="min-width:0">'+escHtml(ex.name)+'</div>'
         +'</div>'
+        +freqBtn
         +'<button class="btn btn-ghost btn-sm" style="flex-shrink:0;padding:4px 8px" onclick="event.stopPropagation();openEditPoolExerciseModal(\''+ex.id+'\')" title="Edit this exercise">✏️</button>'
         +'<button class="btn btn-ghost btn-sm" style="flex-shrink:0;padding:4px 8px'+(fixed?';color:var(--accent)':'')+'" onclick="event.stopPropagation();toggleAutoRoutineFixed(\''+ex.id+'\')" title="'+(fixed?'Unfix':'Always use this one for '+escHtml(muscle))+'">'+(fixed?'📌 Fixed':'📌')+'</button>'
         +'<button class="btn btn-ghost btn-sm" style="flex-shrink:0;padding:4px 8px'+(tracked?';color:var(--accent)':'')+'" onclick="event.stopPropagation();toggleAutoRoutineTracker(\''+ex.id+'\',\''+muscle+'\')" title="'+(tracked?'Stop tracking':'Track this one\u2019s progress for '+escHtml(muscle)+'\u2019s struggling check (no ranking change, just what data gets compared)')+'">'+(tracked?'🎯 Tracking':'🎯')+'</button>'
@@ -15390,6 +15419,10 @@ function rewireAutoRoutineExerciseRefs(oldId,newId){
       if(state.autoRoutinePool.includes(newId))state.autoRoutinePool.splice(i,1);
       else state.autoRoutinePool[i]=newId;
     }
+  }
+  if(state.autoRoutineFreq&&state.autoRoutineFreq[oldId]){
+    if(!state.autoRoutineFreq[newId])state.autoRoutineFreq[newId]=state.autoRoutineFreq[oldId]; // survivor keeps its own setting if it has one
+    delete state.autoRoutineFreq[oldId];
   }
   if(Array.isArray(state.autoRoutineFixedExIds)){
     const i=state.autoRoutineFixedExIds.indexOf(oldId);
