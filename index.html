@@ -731,7 +731,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-10-05.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-10-05.3</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -9096,7 +9096,7 @@ function getSetTarget(exId,workoutEx,setIdx,exData,routineId){
   const hasRoom=rpeEq==null||rpeEq<=8;
   const isBW=!!(exData&&exData.bw==='bw');
   const inc=getEquipmentIncrement(exData||{});
-  const w=ps.weight||0;
+  const w=isBW?0:(ps.weight||0);
   // For unilateral work, progress off the weaker side so both sides genuinely earn the next jump
   const repsMetric=repsMetricOf(ps);
   let targetWeight,targetReps;
@@ -9368,7 +9368,7 @@ function suggestNextLoad(exId,workoutEx,routineId){
   if(!first||(!first.weight&&!first.reps&&!first.repsL&&!first.repsR))return null;
   const exData=getExercise(exId)||{};
   const hasSplit=first.repsL!=null||first.repsR!=null;
-  const w=first.weight||0;
+  const w=(exData&&exData.bw==='bw')?0:(first.weight||0); // reps-only exercises never suggest/show a kg figure, even if old data holds one
   // Unilateral sets store reps as the L+R sum (for volume/history purposes) — using that
   // directly against a per-side rep-range target inflates the count and wrongly suggests
   // increasing weight. Progress off the weaker side instead, same as getSetTarget/comparePerf.
@@ -9788,6 +9788,9 @@ function performExerciseSwitch(exIdx,newExId){
       s={...s,weight:target.weight,reps:target.reps,repsL:target.repsL,repsR:target.repsR};
       s.autoWeight=true;s.autoReps=true;s.autoRepsL=true;s.autoRepsR=true;
     }
+    // BODYWEIGHT FIX (2026-10-05): a reps-only exercise has no weight box, so a kg carried over from the exercise switched away from
+    // (e.g. weighted pull-up -> bodyweight pull-up) could never be seen or edited, yet was logged and counted as volume.
+    if(newExData.bw==='bw'){s.weight=0;s.autoWeight=false;}
     sets.push(s);
   }
   const oldExData=getExercise(ex.exId);
@@ -12845,6 +12848,7 @@ function renderSets(exIdx){
   // numbered <tr> in this loop.
   let displayNum=0,lastWasDropset=false;
   ex.sets.forEach((set,setIdx)=>{
+    if(isBW&&set.weight){set.weight=0;set.autoWeight=false;} // reps-only exercise: weight box is hidden, so a stray carried-over kg must not be logged
     if(!(set.type==='dropset'&&lastWasDropset))displayNum++;
     lastWasDropset=(set.type==='dropset');
     const tr=document.createElement('tr');
@@ -13178,6 +13182,12 @@ function toggleSetDone(exIdx,setIdx){
     if(inputs[rIdx]&&!set.repsR&&inputs[rIdx].placeholder&&inputs[rIdx].placeholder!=='—'){set.repsR=parseFloat(inputs[rIdx].placeholder)||0;inputs[rIdx].value=set.repsR;}
     if(!isBW2&&inputs[0]&&!set.weight&&inputs[0].placeholder&&inputs[0].placeholder!=='—'){set.weight=parseFloat(inputs[0].placeholder)||0;inputs[0].value=set.weight;}
     set.reps=(set.repsL||0)+(set.repsR||0);
+  }else if(isBW2){
+    // ROOT CAUSE of "bodyweight pull-ups recorded as weighted" (2026-10-05): a reps-only exercise has no weight box, so inputs[0] here is the
+    // REPS box, but the generic branch below read inputs[0] as the weight — ticking a set with the weight "blank" copied the reps target
+    // (e.g. 15) into set.weight as kg. The reps box is the only input for these, so fill reps from it and never set a weight.
+    if(inputs[0]&&!set.reps&&inputs[0].placeholder&&inputs[0].placeholder!=='—'){set.reps=parseFloat(inputs[0].placeholder)||0;inputs[0].value=set.reps;}
+    set.weight=0;set.autoWeight=false;
   }else{
     if(inputs[0]&&!set.weight&&inputs[0].placeholder&&inputs[0].placeholder!=='—'){set.weight=parseFloat(inputs[0].placeholder)||0;inputs[0].value=set.weight;}
     if(inputs[1]&&!set.reps&&inputs[1].placeholder&&inputs[1].placeholder!=='—'){set.reps=parseFloat(inputs[1].placeholder)||0;inputs[1].value=set.reps;}
