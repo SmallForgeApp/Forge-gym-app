@@ -731,7 +731,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-10-05.3</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-10-27.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -16402,7 +16402,7 @@ function getMuscleWeekPlan(muscle){
   const windowTarget=aim*(windowDays/7);
   const remaining=Math.max(0,Math.round((windowTarget-delivered)*10)/10);
   const daysLeft=getCalendarWeekDaysLeft();
-  const out={muscle,aim,remaining,needed:0,possible:0,sessions:0,lastDay:0,typicalDose:0,biggerSessions:false,shortfall:0,directOnly:isPriority,daysLeft,planned,windowDays};
+  const out={muscle,aim,remaining,delivered:Math.round(delivered*10)/10,needed:0,possible:0,sessions:0,lastDay:0,typicalDose:0,biggerSessions:false,shortfall:0,directOnly:isPriority,daysLeft,planned,windowDays};
   if(remaining<=0)return out;
   if(!planned){
     out.typicalDose=getAutoRoutineNormalSessionDose(aim,info);
@@ -16786,19 +16786,25 @@ function renderReview(){
     const plan=getMuscleWeekPlan(m);
     const remaining=plan.remaining;
     const pl=n=>n!==1?'s':'';
+    // 2026-10-27 (user: "more left than the shortfall of my aim"): the gauge above is the TRAILING 7 days, which still holds
+    // last week's sets, but this line counts from Monday 04:30 GMT (its sets-to-go = Aim minus what's been done THIS calendar
+    // week), so the two could never agree and nothing said why. The line now states its own tally so done + to-go = Aim.
+    let weekTally='';
+    if(plan.planned&&remaining>0){
+      const gaugeGap=Math.max(0,Math.round((target-getMuscleVolumeBreakdownSince(m,getCalendarWeekStart()).direct-getMuscleVolumeBreakdownSince(m,getCalendarWeekStart()).indirect)*10)/10);
+      weekTally='Since Monday: '+plan.delivered+' of '+Math.round(plan.aim*10)/10+(plan.directOnly&&Math.abs(remaining-gaugeGap)>0.05?' (direct sets only)':'')+' \u00b7 ';
+    }
     let planLine='';
     if(remaining>0){
       if(!plan.planned){
         planLine='About '+remaining+' set'+pl(remaining)+' behind pace over the last '+plan.windowDays+' days';
       }else if(plan.sessions>0){
-        planLine='By Sunday: '+remaining+' set'+pl(remaining)+' to go \u2014 about '+plan.sessions+' more workout'+pl(plan.sessions)
+        planLine=weekTally+remaining+' set'+pl(remaining)+' to go by Sunday \u2014 about '+plan.sessions+' more workout'+pl(plan.sessions)
           +(plan.biggerSessions?' (bigger than usual, up to '+plan.cap+' sets each)':'');
       }else{
-        planLine='By Sunday: '+remaining+' set'+pl(remaining)+' to go \u2014 no more sessions left that '+m+' can be trained in';
+        planLine=weekTally+remaining+' set'+pl(remaining)+' to go by Sunday \u2014 no more sessions left that '+m+' can be trained in';
       }
       if(plan.planned){
-        const gaugeGap=Math.max(0,Math.round((target-getMuscleVolumeBreakdownSince(m,getCalendarWeekStart()).direct-getMuscleVolumeBreakdownSince(m,getCalendarWeekStart()).indirect)*10)/10);
-        if(plan.directOnly&&Math.abs(remaining-gaugeGap)>0.05)planLine+=' (direct sets only)';
         if(plan.shortfall>0)planLine+=' \u2014 <span style="color:var(--orange)">about '+plan.shortfall+' set'+pl(plan.shortfall)+' short even at the per-session max</span>';
       }
     }
