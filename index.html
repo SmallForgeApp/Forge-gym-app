@@ -731,7 +731,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-10-27.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-10-28.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -16599,6 +16599,20 @@ function renderAutoSessionWeekPlanRow(){
     el.innerHTML='\uD83D\uDCC5 '+link('Plan this week\u2019s sessions');
   }
 }
+// 2026-10-28 (user: Review said "Light week \u2014 you can ease off" while 7 of 9 muscles were under aim): the card's session
+// count only looked at the single hungriest muscle, as if one session could carry every muscle's dose at once. This is the
+// size of a normal session for this user \u2014 done sets per workout over the last 28 days, never below the builder's own floor.
+function getUsualSessionSets(){
+  const since=Date.now()-28*86400000;
+  let sets=0,n=0;
+  (state.history||[]).forEach(w=>{
+    if(!w||new Date(w.date).getTime()<since)return;
+    let c=0;
+    (w.exercises||[]).forEach(e=>(e.sets||[]).forEach(st=>{if(st&&st.done)c++;}));
+    if(c>0){sets+=c;n++;}
+  });
+  return Math.max(AUTO_ROUTINE_MIN_SESSION_SETS,n?Math.round(sets/n):0);
+}
 function getWeekPlanSummary(){
   const plans=[];
   Object.keys(state.volumeLandmarks||{}).forEach(m=>{
@@ -16611,7 +16625,12 @@ function getWeekPlanSummary(){
   const planLeft=getWeekPlanSessionsLeft();
   const planned=planLeft!=null;
   const expected=planned?Math.max(1,Math.min(daysLeft+1,planLeft)):null;
-  const needed=planned?plans.reduce((a,p)=>Math.max(a,p.sessions),0):0;
+  const muscleNeeded=planned?plans.reduce((a,p)=>Math.max(a,p.sessions),0):0;
+  const totalLeft=Math.round(plans.reduce((a,p)=>a+p.remaining,0)*10)/10;
+  const usual=getUsualSessionSets();
+  const bySize=planned&&totalLeft>0?Math.ceil(totalLeft/usual-1e-9):0;
+  const needed=Math.max(muscleNeeded,bySize);
+  const sizeDriven=bySize>muscleNeeded;
   const weekStart=getCalendarWeekStart();
   let hitRolling=0,hitWeek=0;
   plans.forEach(p=>{
@@ -16620,7 +16639,7 @@ function getWeekPlanSummary(){
     if(b.direct+b.indirect>=p.aim-0.05)hitWeek++;
   });
   const behind=plans.filter(p=>!p.planned&&p.remaining>0).sort((a,b)=>b.remaining-a.remaining);
-  return{plans,needed,expected,avg,daysLeft,planned,planTotal:(getActiveWeekPlan()||{}).sessions||null,sessionsDone:getCalendarWeekSessionsDone(),
+  return{plans,needed,sizeDriven,totalLeft,usual,expected,avg,daysLeft,planned,planTotal:(getActiveWeekPlan()||{}).sessions||null,sessionsDone:getCalendarWeekSessionsDone(),
     shortfall:plans.filter(p=>p.shortfall>0),bigger:plans.filter(p=>p.biggerSessions),behind,
     hitRolling,hitWeek,total:plans.length,windowDays:AUTO_ROUTINE_LONG_WINDOW_DAYS};
 }
@@ -16672,13 +16691,14 @@ function getWeekPlanCardHtml(){
     v={icon:'\uD83D\uDFE1',label:'On track',color:'var(--accent2)',
       text:s.needed+' session'+pl(s.needed)+' needed \u2014 '+(s.planned?'matches your plan.':'about what you usually fit.')};
   }
-  const hungriest=s.plans.filter(p=>p.sessions>0&&p.sessions===s.needed).sort((a,b)=>b.sessions-a.sessions||b.remaining-a.remaining).slice(0,4);
+  const hungriest=s.sizeDriven?[]:s.plans.filter(p=>p.sessions>0&&p.sessions===s.needed).sort((a,b)=>b.sessions-a.sessions||b.remaining-a.remaining).slice(0,4);
   const bigNum=s.needed;
   return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px">'
     +'<div><div style="font-size:30px;font-weight:800;line-height:1">'+bigNum+'</div><div class="small text3">more session'+pl(bigNum)+' needed by Sunday</div></div>'
     +'<span style="font-size:12px;font-weight:700;color:'+v.color+';background:var(--bg3);border:1px solid '+v.color+';border-radius:12px;padding:5px 10px;white-space:nowrap">'+v.icon+' '+v.label+'</span></div>'
     +'<div class="small text2" style="margin-top:8px;line-height:1.45">'+v.text+'</div>'
     +'<div class="small text3" style="margin-top:6px;line-height:1.5">'+s.sessionsDone+' session'+pl(s.sessionsDone)+' so far this week \u00B7 '+(s.planned?'your plan: '+s.planTotal+' sessions this week':'you usually do ~'+(Math.round(s.avg*2)/2)+'/week')+' \u00B7 '+dayWord+'</div>'
+    +(s.sizeDriven?'<div style="margin-top:8px"><span class="small text3">Driving it: </span><span class="muscle-tag">'+Math.round(s.totalLeft)+' sets left \u00B7 ~'+s.usual+' a session</span></div>':'')
     +(hungriest.length?'<div style="margin-top:8px"><span class="small text3">Driving it: </span>'+hungriest.map(p=>'<span class="muscle-tag">'+p.muscle+' \u00B7 '+p.sessions+'</span>').join('')+'</div>':'')
     +'<div class="small text3" style="margin-top:8px">At aim \u2014 previous 7 days: '+s.hitRolling+'/'+s.total+' muscles \u00B7 this week so far: '+s.hitWeek+'/'+s.total+'</div>'
     +(s.daysLeft===0
