@@ -415,6 +415,37 @@ sized for 5 short labels inside the Personal Records card rather than 2 across t
 body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0F1117;--text2:#4A5568;--text3:#8896A8;--border:#D1D9E0;}
 @keyframes slideIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
 .anim{animation:slideIn 0.2s ease;}
+/* AUTO ROUTINE — PICK MUSCLES (2026-11-05) */
+.acs-seg{display:flex;gap:3px;padding:3px;margin:2px 0 12px;background:var(--bg3);border:1px solid var(--border);border-radius:12px;}
+.acs-seg button{flex:1;padding:9px 10px;border:none;border-radius:9px;background:transparent;color:var(--text2);font-size:13px;font-weight:600;cursor:pointer;transition:background .15s,color .15s;}
+.acs-seg button.on{background:var(--accent);color:#0a0a0f;}
+.acs-chips{display:flex;gap:8px;margin:0 0 4px;}
+.acs-chip{flex:1;padding:10px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--text2);font-size:13px;font-weight:600;cursor:pointer;transition:background .15s,color .15s,border-color .15s;}
+.acs-chip:active{background:var(--bg3);}
+.acs-chip.on{border-color:var(--accent);color:var(--accent);background:rgba(var(--accent-rgb),0.12);}
+.acs-chip.clear{flex:0 0 auto;padding:10px 16px;}
+.acs-chip:disabled{opacity:0.45;cursor:default;}
+.acs-group{font-size:12px;color:var(--text3);font-weight:600;margin:14px 2px 6px;}
+.acs-list{border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--bg3);}
+.acs-row{display:flex;align-items:center;gap:10px;padding:9px 10px 9px 12px;min-height:58px;border-bottom:1px solid var(--border);border-left:3px solid transparent;cursor:pointer;}
+.acs-row:last-child{border-bottom:none;}
+.acs-row.on{background:rgba(var(--accent-rgb),0.09);border-left-color:var(--mc,var(--accent));}
+.acs-row.off{opacity:0.55;cursor:default;}
+.acs-name{font-size:14px;font-weight:700;}
+.acs-sub{font-size:11.5px;color:var(--text3);line-height:1.35;margin-top:2px;}
+.acs-sub.warn{color:var(--orange);}
+.acs-stepper{display:flex;align-items:center;flex-shrink:0;}
+.acs-step{width:38px;height:38px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:19px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.acs-step:active{background:var(--bg4);}
+.acs-count{min-width:32px;text-align:center;font-family:'DM Mono',monospace;font-size:17px;font-weight:500;}
+/* The Build bar sticks to the bottom of the sheet while the picker scrolls. A sticky bar stops short of its scroller's own
+   bottom padding, so on this one sheet the safe-area padding (.modal's usual bottom padding) lives in the bar itself instead —
+   same total space at the bottom, but the bar sits flush and the last row can always scroll fully above it. */
+#modal-auto-session .modal{padding-bottom:0;}
+.acs-foot{position:sticky;bottom:0;z-index:2;background:var(--bg2);padding-bottom:env(safe-area-inset-bottom,20px);}
+.acs-foot.custom{border-top:1px solid var(--border);padding-top:10px;}
+.acs-summary{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:0 20px 10px;font-size:13px;color:var(--text2);}
+.acs-summary b{color:var(--text);font-family:'DM Mono',monospace;font-weight:500;}
 </style>
 </head>
 <body>
@@ -731,7 +762,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-10-28.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-11-05.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -908,7 +939,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <div id="auto-routine-preview-list"></div>
     </div>
     <div class="modal-actions">
-      <button class="btn btn-ghost flex-1" onclick="closeModal('modal-auto-routine-preview')">Back</button>
+      <button class="btn btn-ghost flex-1" onclick="backFromAutoRoutinePreview()">Back</button>
       <button class="btn btn-primary flex-1" onclick="startPreviewedAutoRoutine()">Start Workout</button>
     </div>
   </div>
@@ -972,6 +1003,12 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
     <div class="modal-body">
+      <!-- 2026-11-05, user's explicit request: a second way to build a session — pick the muscles and the sets for each. -->
+      <div class="acs-seg" role="tablist" aria-label="Session type">
+        <button type="button" id="acs-mode-auto" class="on" role="tab" aria-selected="true" onclick="setAutoSessionMode('auto')">Auto</button>
+        <button type="button" id="acs-mode-custom" role="tab" aria-selected="false" onclick="setAutoSessionMode('custom')">Pick muscles</button>
+      </div>
+      <div id="auto-session-auto-pane">
       <!-- 2026-09-29, user's explicit request: the full explanation was always-visible, dense text —
            collapsed behind a tap now, same wording, nothing cut. -->
       <div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:8px">
@@ -987,10 +1024,19 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       <div class="input-label mt8">Sets budget (optional)</div>
       <input id="auto-session-sets" type="number" min="1" inputmode="numeric" placeholder="Total sets across the whole session" oninput="document.getElementById('auto-session-minutes').value=''"/>
       <div id="auto-session-supersets-row" style="display:none"></div>
+      </div>
+      <div id="auto-session-custom-pane" style="display:none">
+        <div class="small text3" style="margin-bottom:12px;line-height:1.45">Choose the muscles and how many sets for each. Exercises, weights and reps are still picked for you from your pool.</div>
+        <div id="auto-custom-chips"></div>
+        <div id="auto-custom-list"></div>
+      </div>
     </div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost flex-1" onclick="closeModal('modal-auto-session')">Cancel</button>
-      <button class="btn btn-primary flex-1" onclick="confirmAutoSession()">Build & Start</button>
+    <div class="acs-foot" id="auto-session-footer">
+      <div class="acs-summary" id="auto-custom-summary" style="display:none"></div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost flex-1" onclick="closeModal('modal-auto-session')">Cancel</button>
+        <button class="btn btn-primary flex-1" id="auto-session-build-btn" onclick="confirmAutoSession()">Build & Start</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1787,6 +1833,16 @@ const SET_TYPES=[
 const MUSCLE_GROUPS=['Chest','Back','Shoulders','Biceps','Triceps','Quads','Hamstrings','Glutes','Core','Calves','Tibialis','Full Body'];
 const MUSCLE_PAIRS={Chest:'Back',Back:'Chest',Biceps:'Triceps',Triceps:'Biceps',Quads:'Hamstrings',Hamstrings:'Quads'};
 const MUSCLE_COLORS={Chest:'#e8ff47',Back:'#47c8ff',Shoulders:'#ff8c00',Biceps:'#2ed573',Triceps:'#ff4757',Quads:'#cc44ff',Hamstrings:'#c2703d',Glutes:'#ff6b81',Core:'#ffd700',Calves:'#00cec9',Tibialis:'#74b9ff','Full Body':'#fd79a8'};
+// AUTO ROUTINE "PICK MUSCLES" MODE (2026-11-05) — see the block of functions after startPreviewedAutoRoutine.
+// Declared up here, not beside those functions, for the same boot-chain-hoisting reason as
+// MUSCLE_VOLUME_WINDOW_DAYS just below (a top-level const/let deep in the file can hit "Cannot access
+// before initialization" if anything on the boot chain ever reaches it first).
+const AUTO_CUSTOM_UPPER_MUSCLES=['Chest','Back','Shoulders','Biceps','Triceps'];
+const AUTO_CUSTOM_LOWER_MUSCLES=['Quads','Hamstrings','Calves','Tibialis'];
+const AUTO_CUSTOM_MAX_SETS_PER_MUSCLE=12; // a sanity ceiling on the stepper, not a training rule
+let autoSessionMode='auto'; // which pane of the Auto Routine sheet is showing: 'auto' | 'custom'
+let autoCustomSel={};       // Pick-muscles choices: {muscle: sets}; a muscle that is absent is simply not in the session
+let autoCustomCtx=null;     // per-muscle context for the picker (suggested sets, recency, warnings) — computed once per sheet-open
 // See getMuscleVolume for the full reasoning — declared this early (not right above
 // getMuscleVolume itself) because the Home screen's boot-time render chain can reach it well
 // before the script's own top-to-bottom pass would otherwise get there.
@@ -10908,6 +10964,9 @@ function setDailyReadiness(level){
   // "Default if left blank" estimate needs a refresh too — otherwise it would keep showing the
   // pre-check-in number until the modal was closed and reopened.
   try{renderAutoSessionEstimate();}catch(e){console.error('estimate refresh after readiness check-in failed:',e);}
+  // The Pick-muscles suggestions start from the same readiness-trimmed doses, so they refresh too (the numbers the
+  // user already typed in are never touched — only the "suggested" figures behind them).
+  try{autoCustomCtx=null;if(autoSessionMode==='custom')renderAutoCustomPane();}catch(e){console.error('pick-muscles refresh after readiness check-in failed:',e);}
 }
 function openDailyReadinessModal(){openModal('modal-daily-readiness');}
 function renderAutoSessionReadinessRow(){
@@ -12365,10 +12424,12 @@ function openAutoSessionModal(mesoIdx){
     if(m&&m.phase==='deload'&&m.measurementsPending){startMesoMeasurements(mesoIdx);return;}
   }
   autoSessionMesoIdx=mesoIdx;
+  autoCustomSel={};autoCustomCtx=null; // Pick-muscles starts fresh every time the sheet is entered — a selection is never carried over between sessions
   const input=document.getElementById('auto-session-minutes');if(input)input.value='';
   const setsInput=document.getElementById('auto-session-sets');if(setsInput)setsInput.value='';
   const est=document.getElementById('auto-session-default-estimate');
   renderAutoSessionEstimate();
+  setAutoSessionMode('auto'); // always opens on Auto — one tap to Build & Start stays exactly as it was
   openModal('modal-auto-session');
   renderAutoSessionWeekPlanRow();
   try{renderAutoSessionSupersetsRow();}catch(e){console.error('supersets row failed:',e);}
@@ -12645,7 +12706,7 @@ function showAutoRoutinePreview(mesoIdx,picks,estMinutes){
     const exData=getExercise(p.exId);
     return'<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 4px;border-bottom:1px solid var(--border)">'
       +'<div class="small">'+escHtml(exData?exData.name:p.exId)+' <span class="text3">('+escHtml(p.muscle)+')</span></div>'
-      +'<div class="small text3">'+p.sets+' sets</div></div>';
+      +'<div class="small text3">'+p.sets+(p.sets===1?' set':' sets')+'</div></div>';
   }).join('');
   closeModal('modal-auto-session');
   openModal('modal-auto-routine-preview');
@@ -12655,6 +12716,199 @@ function startPreviewedAutoRoutine(){
   const{mesoIdx,picks}=autoRoutinePreviewPicks;
   closeModal('modal-auto-routine-preview');
   beginAutoSessionWithSorenessCheck(mesoIdx,picks);
+}
+// ── AUTO ROUTINE — "PICK MUSCLES" MODE (2026-11-05) ──
+// User's explicit request: "another option [on the auto routine] where I pick the muscles to have in a workout and
+// the amount of sets for each … I even fancy an option to have upper or lower be selected." The design was left to
+// me. Decision: NOT a new feature beside Auto Routine and NOT a saved routine (standing stance: no fixed routines),
+// but a second way into the SAME sheet — a two-way switch at its top, Auto | Pick muscles. Pick muscles replaces only
+// the WHAT-and-HOW-MUCH decision (the scheduler's dose). Everything after that is the existing Auto Routine path,
+// untouched: same pool, same exercise ranking and variety rule (growMuscleOneSet), same weight/rep targets and RIR,
+// same pre-workout soreness check, same preview, superset memory, Extend Session, and the same 'Auto Routine' history
+// entry (so personal-pace calibration keeps learning from these sessions too).
+//  - Automation proposes, the user overrides: ticking a muscle pre-fills a normal session's worth of sets for it (more
+//    if the scheduler would have asked for a bigger catch-up today), trimmed by today's check-in like Auto's own doses,
+//    and Upper/Lower just tick that group the same way. Every number stays editable.
+//  - The user's number is honored. The per-session cap and the MRV guard are advisory here (a soft note under the
+//    row), never a block — the same stance Extend Session takes once the user has explicitly asked for more. Today's
+//    readiness trim is NOT applied on top of a number the user typed in; it only shapes the suggestions.
+//  - Muscles are the ones Auto Routine tracks (Glutes/Core stay excluded, as everywhere else). A muscle with no usable
+//    exercise in the pool is shown but can't be ticked, with the reason.
+//  - Nothing was "pulled forward" by a hand-picked session, so it records no pull-forward fairness credit; it does
+//    advance weekly progress like any session, since the sets are real.
+function getAutoCustomGroups(){
+  const tracked=Object.keys(state.volumeLandmarks||{});
+  const upper=AUTO_CUSTOM_UPPER_MUSCLES.filter(m=>tracked.includes(m));
+  const lower=AUTO_CUSTOM_LOWER_MUSCLES.filter(m=>tracked.includes(m));
+  const other=tracked.filter(m=>!upper.includes(m)&&!lower.includes(m));
+  return{upper,lower,other};
+}
+// One pass per sheet-open (cleared by openAutoSessionModal and by a readiness check-in): everything the picker
+// shows or suggests for each muscle, read from the same functions the real scheduler uses.
+function getAutoCustomContext(){
+  if(autoCustomCtx)return autoCustomCtx;
+  const g=getAutoCustomGroups();
+  const activeSet=getAutoRoutineActiveMuscles();
+  const ctx={};
+  g.upper.concat(g.lower,g.other).forEach(muscle=>{
+    const c={muscle,usable:0,noPool:true,suggest:3,cap:5,aim:0,done:0,daysSince:null,eligible:true,struggling:false};
+    try{
+      const exIds=getAutoRoutineCandidateExIds(muscle);
+      c.noPool=exIds.length===0;
+      c.usable=exIds.filter(id=>!isExerciseInjured(id)).length;
+      const info=getMuscleExposureInfo(muscle,activeSet);
+      c.cap=info.exposureCap;c.daysSince=info.daysSince;c.eligible=info.eligible;
+      c.aim=getAutoRoutineMuscleTargetNow(muscle);
+      c.done=getMuscleVolumeForReview(muscle);
+      // Suggested sets = never less than a NORMAL session's worth for this muscle (a muscle you deliberately tick isn't
+      // "done" just because the scheduler has nothing owed today), more if the scheduler would have asked for a bigger
+      // catch-up, bounded by its per-session cap, then scaled by today's check-in exactly as Auto's own doses are.
+      let doseRaw=0;
+      try{const d=getMuscleExposureDose(muscle,activeSet,[]);doseRaw=(d.doseBreakdown&&d.doseBreakdown.doseRaw)||0;}
+      catch(e){console.error('pick-muscles dose failed for '+muscle+':',e);}
+      const normal=getAutoRoutineNormalSessionDose(c.aim,info);
+      c.suggest=Math.max(1,Math.min(c.cap,Math.round(Math.max(doseRaw,normal)*getAutoRoutineDailyReadinessFactor())));
+      try{c.struggling=isAutoRoutineMuscleStruggling(muscle);}catch(e){c.struggling=false;}
+    }catch(e){console.error('pick-muscles context failed for '+muscle+':',e);}
+    ctx[muscle]=c;
+  });
+  autoCustomCtx=ctx;
+  return ctx;
+}
+function renderAutoCustomPane(){
+  const chipsEl=document.getElementById('auto-custom-chips'),listEl=document.getElementById('auto-custom-list');
+  if(!chipsEl||!listEl)return;
+  let ctx,g;
+  try{ctx=getAutoCustomContext();g=getAutoCustomGroups();}
+  catch(e){console.error('pick-muscles context failed:',e);chipsEl.innerHTML='';listEl.innerHTML='<div class="small text3" style="padding:12px 0">Couldn\u2019t load your muscles \u2014 switch back to Auto.</div>';renderAutoCustomSummary();return;}
+  const sel=autoCustomSel,selKeys=Object.keys(sel);
+  const groupOn=arr=>{const usable=arr.filter(m=>ctx[m]&&ctx[m].usable>0);return usable.length>0&&selKeys.length===usable.length&&usable.every(m=>sel[m]!=null);};
+  chipsEl.innerHTML='<div class="acs-chips">'
+    +'<button type="button" class="acs-chip'+(groupOn(g.upper)?' on':'')+'" onclick="autoCustomPreset(\'upper\')">Upper</button>'
+    +'<button type="button" class="acs-chip'+(groupOn(g.lower)?' on':'')+'" onclick="autoCustomPreset(\'lower\')">Lower</button>'
+    +'<button type="button" class="acs-chip clear" onclick="autoCustomClear()"'+(selKeys.length?'':' disabled')+'>Clear</button></div>';
+  const win=state.reviewWindowMode==='calendar'?'this wk':'in 7d';
+  const agoTxt=d=>d==null?'not trained yet':d===0?'trained today':d===1?'trained yesterday':'trained '+d+'d ago';
+  const num=n=>Math.round(n*10)/10;
+  const rowHtml=muscle=>{
+    const c=ctx[muscle];if(!c)return'';
+    const on=sel[muscle]!=null,unusable=c.usable<1;
+    const color=MUSCLE_COLORS[muscle]||'#aaa';
+    let sub='';const warns=[];
+    if(unusable){
+      warns.push(c.noPool?'No exercises in your pool \u2014 add some with Edit Pool.':'All its exercises are marked injured/resting.');
+    }else{
+      sub=(c.aim>0?num(c.done)+'/'+num(c.aim)+' '+win+' \u00b7 ':'')+agoTxt(c.daysSince);
+      if(on&&sel[muscle]!==c.suggest)sub+=' \u00b7 suggested '+c.suggest;
+      if(c.struggling)warns.push('Flagged as struggling \u2014 consider going lighter.');
+      if(!c.eligible)warns.push('Still recovering.');
+      if(on&&sel[muscle]>c.cap)warns.push('Above the usual max of '+c.cap+' sets for one session.');
+    }
+    const right=unusable?'':on
+      ?'<div class="acs-stepper" onclick="event.stopPropagation()">'
+        +'<button type="button" class="acs-step" aria-label="'+(sel[muscle]===1?'Remove ':'Fewer ')+muscle+(sel[muscle]===1?'':' sets')+'" onclick="autoCustomStep(\''+muscle+'\',-1)">'+(sel[muscle]===1?'\u00d7':'\u2212')+'</button>'
+        +'<div class="acs-count" aria-live="polite">'+sel[muscle]+'</div>'
+        +'<button type="button" class="acs-step" aria-label="More '+muscle+' sets" onclick="autoCustomStep(\''+muscle+'\',1)">+</button></div>'
+      :'<button type="button" class="acs-step" aria-label="Add '+muscle+'" onclick="event.stopPropagation();autoCustomToggle(\''+muscle+'\')">+</button>';
+    return'<div class="acs-row'+(on?' on':'')+(unusable?' off':'')+'" style="--mc:'+color+'"'
+      +(unusable?'':' role="button" tabindex="0" aria-pressed="'+(on?'true':'false')+'" onclick="autoCustomToggle(\''+muscle+'\')"')+'>'
+      +'<div style="flex:1;min-width:0"><div class="acs-name">'+escHtml(muscle)+'</div>'
+      +(sub?'<div class="acs-sub">'+escHtml(sub)+'</div>':'')
+      +warns.map(w=>'<div class="acs-sub warn">'+escHtml(w)+'</div>').join('')
+      +'</div>'+right+'</div>';
+  };
+  const groupHtml=(label,arr)=>arr.length?'<div class="acs-group">'+label+'</div><div class="acs-list">'+arr.map(rowHtml).join('')+'</div>':'';
+  const html=groupHtml('Upper body',g.upper)+groupHtml('Lower body',g.lower)+groupHtml('Other',g.other);
+  listEl.innerHTML=html||'<div class="small text3" style="padding:12px 0">No muscles are being tracked yet.</div>';
+  renderAutoCustomSummary();
+}
+// Sticky footer line: the live total for what's ticked, built by the REAL builder below (same lesson as
+// getDefaultAutoSessionEstimate — one code path, so the number shown can never drift from the session you get).
+function renderAutoCustomSummary(){
+  const foot=document.getElementById('auto-session-footer'),el=document.getElementById('auto-custom-summary'),btn=document.getElementById('auto-session-build-btn');
+  const isCustom=autoSessionMode==='custom';
+  if(foot)foot.classList.toggle('custom',isCustom);
+  if(!el)return;
+  if(!isCustom){el.style.display='none';el.innerHTML='';if(btn)btn.disabled=false;return;}
+  el.style.display='flex';
+  const keys=Object.keys(autoCustomSel);
+  if(!keys.length){el.innerHTML='<span>Pick at least one muscle</span>';if(btn)btn.disabled=true;return;}
+  let sets=keys.reduce((a,m)=>a+autoCustomSel[m],0),mins=null;
+  try{const picks=buildCustomAutoSession(autoCustomSel);sets=picks.reduce((a,p)=>a+p.sets,0);mins=Math.round(estimatePicksSeconds(picks)/60);}
+  catch(e){console.error('pick-muscles estimate failed:',e);}
+  el.innerHTML='<span><b>'+sets+'</b> set'+(sets!==1?'s':'')+' \u00b7 <b>'+keys.length+'</b> muscle'+(keys.length!==1?'s':'')+'</span>'+(mins!=null?'<span>~'+mins+' min</span>':'');
+  if(btn)btn.disabled=false;
+}
+function autoCustomToggle(muscle){
+  const c=getAutoCustomContext()[muscle];
+  if(!c||c.usable<1)return;
+  if(autoCustomSel[muscle]!=null)delete autoCustomSel[muscle];else autoCustomSel[muscle]=c.suggest;
+  renderAutoCustomPane();
+}
+// Stepping down from 1 removes the muscle (the button shows × at 1) — sets per muscle is the single source of truth, 0 = not in the session.
+function autoCustomStep(muscle,delta){
+  const c=getAutoCustomContext()[muscle];
+  if(!c||c.usable<1)return;
+  const next=(autoCustomSel[muscle]!=null?autoCustomSel[muscle]:0)+delta;
+  if(next<=0)delete autoCustomSel[muscle];
+  else autoCustomSel[muscle]=Math.min(AUTO_CUSTOM_MAX_SETS_PER_MUSCLE,next);
+  renderAutoCustomPane();
+}
+// Upper / Lower: tick exactly that group (replacing whatever was ticked) at today's suggested sets; tapping the lit chip again clears.
+function autoCustomPreset(which){
+  const g=getAutoCustomGroups(),ctx=getAutoCustomContext();
+  const group=(which==='lower'?g.lower:g.upper).filter(m=>ctx[m]&&ctx[m].usable>0);
+  const keys=Object.keys(autoCustomSel);
+  const alreadyThis=group.length>0&&keys.length===group.length&&group.every(m=>autoCustomSel[m]!=null);
+  autoCustomSel={};
+  if(!alreadyThis)group.forEach(m=>{autoCustomSel[m]=ctx[m].suggest;});
+  renderAutoCustomPane();
+}
+function autoCustomClear(){autoCustomSel={};renderAutoCustomPane();}
+function setAutoSessionMode(mode){
+  autoSessionMode=mode==='custom'?'custom':'auto';
+  const isCustom=autoSessionMode==='custom';
+  const a=document.getElementById('auto-session-auto-pane'),c=document.getElementById('auto-session-custom-pane');
+  if(a)a.style.display=isCustom?'none':'';
+  if(c)c.style.display=isCustom?'':'none';
+  [['acs-mode-auto',!isCustom],['acs-mode-custom',isCustom]].forEach(([id,on])=>{
+    const b=document.getElementById(id);
+    if(b){b.classList.toggle('on',on);b.setAttribute('aria-selected',on?'true':'false');}
+  });
+  if(isCustom)renderAutoCustomPane();else renderAutoCustomSummary();
+}
+// Same muscle order as buildAutoSession (priority/active muscles first, then the standard order) and the same
+// growMuscleOneSet that every other build uses — so exercise choice, the 3-sets-then-a-second-exercise variety rule,
+// pins, trackers and freshness rotation all behave exactly as in Auto. allowExceedCap=true because the user chose
+// the number (see the block comment above).
+function buildCustomAutoSession(sel){
+  const activeSet=getAutoRoutineActiveMuscles();
+  const chosen=Object.keys(sel||{}).filter(m=>sel[m]>0);
+  const std=Object.keys(state.volumeLandmarks||{});
+  const ordered=std.filter(m=>chosen.includes(m)&&activeSet.has(m)).concat(std.filter(m=>chosen.includes(m)&&!activeSet.has(m)));
+  const picks=[];
+  ordered.forEach(muscle=>{
+    if(isAutoRoutineMuscleFullyResting(muscle))return;
+    for(let i=0;i<sel[muscle];i++){if(!growMuscleOneSet(picks,muscle,activeSet,true))break;}
+  });
+  const out=applyMuscleTrackerOrdering(picks);
+  out.autoRoutineCustom=true;
+  out.autoRoutineServedMuscles=[];
+  return out;
+}
+function confirmCustomAutoSession(){
+  // No minutes/sets budget: the sets picked ARE the session. Extend Session falls back to current+N, same as any budget-less build.
+  autoSessionOriginalMinutes=null;autoSessionOriginalSets=null;
+  const picks=buildCustomAutoSession(autoCustomSel);
+  if(!picks.length){alert('Pick at least one muscle that has an exercise in your Auto Routine pool.');return;}
+  showAutoRoutinePreview(autoSessionMesoIdx,picks,Math.round(estimatePicksSeconds(picks)/60));
+}
+// Preview "Back": a Pick-muscles preview returns to the picker with the selection intact (change a number and rebuild,
+// instead of starting over from Home); an Auto preview behaves exactly as before.
+function backFromAutoRoutinePreview(){
+  const wasCustom=!!(autoRoutinePreviewPicks&&autoRoutinePreviewPicks.picks&&autoRoutinePreviewPicks.picks.autoRoutineCustom);
+  closeModal('modal-auto-routine-preview');
+  if(wasCustom)openModal('modal-auto-session');
 }
 // BUG FIX (2026-08-28, user's second report of the same 76-set/200min session even after the
 // original per-muscle accrual fix): the real remaining cause was here, not in that per-muscle
@@ -12717,6 +12971,7 @@ function toggleAutoSessionInfo(){
 // trimming/time-fill entirely, return exactly what's due). getDefaultAutoSessionMinutes is now used
 // ONLY for the modal's displayed estimate text, never as a real constraint.
 function confirmAutoSession(){
+  if(autoSessionMode==='custom'){confirmCustomAutoSession();return;} // Pick-muscles path (below startPreviewedAutoRoutine) — Auto's own flow right after this is untouched
   const minutesInput=document.getElementById('auto-session-minutes');
   const setsInput=document.getElementById('auto-session-sets');
   const minVal=minutesInput?parseInt(minutesInput.value,10):NaN;
