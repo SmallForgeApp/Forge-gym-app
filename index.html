@@ -762,7 +762,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-11-05.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-11-09.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -2966,6 +2966,9 @@ function showPRToast(name){
   }catch(e){/* audio not available — vibration still fires */}
   const t=document.createElement('div');t.className='pr-toast';t.textContent='PR! '+name;
   document.body.appendChild(t);setTimeout(()=>t.remove(),2500);
+  // 2026-11-09 (user: notices stay up too long): swipe it away sideways, or just tap it. No ✕ here — it's gone by itself in 2.5s.
+  attachNoticeSwipe(t,()=>t.remove());
+  t.addEventListener('click',()=>t.remove());
 }
 
 // ── NAV ──
@@ -13581,7 +13584,63 @@ function removeLastSet(exIdx){
     });
   }
 }
+// ── NOTICE DISMISSAL (2026-11-09, user's request: "swipe away some of the notices that pop up as they stay up too long.
+// Either swipe or x away") ──
+// The floating notices that time themselves out — the Undo toast (10 call sites, one shared element) and the PR toast — now
+// answer to a sideways swipe in either direction, and the Undo toast also has a ✕. Dismissing early is exactly what the
+// timer running out does: nothing is committed or reverted, the toast just goes (for an Undo toast that closes its Undo window).
+// Deliberately NOT applied to the two data-warning banners (save-error / data-recovery): those persist until an explicit ✕
+// on purpose (see showDataRecoveryBanner), and a stray swipe shouldn't be able to hide a "your data isn't saving" warning.
+// Touch-based like the rest of the app's gestures. Uses the individual `translate` property (not `transform`) so it composes with
+// the PR toast's own centering transform, and cancels that toast's entrance animation once a drag starts, since a finished
+// `forwards` animation would otherwise override the inline opacity.
+function attachNoticeSwipe(el,onDismiss){
+  if(!el||el.__noticeSwipe)return;
+  el.__noticeSwipe=true;
+  el.style.touchAction='pan-y'; // the browser keeps vertical scrolling; sideways drags come to us
+  let sx=0,sy=0,dx=0,st=0,tracking=false,locked=false;
+  const settle=()=>{ // snap back, then drop the transition so the next show starts clean
+    el.style.transition='translate .2s ease, opacity .2s ease';
+    el.style.translate='0 0';el.style.opacity='1';
+    setTimeout(()=>{el.style.transition='';},230);
+  };
+  el.addEventListener('touchstart',e=>{
+    if(e.touches.length!==1){tracking=false;return;}
+    sx=e.touches[0].clientX;sy=e.touches[0].clientY;dx=0;st=Date.now();tracking=true;locked=false;
+  },{passive:true});
+  el.addEventListener('touchmove',e=>{
+    if(!tracking)return;
+    const mx=e.touches[0].clientX-sx,my=e.touches[0].clientY-sy;
+    if(!locked){
+      if(Math.abs(my)>10&&Math.abs(my)>Math.abs(mx)){tracking=false;return;} // a vertical drag — not ours
+      if(Math.abs(mx)<8)return; // still inside tap slop
+      locked=true;
+      el.style.animation='none';
+      el.style.transition='none';
+    }
+    dx=mx;
+    el.style.translate=dx+'px 0';
+    el.style.opacity=String(Math.max(0.2,1-Math.abs(dx)/((el.offsetWidth||300)*1.1)));
+  },{passive:true});
+  el.addEventListener('touchend',()=>{
+    const wasDrag=tracking&&locked;
+    tracking=false;
+    if(!wasDrag)return;
+    const w=el.offsetWidth||300,speed=Math.abs(dx)/Math.max(1,Date.now()-st); // px/ms
+    if(Math.abs(dx)>w*0.3||(Math.abs(dx)>40&&speed>0.5)){ // dragged far enough, or flicked
+      el.style.transition='translate .18s ease, opacity .18s ease';
+      el.style.translate=((dx<0?-1.1:1.1)*w)+'px 0';el.style.opacity='0';
+      setTimeout(onDismiss,180);
+    }else settle();
+  },{passive:true});
+  el.addEventListener('touchcancel',()=>{if(tracking&&locked)settle();tracking=false;},{passive:true});
+}
 let undoToastTimer=null;
+function dismissUndoToast(){
+  clearTimeout(undoToastTimer);
+  const toast=document.getElementById('undo-toast');
+  if(toast){toast.style.display='none';toast.style.translate='';toast.style.opacity='';toast.style.transition='';toast.style.animation='';}
+}
 function showUndoToast(message,restoreFn,opts){
   const o=opts||{};
   clearTimeout(undoToastTimer);
@@ -13592,12 +13651,16 @@ function showUndoToast(message,restoreFn,opts){
     toast.style.cssText='position:fixed;left:16px;right:16px;bottom:calc(78px + env(safe-area-inset-bottom, 0px));background:#1c2028;border:1px solid var(--border);border-radius:12px;padding:12px 16px;align-items:center;justify-content:space-between;gap:12px;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,0.4)';
     document.body.appendChild(toast);
   }
+  toast.style.translate='';toast.style.opacity='';toast.style.transition='';toast.style.animation=''; // a previous swipe-away leaves it parked off to the side
   toast.style.display='flex';
+  attachNoticeSwipe(toast,dismissUndoToast); // binds once — this one element is reused for every Undo toast
   const btn='background:none;border:none;color:var(--accent);font-weight:700;font-size:13px;padding:4px 8px;flex-shrink:0';
+  const xBtn='background:none;border:none;color:var(--text3);font-size:17px;line-height:1;padding:11px 10px;margin:-11px -8px -11px 0;flex-shrink:0'; // negative margins grow the tap target without growing the toast
   toast.innerHTML='<span style="font-size:13px;color:var(--text)">'+escHtml(message)+'</span>'
-    +'<span style="display:flex;gap:2px;flex-shrink:0">'
+    +'<span style="display:flex;gap:2px;flex-shrink:0;align-items:center">'
     +(o.extraLabel?'<button style="'+btn+'" id="undo-toast-extra">'+escHtml(o.extraLabel)+'</button>':'')
-    +'<button style="'+btn+'" id="undo-toast-btn">UNDO</button></span>';
+    +'<button style="'+btn+'" id="undo-toast-btn">UNDO</button>'
+    +'<button style="'+xBtn+'" id="undo-toast-x" aria-label="Dismiss">\u2715</button></span>';
   document.getElementById('undo-toast-btn').onclick=()=>{
     clearTimeout(undoToastTimer);
     toast.style.display='none';
@@ -13605,6 +13668,7 @@ function showUndoToast(message,restoreFn,opts){
   };
   const ex=document.getElementById('undo-toast-extra');
   if(ex)ex.onclick=()=>{clearTimeout(undoToastTimer);toast.style.display='none';o.extraFn();};
+  document.getElementById('undo-toast-x').onclick=dismissUndoToast;
   undoToastTimer=setTimeout(()=>{toast.style.display='none';},o.duration||5000);
 }
 function removeExercise(exIdx){
