@@ -762,7 +762,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-11-09.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-11-14.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1840,6 +1840,7 @@ const MUSCLE_COLORS={Chest:'#e8ff47',Back:'#47c8ff',Shoulders:'#ff8c00',Biceps:'
 const AUTO_CUSTOM_UPPER_MUSCLES=['Chest','Back','Shoulders','Biceps','Triceps'];
 const AUTO_CUSTOM_LOWER_MUSCLES=['Quads','Hamstrings','Calves','Tibialis'];
 const AUTO_CUSTOM_MAX_SETS_PER_MUSCLE=12; // a sanity ceiling on the stepper, not a training rule
+const AUTO_CUSTOM_MIN_SUGGEST=2;          // floor for the pre-filled sets: a muscle you tick that's already at aim still gets a light 2, never a token 1
 let autoSessionMode='auto'; // which pane of the Auto Routine sheet is showing: 'auto' | 'custom'
 let autoCustomSel={};       // Pick-muscles choices: {muscle: sets}; a muscle that is absent is simply not in the session
 let autoCustomCtx=null;     // per-muscle context for the picker (suggested sets, recency, warnings) — computed once per sheet-open
@@ -12729,9 +12730,9 @@ function startPreviewedAutoRoutine(){
 // untouched: same pool, same exercise ranking and variety rule (growMuscleOneSet), same weight/rep targets and RIR,
 // same pre-workout soreness check, same preview, superset memory, Extend Session, and the same 'Auto Routine' history
 // entry (so personal-pace calibration keeps learning from these sessions too).
-//  - Automation proposes, the user overrides: ticking a muscle pre-fills a normal session's worth of sets for it (more
-//    if the scheduler would have asked for a bigger catch-up today), trimmed by today's check-in like Auto's own doses,
-//    and Upper/Lower just tick that group the same way. Every number stays editable.
+//  - Automation proposes, the user overrides: ticking a muscle pre-fills what Auto itself would ask of it today (its real
+//    dose, today's check-in included; at least 2 sets so a muscle already at aim is a light touch), and Upper/Lower just
+//    tick that group the same way. Every number stays editable.
 //  - The user's number is honored. The per-session cap and the MRV guard are advisory here (a soft note under the
 //    row), never a block — the same stance Extend Session takes once the user has explicitly asked for more. Today's
 //    readiness trim is NOT applied on top of a number the user typed in; it only shapes the suggestions.
@@ -12763,14 +12764,14 @@ function getAutoCustomContext(){
       c.cap=info.exposureCap;c.daysSince=info.daysSince;c.eligible=info.eligible;
       c.aim=getAutoRoutineMuscleTargetNow(muscle);
       c.done=getMuscleVolumeForReview(muscle);
-      // Suggested sets = never less than a NORMAL session's worth for this muscle (a muscle you deliberately tick isn't
-      // "done" just because the scheduler has nothing owed today), more if the scheduler would have asked for a bigger
-      // catch-up, bounded by its per-session cap, then scaled by today's check-in exactly as Auto's own doses are.
-      let doseRaw=0;
-      try{const d=getMuscleExposureDose(muscle,activeSet,[]);doseRaw=(d.doseBreakdown&&d.doseBreakdown.doseRaw)||0;}
+      // Suggested sets = what Auto itself would ask of this muscle today: its real dose, so every ceiling and today's
+      // check-in are already applied. 2026-11-14 (user's screenshot: Upper pre-filled 26 sets / ~106 min, with muscles
+      // already at aim getting full sessions): the earlier "never less than a normal session" rule overshot. Floor of
+      // AUTO_CUSTOM_MIN_SUGGEST for a muscle that's at aim or not due, so a ticked muscle is a light touch, not a token 1.
+      let dose=0;
+      try{dose=Math.round(getMuscleExposureDose(muscle,activeSet,[]).dose)||0;}
       catch(e){console.error('pick-muscles dose failed for '+muscle+':',e);}
-      const normal=getAutoRoutineNormalSessionDose(c.aim,info);
-      c.suggest=Math.max(1,Math.min(c.cap,Math.round(Math.max(doseRaw,normal)*getAutoRoutineDailyReadinessFactor())));
+      c.suggest=Math.max(1,Math.min(c.cap,Math.max(AUTO_CUSTOM_MIN_SUGGEST,dose)));
       try{c.struggling=isAutoRoutineMuscleStruggling(muscle);}catch(e){c.struggling=false;}
     }catch(e){console.error('pick-muscles context failed for '+muscle+':',e);}
     ctx[muscle]=c;
