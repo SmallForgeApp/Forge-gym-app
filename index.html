@@ -446,6 +446,10 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
 .acs-foot.custom{border-top:1px solid var(--border);padding-top:10px;}
 .acs-summary{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:0 20px 10px;font-size:13px;color:var(--text2);}
 .acs-summary b{color:var(--text);font-family:'DM Mono',monospace;font-weight:500;}
+/* MUSCLE CONSISTENCY CARD (2026-11-23) */
+.mc-row{padding:3px 0;border-radius:8px;cursor:pointer;}
+.mc-row:active{background:var(--bg3);}
+.mc-row.mc-idle{opacity:0.5;}
 </style>
 </head>
 <body>
@@ -479,6 +483,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
     <div class="home-sec" id="home-sec-chart" data-home-key="chart">
       <div class="sec-hdr"><span class="sec-hdr-title">Weekly Consistency</span></div>
       <div id="weekly-consistency-chart" style="margin:0 16px 16px;padding:14px;background:var(--bg2);border-radius:var(--radius);"></div>
+      <div id="muscle-consistency-chart" style="margin:0 16px 16px;padding:14px;background:var(--bg2);border-radius:var(--radius);"></div>
     </div>
   </div>
   <div class="bottom-nav" id="nav-home"></div>
@@ -762,7 +767,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-11-14.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-11-23.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1841,6 +1846,10 @@ const AUTO_CUSTOM_UPPER_MUSCLES=['Chest','Back','Shoulders','Biceps','Triceps'];
 const AUTO_CUSTOM_LOWER_MUSCLES=['Quads','Hamstrings','Calves','Tibialis'];
 const AUTO_CUSTOM_MAX_SETS_PER_MUSCLE=12; // a sanity ceiling on the stepper, not a training rule
 const AUTO_CUSTOM_MIN_SUGGEST=2;          // floor for the pre-filled sets: a muscle you tick that's already at aim still gets a light 2, never a token 1
+// MUSCLE CONSISTENCY CARD (2026-11-23) — declared this early for the same boot-chain reason as the AUTO_CUSTOM_* consts above
+// (Home's render chain runs at boot and reaches renderMuscleConsistencyChart).
+const MUSCLE_CONSISTENCY_WEEKS=5; // the same 5 weeks Home's Weekly Consistency chart shows (getWeekBuckets(5))
+let muscleConsistencyOpen=null;   // which muscle's week-by-week detail is expanded on the Home card (null = none); never persisted
 let autoSessionMode='auto'; // which pane of the Auto Routine sheet is showing: 'auto' | 'custom'
 let autoCustomSel={};       // Pick-muscles choices: {muscle: sets}; a muscle that is absent is simply not in the session
 let autoCustomCtx=null;     // per-muscle context for the picker (suggested sets, recency, warnings) — computed once per sheet-open
@@ -4498,6 +4507,129 @@ function saveWeeklyTarget(v){
   state.weeklyWorkoutTarget=n;save();
   renderWeeklyConsistencyChart();
 }
+// ── MUSCLE CONSISTENCY CARD (2026-11-23, user's request: "the same concept in the same place" as Home's Weekly Consistency
+// chart, but for sets per muscle — "have biceps hit their target for so many weeks … a snapshot to see each muscle and its
+// weekly consistency of hitting their target") ──
+// Same weeks as the workouts chart (getWeekBuckets: Monday 04:30 GMT, last 5, current week included). A muscle "hits" a week
+// when its sets that week reach its target for that week. Sets are counted exactly like Review's muscle tallies
+// (getExerciseVolumeCredit + secondary-muscle fractions, so a done bench set also credits triceps), just bucketed by week.
+// THE TARGET is the muscle's Aim — the number Review and the Pick-muscles list show. But Aim moves (active muscles ramp up
+// daily), so judging old weeks against today's Aim would quietly rewrite history. Instead each week is judged against the
+// FIRST Aim the app saw for that muscle that week (state.muscleAimLog, written by noteMuscleAimSeen from inside
+// getAutoRoutineMuscleTargetNow). A week with no record — everything before this build, or a week where nothing looked at
+// Aim — falls back to the muscle's MEV (the app's own floor target) and is marked "~" in the detail.
+// THIS CARD ONLY READS THE LOG. It must never call the Aim function itself: that goes through getAutoRoutineActiveMuscles,
+// whose slot selection stamps tenure start times, and a passive Home render must not be able to start a muscle's ramp.
+function noteMuscleAimSeen(muscle,aim){
+  if(!(aim>0)||!isFinite(aim))return;
+  if(!state||!state.volumeLandmarks||!state.volumeLandmarks[muscle])return;
+  const weekStart=getAppWeekStartMs();
+  const key=String(weekStart);
+  if(!state.muscleAimLog)state.muscleAimLog={};
+  let rec=state.muscleAimLog[key];
+  if(!rec){
+    rec=state.muscleAimLog[key]={};
+    const cutoff=weekStart-12*7*864e5; // keep ~12 weeks; this only runs once per new week
+    Object.keys(state.muscleAimLog).forEach(k=>{if(Number(k)<cutoff)delete state.muscleAimLog[k];});
+  }
+  if(rec[muscle]==null)rec[muscle]=Math.round(aim*10)/10; // no save() here — it rides along with the next normal save
+}
+function getMuscleConsistency(numWeeks){
+  numWeeks=numWeeks||MUSCLE_CONSISTENCY_WEEKS;
+  const WK=7*864e5;
+  const thisMonday=getAppWeekStartMs();
+  const firstStart=thisMonday-(numWeeks-1)*WK;
+  const g=getAutoCustomGroups();
+  const muscles=g.upper.concat(g.lower,g.other);
+  const sets={};muscles.forEach(m=>{sets[m]=new Array(numWeeks).fill(0);});
+  (state.history||[]).forEach(w=>{
+    if(!w)return;
+    const t=new Date(w.date).getTime();
+    if(!(t>=firstStart&&t<thisMonday+WK))return;
+    const wi=Math.floor((t-firstStart)/WK);
+    (w.exercises||[]).forEach(ex=>{
+      if(!ex)return;
+      const exData=getExercise(ex.exId);if(!exData)return;
+      const credit=getExerciseVolumeCredit(ex);
+      if(!credit)return;
+      if(sets[exData.muscle])sets[exData.muscle][wi]+=credit;
+      if(exData.secondary){
+        const seen=new Set();
+        exData.secondary.split(',').forEach(sec=>{
+          sec=sec.trim();
+          if(!sec||sec===exData.muscle||seen.has(sec)||!sets[sec])return;
+          seen.add(sec);
+          sets[sec][wi]+=credit*getSecondaryMuscleFraction(exData,sec);
+        });
+      }
+    });
+  });
+  const log=state.muscleAimLog||{};
+  return muscles.map(m=>{
+    const mev=getMuscleLandmarks(m).mev;
+    const weeks=[];
+    for(let i=0;i<numWeeks;i++){
+      const start=firstStart+i*WK;
+      const rec=log[String(start)];
+      const recorded=!!(rec&&rec[m]>0);
+      const target=recorded?rec[m]:mev;
+      const s=Math.round(sets[m][i]*10)/10;
+      weeks.push({start,sets:s,target,est:!recorded,current:i===numWeeks-1,hit:target>0&&s>=target});
+    }
+    return{muscle:m,weeks,hits:weeks.filter(x=>x.hit).length,tracked:weeks.some(x=>x.sets>0)};
+  });
+}
+function toggleMuscleConsistencyRow(muscle){
+  muscleConsistencyOpen=muscleConsistencyOpen===muscle?null:muscle;
+  renderMuscleConsistencyChart();
+}
+function renderMuscleConsistencyChart(){
+  const el=document.getElementById('muscle-consistency-chart');
+  if(!el)return;
+  const NUM=MUSCLE_CONSISTENCY_WEEKS;
+  const rows=getMuscleConsistency(NUM);
+  if(!rows.length){el.style.display='none';return;}
+  el.style.display='';
+  const fmt=n=>{const r=Math.round(n*10)/10;return Number.isInteger(r)?String(r):r.toFixed(1);};
+  const grid='display:grid;grid-template-columns:92px repeat('+NUM+',minmax(0,1fr)) 34px;column-gap:6px;align-items:center';
+  const cell='height:24px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;';
+  const weekLabel=(w,i)=>i===NUM-1?'This wk':new Date(w.start).toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+  const labelRow='<div style="'+grid+';margin-bottom:4px"><div></div>'
+    +rows[0].weeks.map((w,i)=>'<div class="small text3" style="font-size:10px;text-align:center;white-space:nowrap">'+weekLabel(w,i)+'</div>').join('')
+    +'<div></div></div>';
+  let anyEstimated=false;
+  const onTarget=rows.filter(r=>r.weeks[NUM-1].hit).length;
+  const rowsHtml=rows.map(r=>{
+    const open=muscleConsistencyOpen===r.muscle;
+    const cells=r.weeks.map(w=>{
+      if(w.est&&w.sets>0)anyEstimated=true;
+      const t=fmt(w.sets);
+      if(w.hit)return'<div style="'+cell+'background:var(--accent);color:#0a0a0f">'+t+'</div>';
+      if(w.current)return'<div style="'+cell+'border:1px dashed var(--accent);color:var(--text2)">'+t+'</div>'; // this week, still in progress
+      return'<div style="'+cell+'background:var(--bg3);color:var(--text3)">'+t+'</div>';
+    }).join('');
+    const detail=open
+      ?'<div style="margin:4px 0 6px;padding:8px 10px;background:var(--bg3);border-radius:8px;font-size:11.5px;line-height:1.75">'
+        +r.weeks.map((w,i)=>'<div style="display:flex;justify-content:space-between;gap:8px"><span class="text2">'+weekLabel(w,i)+'</span>'
+          +'<span style="flex:1;text-align:center">'+fmt(w.sets)+' / '+(w.est?'~':'')+fmt(w.target)+' sets</span>'
+          +'<span style="width:18px;text-align:right;color:'+(w.hit?'var(--accent)':'var(--text3)')+'">'+(w.hit?'\u2713':(w.current?'\u2026':'\u2717'))+'</span></div>').join('')
+        +'</div>'
+      :'';
+    return'<div class="mc-row'+(r.tracked?'':' mc-idle')+'" role="button" aria-expanded="'+(open?'true':'false')+'" onclick="toggleMuscleConsistencyRow(\''+r.muscle+'\')" style="'+grid+'">'
+      +'<div style="display:flex;align-items:center;gap:6px;min-width:0"><span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:'+(MUSCLE_COLORS[r.muscle]||'var(--text3)')+'"></span>'
+      +'<span style="font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escHtml(r.muscle)+'</span></div>'
+      +cells
+      +'<div style="text-align:right;font-size:12px;font-weight:700;color:'+(r.hits===NUM?'var(--accent)':'var(--text2)')+'">'+r.hits+'/'+NUM+'</div>'
+      +'</div>'+detail;
+  }).join('');
+  el.innerHTML='<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:12px">'
+    +'<div><div class="bold" style="font-size:14px">Muscle Consistency</div><div class="small text2">Weeks each muscle hit its sets target</div></div>'
+    +'<div class="small text2" style="text-align:right;white-space:nowrap"><b style="color:var(--text)">'+onTarget+'/'+rows.length+'</b> on target<br>this week</div>'
+    +'</div>'
+    +labelRow+rowsHtml
+    +'<div class="small text3" style="font-size:10.5px;line-height:1.45;margin-top:10px">Tap a muscle for the week-by-week numbers.'
+    +(anyEstimated?' Weeks before a target was recorded are checked against the muscle\u2019s minimum (MEV), marked ~.':'')+'</div>';
+}
 function renderActiveMesoHero(){
   const el=document.getElementById('active-meso-hero');
   if(!el)return;
@@ -4682,6 +4814,7 @@ function renderHomeScreen(){
   renderGoogleSyncBanner();
   renderActiveMesoHero();
   renderWeeklyConsistencyChart();
+  try{renderMuscleConsistencyChart();}catch(e){console.error('muscle consistency render failed:',e);}
 }
 function renderRoutinesList(){
   renderHomeScreen();
@@ -10705,7 +10838,15 @@ function removeAutoRoutineActiveMuscle(muscle){
 // re-clamp at READ time too, against the CURRENT active set (computed fresh) — this is what
 // actually guarantees "never past MAV unless active" holds at every moment, not just right after
 // the next advance() call happens to run.
+// 2026-11-23: thin wrapper. The value returned is exactly what it always was (computeAutoRoutineMuscleTargetNow below is the
+// original body, untouched); on the way out it notes the FIRST aim seen for this muscle each calendar week, which the Home
+// Muscle Consistency card judges that week against. Pure bookkeeping — nothing reads the log back into a decision.
 function getAutoRoutineMuscleTargetNow(muscle){
+  const v=computeAutoRoutineMuscleTargetNow(muscle);
+  try{noteMuscleAimSeen(muscle,v);}catch(e){console.error('muscle aim log failed:',e);}
+  return v;
+}
+function computeAutoRoutineMuscleTargetNow(muscle){
   const raw=getAutoRoutineMuscleProgress(muscle);
   const lm=getMuscleLandmarks(muscle);
   const mode=getAutoRoutineMuscleRampMode(muscle);
