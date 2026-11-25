@@ -450,6 +450,8 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
 .mc-row{padding:3px 0;border-radius:8px;cursor:pointer;}
 .mc-row:active{background:var(--bg3);}
 .mc-row.mc-idle{opacity:0.5;}
+.mc-wk{font-size:10px;text-align:center;white-space:nowrap;}
+@media (max-width:380px){.mc-wk{font-size:9px;letter-spacing:-0.2px;}}
 </style>
 </head>
 <body>
@@ -767,7 +769,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-11-23.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-11-24.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1850,6 +1852,9 @@ const AUTO_CUSTOM_MIN_SUGGEST=2;          // floor for the pre-filled sets: a mu
 // (Home's render chain runs at boot and reaches renderMuscleConsistencyChart).
 const MUSCLE_CONSISTENCY_WEEKS=5; // the same 5 weeks Home's Weekly Consistency chart shows (getWeekBuckets(5))
 let muscleConsistencyOpen=null;   // which muscle's week-by-week detail is expanded on the Home card (null = none); never persisted
+// 2026-11-24: colour key + corner star + MEV streak on the card. The hues are the Review gauge's zone hues (LM_ZONE_COLORS), opaque.
+const MUSCLE_STREAK_LOOKBACK_WEEKS=104; // how far back the MEV streak is allowed to count (the grid itself shows 5 weeks)
+const MUSCLE_ZONE_COLORS={none:'var(--bg3)',under:'#ff8c00',mev:'#47c8ff',mav:'#2ed573',mrv:'#ff4757'};
 let autoSessionMode='auto'; // which pane of the Auto Routine sheet is showing: 'auto' | 'custom'
 let autoCustomSel={};       // Pick-muscles choices: {muscle: sets}; a muscle that is absent is simply not in the session
 let autoCustomCtx=null;     // per-muscle context for the picker (suggested sets, recency, warnings) — computed once per sheet-open
@@ -4534,14 +4539,29 @@ function noteMuscleAimSeen(muscle,aim){
   }
   if(rec[muscle]==null)rec[muscle]=Math.round(aim*10)/10; // no save() here — it rides along with the next normal save
 }
+// 2026-11-24 (user: "a key and a colour for each to show whether it hit MEV, MRV etc and a little star in the corner to show if it
+// hit target … and for each muscle a way of showing a streak for hitting MEV or above"): each cell is coloured by the HIGHEST
+// landmark that week's sets reached (same four bands and hues as the Review gauge: under MEV / MEV+ / MAV+ / MRV+; no sets = grey),
+// judged against the muscle's CURRENT landmarks for every week; the corner star is the separate "hit that week's target" signal.
+// The streak is weeks in a row at MEV or above. MEV is a fixed landmark, so — unlike the per-week target — the streak needs no
+// recorded snapshots and can be counted from the whole history (up to MUSCLE_STREAK_LOOKBACK_WEEKS). It counts back from the last
+// COMPLETED week; the in-progress week adds 1 once it has reached MEV and never breaks the streak while it hasn't yet.
+function getMuscleZone(sets,lm){
+  if(!(sets>0))return'none';
+  if(sets>=lm.mrv)return'mrv';
+  if(sets>=lm.mav)return'mav';
+  if(sets>=lm.mev)return'mev';
+  return'under';
+}
 function getMuscleConsistency(numWeeks){
   numWeeks=numWeeks||MUSCLE_CONSISTENCY_WEEKS;
   const WK=7*864e5;
+  const L=Math.max(numWeeks,MUSCLE_STREAK_LOOKBACK_WEEKS); // buckets run oldest..current; streaks look further back than the grid shows
   const thisMonday=getAppWeekStartMs();
-  const firstStart=thisMonday-(numWeeks-1)*WK;
+  const firstStart=thisMonday-(L-1)*WK;
   const g=getAutoCustomGroups();
   const muscles=g.upper.concat(g.lower,g.other);
-  const sets={};muscles.forEach(m=>{sets[m]=new Array(numWeeks).fill(0);});
+  const sets={};muscles.forEach(m=>{sets[m]=new Array(L).fill(0);});
   (state.history||[]).forEach(w=>{
     if(!w)return;
     const t=new Date(w.date).getTime();
@@ -4565,18 +4585,26 @@ function getMuscleConsistency(numWeeks){
     });
   });
   const log=state.muscleAimLog||{};
+  const r1=n=>Math.round(n*10)/10;
   return muscles.map(m=>{
-    const mev=getMuscleLandmarks(m).mev;
+    const lm=getMuscleLandmarks(m);
+    const arr=sets[m].map(r1);
     const weeks=[];
-    for(let i=0;i<numWeeks;i++){
+    for(let k=0;k<numWeeks;k++){
+      const i=L-numWeeks+k;
       const start=firstStart+i*WK;
       const rec=log[String(start)];
       const recorded=!!(rec&&rec[m]>0);
-      const target=recorded?rec[m]:mev;
-      const s=Math.round(sets[m][i]*10)/10;
-      weeks.push({start,sets:s,target,est:!recorded,current:i===numWeeks-1,hit:target>0&&s>=target});
+      const target=recorded?rec[m]:lm.mev;
+      weeks.push({start,sets:arr[i],target,est:!recorded,current:i===L-1,hit:target>0&&arr[i]>=target,zone:getMuscleZone(arr[i],lm)});
     }
-    return{muscle:m,weeks,hits:weeks.filter(x=>x.hit).length,tracked:weeks.some(x=>x.sets>0)};
+    let streak=0,best=0;
+    if(lm.mev>0){
+      for(let i=L-2;i>=0&&arr[i]>=lm.mev;i--)streak++;
+      if(arr[L-1]>=lm.mev)streak++;
+      let run=0;for(let i=0;i<L;i++){if(arr[i]>=lm.mev){run++;if(run>best)best=run;}else run=0;}
+    }
+    return{muscle:m,lm,weeks,hits:weeks.filter(x=>x.hit).length,tracked:weeks.some(x=>x.sets>0),streak,best};
   });
 }
 function toggleMuscleConsistencyRow(muscle){
@@ -4590,12 +4618,14 @@ function renderMuscleConsistencyChart(){
   const rows=getMuscleConsistency(NUM);
   if(!rows.length){el.style.display='none';return;}
   el.style.display='';
+  const ZC=MUSCLE_ZONE_COLORS,GOLD='#ffe066';
   const fmt=n=>{const r=Math.round(n*10)/10;return Number.isInteger(r)?String(r):r.toFixed(1);};
-  const grid='display:grid;grid-template-columns:92px repeat('+NUM+',minmax(0,1fr)) 34px;column-gap:6px;align-items:center';
-  const cell='height:24px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;';
+  const grid='display:grid;grid-template-columns:92px repeat('+NUM+',minmax(0,1fr)) 38px;column-gap:6px;align-items:center';
+  const cellBase='position:relative;height:24px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;';
+  const starBadge='<span style="position:absolute;top:-5px;right:-3px;font-size:11px;line-height:1;color:'+GOLD+';text-shadow:0 0 2px #000,0 0 3px #000;pointer-events:none">\u2605</span>';
   const weekLabel=(w,i)=>i===NUM-1?'This wk':new Date(w.start).toLocaleDateString('en-GB',{day:'numeric',month:'short'});
   const labelRow='<div style="'+grid+';margin-bottom:4px"><div></div>'
-    +rows[0].weeks.map((w,i)=>'<div class="small text3" style="font-size:10px;text-align:center;white-space:nowrap">'+weekLabel(w,i)+'</div>').join('')
+    +rows[0].weeks.map((w,i)=>'<div class="small text3 mc-wk">'+weekLabel(w,i)+'</div>').join('')
     +'<div></div></div>';
   let anyEstimated=false;
   const onTarget=rows.filter(r=>r.weeks[NUM-1].hit).length;
@@ -4603,30 +4633,40 @@ function renderMuscleConsistencyChart(){
     const open=muscleConsistencyOpen===r.muscle;
     const cells=r.weeks.map(w=>{
       if(w.est&&w.sets>0)anyEstimated=true;
-      const t=fmt(w.sets);
-      if(w.hit)return'<div style="'+cell+'background:var(--accent);color:#0a0a0f">'+t+'</div>';
-      if(w.current)return'<div style="'+cell+'border:1px dashed var(--accent);color:var(--text2)">'+t+'</div>'; // this week, still in progress
-      return'<div style="'+cell+'background:var(--bg3);color:var(--text3)">'+t+'</div>';
+      const coloured=w.zone!=='none';
+      let st=cellBase+'background:'+((w.current&&!coloured)?'transparent':ZC[w.zone])+';color:'+(coloured?'#0a0a0f':'var(--text3)')+';';
+      if(w.current)st+='border:1px dashed '+(coloured?'rgba(255,255,255,0.8)':'var(--text3)')+';'; // this week, still in progress
+      return'<div style="'+st+'">'+fmt(w.sets)+(w.hit?starBadge:'')+'</div>';
     }).join('');
+    const streakTxt='\uD83D\uDD25 '+r.streak+(r.streak===1?' wk':' wks');
     const detail=open
       ?'<div style="margin:4px 0 6px;padding:8px 10px;background:var(--bg3);border-radius:8px;font-size:11.5px;line-height:1.75">'
+        +'<div class="text3" style="font-size:10.5px;line-height:1.5;margin-bottom:4px">MEV '+fmt(r.lm.mev)+' \u00b7 MAV '+fmt(r.lm.mav)+' \u00b7 MRV '+fmt(r.lm.mrv)
+        +'<br>\uD83D\uDD25 '+r.streak+' week'+(r.streak===1?'':'s')+' in a row at MEV or above (best '+r.best+')</div>'
         +r.weeks.map((w,i)=>'<div style="display:flex;justify-content:space-between;gap:8px"><span class="text2">'+weekLabel(w,i)+'</span>'
-          +'<span style="flex:1;text-align:center">'+fmt(w.sets)+' / '+(w.est?'~':'')+fmt(w.target)+' sets</span>'
-          +'<span style="width:18px;text-align:right;color:'+(w.hit?'var(--accent)':'var(--text3)')+'">'+(w.hit?'\u2713':(w.current?'\u2026':'\u2717'))+'</span></div>').join('')
+          +'<span style="flex:1;text-align:center"><span style="color:'+(w.zone==='none'?'var(--text3)':ZC[w.zone])+'">\u25A0</span> '+fmt(w.sets)+' / '+(w.est?'~':'')+fmt(w.target)+' sets</span>'
+          +'<span style="width:18px;text-align:right;color:'+(w.hit?GOLD:'var(--text3)')+'">'+(w.hit?'\u2605':(w.current?'\u2026':'\u2717'))+'</span></div>').join('')
         +'</div>'
       :'';
     return'<div class="mc-row'+(r.tracked?'':' mc-idle')+'" role="button" aria-expanded="'+(open?'true':'false')+'" onclick="toggleMuscleConsistencyRow(\''+r.muscle+'\')" style="'+grid+'">'
-      +'<div style="display:flex;align-items:center;gap:6px;min-width:0"><span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:'+(MUSCLE_COLORS[r.muscle]||'var(--text3)')+'"></span>'
+      +'<div style="min-width:0"><div style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:'+(MUSCLE_COLORS[r.muscle]||'var(--text3)')+'"></span>'
       +'<span style="font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escHtml(r.muscle)+'</span></div>'
+      +'<div style="font-size:10px;line-height:1.2;margin:1px 0 0 14px;white-space:nowrap;color:'+(r.streak>0?'var(--text2)':'var(--text3)')+'">'+streakTxt+'</div></div>'
       +cells
-      +'<div style="text-align:right;font-size:12px;font-weight:700;color:'+(r.hits===NUM?'var(--accent)':'var(--text2)')+'">'+r.hits+'/'+NUM+'</div>'
+      +'<div style="text-align:right;font-size:12px;font-weight:700;white-space:nowrap;color:'+(r.hits===NUM?GOLD:'var(--text2)')+'"><span style="font-size:9px;color:'+GOLD+'">\u2605</span>'+r.hits+'/'+NUM+'</div>'
       +'</div>'+detail;
   }).join('');
+  const swatch=(c,t)=>'<span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap"><span style="width:10px;height:10px;border-radius:3px;flex-shrink:0;background:'+c+'"></span>'+t+'</span>';
+  const keyStyle='display:flex;flex-wrap:wrap;gap:5px 12px;font-size:10.5px;line-height:1.3;color:var(--text2)';
+  const key='<div style="'+keyStyle+';margin-top:12px">'
+    +swatch(ZC.none,'No sets')+swatch(ZC.under,'Under MEV')+swatch(ZC.mev,'MEV+')+swatch(ZC.mav,'MAV+')+swatch(ZC.mrv,'MRV+')+'</div>'
+    +'<div style="'+keyStyle+';margin-top:5px"><span style="white-space:nowrap"><span style="color:'+GOLD+'">\u2605</span> Hit that week\u2019s target</span>'
+    +'<span style="white-space:nowrap">\uD83D\uDD25 Weeks in a row at MEV or above</span></div>';
   el.innerHTML='<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:12px">'
-    +'<div><div class="bold" style="font-size:14px">Muscle Consistency</div><div class="small text2">Weeks each muscle hit its sets target</div></div>'
+    +'<div><div class="bold" style="font-size:14px">Muscle Consistency</div><div class="small text2">Weekly sets per muscle</div></div>'
     +'<div class="small text2" style="text-align:right;white-space:nowrap"><b style="color:var(--text)">'+onTarget+'/'+rows.length+'</b> on target<br>this week</div>'
     +'</div>'
-    +labelRow+rowsHtml
+    +labelRow+rowsHtml+key
     +'<div class="small text3" style="font-size:10.5px;line-height:1.45;margin-top:10px">Tap a muscle for the week-by-week numbers.'
     +(anyEstimated?' Weeks before a target was recorded are checked against the muscle\u2019s minimum (MEV), marked ~.':'')+'</div>';
 }
