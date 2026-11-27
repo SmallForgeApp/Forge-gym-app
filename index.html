@@ -769,7 +769,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-11-24.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-11-26.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1855,6 +1855,15 @@ let muscleConsistencyOpen=null;   // which muscle's week-by-week detail is expan
 // 2026-11-24: colour key + corner star + MEV streak on the card. The hues are the Review gauge's zone hues (LM_ZONE_COLORS), opaque.
 const MUSCLE_STREAK_LOOKBACK_WEEKS=104; // how far back the MEV streak is allowed to count (the grid itself shows 5 weeks)
 const MUSCLE_ZONE_COLORS={none:'var(--bg3)',under:'#ff8c00',mev:'#47c8ff',mav:'#2ed573',mrv:'#ff4757'};
+// 2026-11-25: focus muscles + "Train what's left" on the Muscle Consistency card.
+let muscleFocusEditing=false;  // whether the focus chooser is open on the Home card (never persisted)
+let autoCustomFromLeft=false;  // Pick muscles was opened by "Train what's left": shows a one-line note until the selection is changed by hand
+// 2026-11-26: streak protection, weeks off, an overall row and a 12-week view on the Muscle Consistency card.
+const MUSCLE_CONSISTENCY_LONG_WEEKS=12;   // the longer heatmap view
+const MUSCLE_STREAK_WARN_DAYS_LEFT=3;     // a streak counts as "at risk" only in the last 3 days of the app's week ...
+const MUSCLE_STREAK_WARN_MIN=2;           // ... and only once it is at least 2 weeks long
+const MUSCLE_EXCUSE_KINDS=['holiday','ill','deload'];
+const MUSCLE_EXCUSE_ICONS={holiday:'\uD83C\uDFD6',ill:'\uD83E\uDD12',deload:'\uD83D\uDCA4'};
 let autoSessionMode='auto'; // which pane of the Auto Routine sheet is showing: 'auto' | 'custom'
 let autoCustomSel={};       // Pick-muscles choices: {muscle: sets}; a muscle that is absent is simply not in the session
 let autoCustomCtx=null;     // per-muscle context for the picker (suggested sets, recency, warnings) — computed once per sheet-open
@@ -4553,6 +4562,11 @@ function getMuscleZone(sets,lm){
   if(sets>=lm.mev)return'mev';
   return'under';
 }
+// WEEKS OFF (2026-11-26): a week can be marked holiday / ill / deload (state.weekExcuses, keyed by week-start ms; it applies to every
+// muscle). A marked week is neutral for streaks: if the sets reached MEV it counts like any other week, if not it neither extends
+// nor breaks the streak. Everything else about the card (colours, stars, targets) ignores the mark.
+function getMuscleWeekExcuse(startMs){const e=state.weekExcuses&&state.weekExcuses[String(startMs)];return MUSCLE_EXCUSE_KINDS.includes(e)?e:null;}
+function getMuscleWeekDaysLeft(){return (getAppWeekStartMs()+7*864e5-Date.now())/864e5;}
 function getMuscleConsistency(numWeeks){
   numWeeks=numWeeks||MUSCLE_CONSISTENCY_WEEKS;
   const WK=7*864e5;
@@ -4586,6 +4600,8 @@ function getMuscleConsistency(numWeeks){
   });
   const log=state.muscleAimLog||{};
   const r1=n=>Math.round(n*10)/10;
+  const daysLeft=getMuscleWeekDaysLeft();
+  const excusedAt=i=>!!getMuscleWeekExcuse(firstStart+i*WK);
   return muscles.map(m=>{
     const lm=getMuscleLandmarks(m);
     const arr=sets[m].map(r1);
@@ -4596,78 +4612,288 @@ function getMuscleConsistency(numWeeks){
       const rec=log[String(start)];
       const recorded=!!(rec&&rec[m]>0);
       const target=recorded?rec[m]:lm.mev;
-      weeks.push({start,sets:arr[i],target,est:!recorded,current:i===L-1,hit:target>0&&arr[i]>=target,zone:getMuscleZone(arr[i],lm)});
+      const isCur=i===L-1,hit=target>0&&arr[i]>=target;
+      // left = WHOLE sets still needed this week to reach the target (a 12-set week still misses a 12.2 target by one set)
+      weeks.push({start,sets:arr[i],target,est:!recorded,current:isCur,hit,zone:getMuscleZone(arr[i],lm),excuse:getMuscleWeekExcuse(start),
+        left:(isCur&&!hit&&target>0)?Math.max(0,Math.ceil(Math.round(target*10)/10-arr[i]-1e-9)):0});
     }
-    let streak=0,best=0;
+    // MEV streak: weeks in a row at or above MEV, counted back from the last COMPLETED week; a marked-off week below MEV is skipped
+    // (neither extends nor breaks it); the in-progress week adds 1 once it has reached MEV and never breaks the streak while short.
+    let streakDone=0,best=0;
     if(lm.mev>0){
-      for(let i=L-2;i>=0&&arr[i]>=lm.mev;i--)streak++;
-      if(arr[L-1]>=lm.mev)streak++;
-      let run=0;for(let i=0;i<L;i++){if(arr[i]>=lm.mev){run++;if(run>best)best=run;}else run=0;}
+      for(let i=L-2;i>=0;i--){if(arr[i]>=lm.mev)streakDone++;else if(excusedAt(i))continue;else break;}
+      let run=0;for(let i=0;i<L;i++){if(arr[i]>=lm.mev){run++;if(run>best)best=run;}else if(!excusedAt(i))run=0;}
     }
-    return{muscle:m,lm,weeks,hits:weeks.filter(x=>x.hit).length,tracked:weeks.some(x=>x.sets>0),streak,best};
+    const cur=arr[L-1];
+    const streak=streakDone+(lm.mev>0&&cur>=lm.mev?1:0);
+    // STREAK PROTECTION: a streak of 2+ weeks that this week's sets haven't yet carried to MEV, in the last days of the week, unless the week is marked off
+    const need=(lm.mev>0&&cur<lm.mev)?Math.max(0,Math.ceil(lm.mev-cur-1e-9)):0;
+    const atRisk=need>0&&streakDone>=MUSCLE_STREAK_WARN_MIN&&!excusedAt(L-1)&&daysLeft<=MUSCLE_STREAK_WARN_DAYS_LEFT;
+    return{muscle:m,lm,weeks,hits:weeks.filter(x=>x.hit).length,tracked:weeks.some(x=>x.sets>0),streak,best,streakDone,need,atRisk,series:arr};
   });
+}
+// OVERALL (2026-11-26): per week, whether EVERY muscle in the rows passed in (the focus muscles) reached MEV, with its own streak.
+function getMuscleOverall(rows,numWeeks){
+  if(!rows.length)return null;
+  const WK=7*864e5;
+  const L=rows[0].series.length;
+  const firstStart=getAppWeekStartMs()-(L-1)*WK;
+  const info=[];
+  for(let i=0;i<L;i++){
+    const short=rows.filter(r=>r.lm.mev>0&&r.series[i]<r.lm.mev).map(r=>r.muscle);
+    info.push({all:short.length===0,reached:rows.length-short.length,total:rows.length,short});
+  }
+  const exc=i=>!!getMuscleWeekExcuse(firstStart+i*WK);
+  let streakDone=0,best=0,run=0;
+  for(let i=L-2;i>=0;i--){if(info[i].all)streakDone++;else if(exc(i))continue;else break;}
+  for(let i=0;i<L;i++){if(info[i].all){run++;if(run>best)best=run;}else if(!exc(i))run=0;}
+  const weeks=[];
+  for(let k=0;k<numWeeks;k++){const i=L-numWeeks+k;const start=firstStart+i*WK;weeks.push(Object.assign({start,current:i===L-1,excuse:getMuscleWeekExcuse(start)},info[i]));}
+  return{weeks,hits:weeks.filter(w=>w.all).length,streak:streakDone+(info[L-1].all?1:0),best};
 }
 function toggleMuscleConsistencyRow(muscle){
   muscleConsistencyOpen=muscleConsistencyOpen===muscle?null:muscle;
   renderMuscleConsistencyChart();
 }
+// ── FOCUS MUSCLES (2026-11-25): which muscles you're training right now. Everything else folds into one "Not training" line and
+// drops out of the "on target this week" count, so an upper-only phase counts out of 5, not 9. Stored as state.muscleFocus (an
+// array of muscle names); missing, empty or stale = all tracked muscles. It only changes what this card shows and counts —
+// nothing about scheduling or dosing reads it.
+function getMuscleFocusList(){
+  const g=getAutoCustomGroups();
+  const all=g.upper.concat(g.lower,g.other);
+  const f=state.muscleFocus;
+  if(!Array.isArray(f)||!f.length)return all;
+  const set=new Set(f);
+  const list=all.filter(m=>set.has(m));
+  return list.length?list:all;
+}
+function setMuscleFocus(list){
+  const g=getAutoCustomGroups();
+  const all=g.upper.concat(g.lower,g.other);
+  const clean=all.filter(m=>list.includes(m));
+  if(!clean.length)return; // never "none": the last muscle can't be switched off
+  if(clean.length===all.length)delete state.muscleFocus; // "everything" is stored as unset, so muscles added later are included automatically
+  else state.muscleFocus=clean;
+  save();
+  renderMuscleConsistencyChart();
+}
+function toggleMuscleFocus(muscle){
+  const cur=getMuscleFocusList();
+  setMuscleFocus(cur.includes(muscle)?cur.filter(m=>m!==muscle):cur.concat(muscle));
+}
+function setMuscleFocusPreset(which){
+  const g=getAutoCustomGroups();
+  setMuscleFocus(which==='upper'?g.upper:which==='lower'?g.lower:g.upper.concat(g.lower,g.other));
+}
+function toggleMuscleFocusEditor(){muscleFocusEditing=!muscleFocusEditing;renderMuscleConsistencyChart();}
+// "Train what's left" (2026-11-25): opens Pick muscles with every focus muscle that is still short of this week's target ticked at
+// the sets it still needs — but never more than that muscle's per-session max (the rest is for another day; the stepper still goes
+// higher). A user action, so unlike the card's render it is allowed to read Aim and the active-muscle state.
+// Shared hand-over to Pick muscles: ticks each muscle in `plan` at the sets it needs, never more than that muscle's per-session max
+// (the stepper still goes higher). A user action, so unlike the card's render it may read Aim and the active-muscle state.
+function openPickMusclesWithPlan(plan,kind){
+  openAutoRoutineFromHome(); // always opens on Auto with a fresh selection ...
+  const sheet=document.getElementById('modal-auto-session');
+  if(!sheet||!sheet.classList.contains('open'))return;
+  setAutoSessionMode('custom'); // ... so switch to Pick muscles and fill it in
+  const ctx=getAutoCustomContext();
+  Object.keys(plan).forEach(m=>{
+    const c=ctx[m];if(!c||c.usable<1)return;
+    autoCustomSel[m]=Math.max(1,Math.min(plan[m],c.cap,AUTO_CUSTOM_MAX_SETS_PER_MUSCLE));
+  });
+  autoCustomFromLeft=kind;
+  renderAutoCustomPane();
+}
+// "Train what's left" (2026-11-25): every focus muscle still short of this week's target, at the sets it still needs.
+function trainWhatsLeft(){
+  const focus=new Set(getMuscleFocusList());
+  const left={};
+  getMuscleConsistency(MUSCLE_CONSISTENCY_WEEKS).forEach(r=>{const w=r.weeks[r.weeks.length-1];if(focus.has(r.muscle)&&w.left>0)left[r.muscle]=w.left;});
+  if(!Object.keys(left).length)return;
+  openPickMusclesWithPlan(left,'left');
+}
+// "Protect streaks" (2026-11-26): the lighter option — only the muscles whose streak is at risk, at the sets they need to reach MEV.
+function protectStreaks(){
+  const focus=new Set(getMuscleFocusList());
+  const need={};
+  getMuscleConsistency(MUSCLE_CONSISTENCY_WEEKS).forEach(r=>{if(focus.has(r.muscle)&&r.atRisk)need[r.muscle]=r.need;});
+  if(!Object.keys(need).length)return;
+  openPickMusclesWithPlan(need,'streaks');
+}
+// Tapping a week's icon in the Overall detail cycles: none -> holiday -> ill -> deload -> none.
+function cycleWeekExcuse(startMs){
+  const cur=getMuscleWeekExcuse(startMs);
+  const order=[null].concat(MUSCLE_EXCUSE_KINDS);
+  const next=order[(order.indexOf(cur)+1)%order.length];
+  if(!state.weekExcuses)state.weekExcuses={};
+  if(next)state.weekExcuses[String(startMs)]=next;else delete state.weekExcuses[String(startMs)];
+  save();
+  renderMuscleConsistencyChart();
+}
+function getMuscleViewWeeks(){return state.muscleViewWeeks===MUSCLE_CONSISTENCY_LONG_WEEKS?MUSCLE_CONSISTENCY_LONG_WEEKS:MUSCLE_CONSISTENCY_WEEKS;}
+function setMuscleViewWeeks(n){
+  if(n===MUSCLE_CONSISTENCY_LONG_WEEKS)state.muscleViewWeeks=n;else delete state.muscleViewWeeks;
+  save();
+  renderMuscleConsistencyChart();
+}
+function openMuscleOverallDetail(){
+  muscleConsistencyOpen='__overall';
+  renderMuscleConsistencyChart();
+  const row=document.getElementById('mc-overall-row');
+  if(row&&row.scrollIntoView){try{row.scrollIntoView({block:'center',behavior:'smooth'});}catch(e){}}
+}
 function renderMuscleConsistencyChart(){
   const el=document.getElementById('muscle-consistency-chart');
   if(!el)return;
-  const NUM=MUSCLE_CONSISTENCY_WEEKS;
-  const rows=getMuscleConsistency(NUM);
-  if(!rows.length){el.style.display='none';return;}
+  const NUM=getMuscleViewWeeks();
+  const compact=NUM>MUSCLE_CONSISTENCY_WEEKS; // 12-week heatmap: colour only, no numbers
+  const allRows=getMuscleConsistency(NUM);
+  if(!allRows.length){el.style.display='none';return;}
   el.style.display='';
-  const ZC=MUSCLE_ZONE_COLORS,GOLD='#ffe066';
+  const g=getAutoCustomGroups();
+  const allMuscles=g.upper.concat(g.lower,g.other);
+  const focusList=getMuscleFocusList();
+  const focusSet=new Set(focusList);
+  const rows=allRows.filter(r=>focusSet.has(r.muscle));
+  const resting=allRows.filter(r=>!focusSet.has(r.muscle));
+  const overall=getMuscleOverall(rows,NUM);
+  const same=(a,b)=>a.length===b.length&&a.every(x=>b.includes(x));
+  const focusName=same(focusList,allMuscles)?'All muscles':same(focusList,g.upper)?'Upper body':same(focusList,g.lower)?'Lower body':focusList.length+' of '+allMuscles.length+' muscles';
+  const ZC=MUSCLE_ZONE_COLORS,GOLD='#ffe066',ICON=MUSCLE_EXCUSE_ICONS;
   const fmt=n=>{const r=Math.round(n*10)/10;return Number.isInteger(r)?String(r):r.toFixed(1);};
-  const grid='display:grid;grid-template-columns:92px repeat('+NUM+',minmax(0,1fr)) 38px;column-gap:6px;align-items:center';
-  const cellBase='position:relative;height:24px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;';
-  const starBadge='<span style="position:absolute;top:-5px;right:-3px;font-size:11px;line-height:1;color:'+GOLD+';text-shadow:0 0 2px #000,0 0 3px #000;pointer-events:none">\u2605</span>';
-  const weekLabel=(w,i)=>i===NUM-1?'This wk':new Date(w.start).toLocaleDateString('en-GB',{day:'numeric',month:'short'});
-  const labelRow='<div style="'+grid+';margin-bottom:4px"><div></div>'
-    +rows[0].weeks.map((w,i)=>'<div class="small text3 mc-wk">'+weekLabel(w,i)+'</div>').join('')
-    +'<div></div></div>';
+  const grid='display:grid;grid-template-columns:92px repeat('+NUM+',minmax(0,1fr)) 38px;column-gap:'+(compact?3:6)+'px;align-items:center';
+  const cellBase=compact
+    ?'position:relative;height:18px;border-radius:3px;'
+    :'position:relative;height:28px;border-radius:7px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;font-weight:700;line-height:1;';
+  const starBadge=compact
+    ?'<span class="mc-star" style="position:absolute;top:1px;right:1px;width:4px;height:4px;border-radius:50%;background:'+GOLD+'"></span>'
+    :'<span class="mc-star" style="position:absolute;top:-5px;right:-3px;font-size:11px;line-height:1;color:'+GOLD+';text-shadow:0 0 2px #000,0 0 3px #000;pointer-events:none">\u2605</span>';
+  const offBadge=k=>'<span class="mc-off" style="position:absolute;left:1px;bottom:-1px;font-size:9px;line-height:1;pointer-events:none">'+ICON[k]+'</span>';
+  const dateLabel=w=>new Date(w.start).toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+  const weekLabel=w=>w.current?'This wk':dateLabel(w);
+  // 5w / 12w switch lives in the otherwise empty top-left cell of the week header
+  const seg=n=>'<button type="button" onclick="setMuscleViewWeeks('+n+')" aria-pressed="'+(NUM===n)+'" style="padding:4px 8px;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;background:'+(NUM===n?'var(--accent)':'transparent')+';color:'+(NUM===n?'#0a0a0f':'var(--text3)')+'">'+n+'w</button>';
+  const toggle='<div style="display:inline-flex;gap:2px;padding:2px;background:var(--bg3);border-radius:8px">'+seg(MUSCLE_CONSISTENCY_WEEKS)+seg(MUSCLE_CONSISTENCY_LONG_WEEKS)+'</div>';
+  const labelCells=allRows[0].weeks.map((w,k)=>{
+    if(!compact)return'<div class="small text3 mc-wk">'+weekLabel(w)+'</div>';
+    if(!(k===0||k===Math.floor(NUM/2)||k===NUM-1))return'<div></div>';
+    const last=k===NUM-1;
+    return'<div class="small text3" style="position:relative;height:12px;font-size:9.5px"><span style="position:absolute;top:0;'+(last?'right:0':'left:0')+';white-space:nowrap">'+(last?'now':dateLabel(w))+'</span></div>';
+  }).join('');
+  const labelRow='<div style="'+grid+';margin-bottom:4px"><div>'+toggle+'</div>'+labelCells+'<div></div></div>';
   let anyEstimated=false;
   const onTarget=rows.filter(r=>r.weeks[NUM-1].hit).length;
+  // OVERALL row: did EVERY focus muscle reach MEV that week?
+  const openAll=muscleConsistencyOpen==='__overall';
+  const overallCells=overall.weeks.map(w=>{
+    let st=cellBase+'background:'+(w.all?GOLD:((w.current&&!compact)?'transparent':'var(--bg3)'))+';';
+    if(!compact)st+='color:'+(w.all?'#0a0a0f':'var(--text2)')+';';
+    if(w.current)st+='border:1px dashed '+(w.all?'rgba(10,10,15,0.55)':'var(--text3)')+';';
+    if(compact&&w.excuse)st+='box-shadow:inset 0 -3px 0 rgba(255,255,255,0.65);';
+    return'<div style="'+st+'">'+(compact?'':'<span>'+(w.all?'\u2713':w.reached+'/'+w.total)+'</span>'+(w.excuse?offBadge(w.excuse):''))+'</div>';
+  }).join('');
+  const overallDetail=openAll
+    ?'<div style="margin:4px 0 8px;padding:8px 10px;background:var(--bg3);border-radius:8px;font-size:11.5px;line-height:1.7">'
+      +'<div class="text3" style="font-size:10.5px;line-height:1.5;margin-bottom:6px">\uD83D\uDD25 '+overall.streak+' week'+(overall.streak===1?'':'s')+' in a row with every muscle you\u2019re training at MEV or above (best '+overall.best+')'
+      +'<br>Tap a week\u2019s icon to mark it off \u2014 '+ICON.holiday+' holiday, '+ICON.ill+' ill, '+ICON.deload+' deload. A marked-off week never breaks a streak.</div>'
+      +overall.weeks.slice().reverse().map(w=>'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:2px 0">'
+        +'<span class="text2" style="width:54px;flex-shrink:0">'+weekLabel(w)+'</span>'
+        +'<span style="flex:1;line-height:1.4">'+(w.all?'<span style="color:'+GOLD+'">\u2713</span> all '+w.total+' at MEV or above':w.reached+'/'+w.total+' at MEV or above \u2014 short: '+w.short.map(escHtml).join(', '))+'</span>'
+        +'<button type="button" onclick="cycleWeekExcuse('+w.start+')" aria-label="Mark this week off" style="flex-shrink:0;width:30px;height:24px;border-radius:7px;border:1px solid var(--border);background:transparent;font-size:13px;line-height:1;cursor:pointer;color:var(--text3)">'+(w.excuse?ICON[w.excuse]:'\uFF0B')+'</button></div>').join('')
+      +'</div>'
+    :'';
+  const overallRow='<div id="mc-overall-row" class="mc-row" role="button" aria-expanded="'+(openAll?'true':'false')+'" onclick="toggleMuscleConsistencyRow(\'__overall\')" style="'+grid+';border-radius:0;padding:3px 0 7px;margin-bottom:5px;border-bottom:1px solid var(--border)">'
+    +'<div style="min-width:0"><div style="font-size:12px;font-weight:700">Overall</div>'
+    +'<div style="font-size:10px;line-height:1.2;margin-top:1px;white-space:nowrap;color:'+(overall.streak>0?'var(--text2)':'var(--text3)')+'">\uD83D\uDD25 '+overall.streak+(overall.streak===1?' wk':' wks')+'</div></div>'
+    +overallCells
+    +'<div style="text-align:right;font-size:12px;font-weight:700;white-space:nowrap;color:'+(overall.hits===NUM?GOLD:'var(--text2)')+'"><span style="font-size:10px;color:'+GOLD+'">\u2713</span>'+overall.hits+'/'+NUM+'</div>'
+    +'</div>'+overallDetail;
   const rowsHtml=rows.map(r=>{
     const open=muscleConsistencyOpen===r.muscle;
     const cells=r.weeks.map(w=>{
       if(w.est&&w.sets>0)anyEstimated=true;
       const coloured=w.zone!=='none';
-      let st=cellBase+'background:'+((w.current&&!coloured)?'transparent':ZC[w.zone])+';color:'+(coloured?'#0a0a0f':'var(--text3)')+';';
+      let st;
+      if(compact){
+        st=cellBase+'background:'+ZC[w.zone]+';';
+        if(w.current)st+='border:1px dashed rgba(255,255,255,0.8);';
+        if(w.excuse)st+='box-shadow:inset 0 -3px 0 rgba(255,255,255,0.65);';
+        return'<div style="'+st+'">'+(w.hit?starBadge:'')+'</div>';
+      }
+      st=cellBase+'background:'+((w.current&&!coloured)?'transparent':ZC[w.zone])+';color:'+(coloured?'#0a0a0f':'var(--text3)')+';';
       if(w.current)st+='border:1px dashed '+(coloured?'rgba(255,255,255,0.8)':'var(--text3)')+';'; // this week, still in progress
-      return'<div style="'+st+'">'+fmt(w.sets)+(w.hit?starBadge:'')+'</div>';
+      const sub=(w.current&&w.left>0)?'<span style="font-size:8.5px;font-weight:700;opacity:0.75;margin-top:2px">\u2212'+w.left+'</span>':''; // sets still needed this week
+      return'<div style="'+st+'"><span>'+fmt(w.sets)+'</span>'+sub+(w.hit?starBadge:'')+(w.excuse?offBadge(w.excuse):'')+'</div>';
     }).join('');
-    const streakTxt='\uD83D\uDD25 '+r.streak+(r.streak===1?' wk':' wks');
+    const streakTxt='\uD83D\uDD25 '+r.streak+(r.streak===1?' wk':' wks')+(r.atRisk?' \u26A0':'');
     const detail=open
       ?'<div style="margin:4px 0 6px;padding:8px 10px;background:var(--bg3);border-radius:8px;font-size:11.5px;line-height:1.75">'
         +'<div class="text3" style="font-size:10.5px;line-height:1.5;margin-bottom:4px">MEV '+fmt(r.lm.mev)+' \u00b7 MAV '+fmt(r.lm.mav)+' \u00b7 MRV '+fmt(r.lm.mrv)
-        +'<br>\uD83D\uDD25 '+r.streak+' week'+(r.streak===1?'':'s')+' in a row at MEV or above (best '+r.best+')</div>'
-        +r.weeks.map((w,i)=>'<div style="display:flex;justify-content:space-between;gap:8px"><span class="text2">'+weekLabel(w,i)+'</span>'
-          +'<span style="flex:1;text-align:center"><span style="color:'+(w.zone==='none'?'var(--text3)':ZC[w.zone])+'">\u25A0</span> '+fmt(w.sets)+' / '+(w.est?'~':'')+fmt(w.target)+' sets</span>'
+        +'<br>\uD83D\uDD25 '+r.streak+' week'+(r.streak===1?'':'s')+' in a row at MEV or above (best '+r.best+')'
+        +(r.atRisk?'<br><span style="color:var(--orange)">\u26A0 Needs '+r.need+' more set'+(r.need===1?'':'s')+' this week to keep the streak</span>':'')+'</div>'
+        +r.weeks.map(w=>'<div style="display:flex;justify-content:space-between;gap:8px"><span class="text2">'+weekLabel(w)+(w.excuse?' '+ICON[w.excuse]:'')+'</span>'
+          +'<span style="flex:1;text-align:center"><span style="color:'+(w.zone==='none'?'var(--text3)':ZC[w.zone])+'">\u25A0</span> '+fmt(w.sets)+' / '+(w.est?'~':'')+fmt(w.target)+' sets'+(w.current&&w.left>0?' \u00b7 '+w.left+' to go':'')+'</span>'
           +'<span style="width:18px;text-align:right;color:'+(w.hit?GOLD:'var(--text3)')+'">'+(w.hit?'\u2605':(w.current?'\u2026':'\u2717'))+'</span></div>').join('')
         +'</div>'
       :'';
     return'<div class="mc-row'+(r.tracked?'':' mc-idle')+'" role="button" aria-expanded="'+(open?'true':'false')+'" onclick="toggleMuscleConsistencyRow(\''+r.muscle+'\')" style="'+grid+'">'
       +'<div style="min-width:0"><div style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:'+(MUSCLE_COLORS[r.muscle]||'var(--text3)')+'"></span>'
       +'<span style="font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escHtml(r.muscle)+'</span></div>'
-      +'<div style="font-size:10px;line-height:1.2;margin:1px 0 0 14px;white-space:nowrap;color:'+(r.streak>0?'var(--text2)':'var(--text3)')+'">'+streakTxt+'</div></div>'
+      +'<div style="font-size:10px;line-height:1.2;margin:1px 0 0 14px;white-space:nowrap;color:'+(r.atRisk?'var(--orange)':(r.streak>0?'var(--text2)':'var(--text3)'))+'">'+streakTxt+'</div></div>'
       +cells
       +'<div style="text-align:right;font-size:12px;font-weight:700;white-space:nowrap;color:'+(r.hits===NUM?GOLD:'var(--text2)')+'"><span style="font-size:9px;color:'+GOLD+'">\u2605</span>'+r.hits+'/'+NUM+'</div>'
       +'</div>'+detail;
   }).join('');
+  // focus chooser (opened from the Focus button in the header, or by tapping the "Not training" line)
+  const pill=(on,label,fn,dot)=>'<button type="button" onclick="'+fn+'" style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid '+(on?'var(--accent)':'var(--border)')+';background:'+(on?'rgba(var(--accent-rgb),0.14)':'transparent')+';color:'+(on?'var(--text)':'var(--text3)')+'">'
+    +(dot?'<span style="width:8px;height:8px;border-radius:50%;background:'+dot+'"></span>':'')+label+'</button>';
+  const editor=muscleFocusEditing
+    ?'<div style="margin-bottom:12px;padding:10px;background:var(--bg3);border-radius:10px">'
+      +'<div class="small text2" style="margin-bottom:8px">Muscles you\u2019re training right now</div>'
+      +'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">'
+        +pill(same(focusList,allMuscles),'All',"setMuscleFocusPreset('all')")
+        +pill(same(focusList,g.upper),'Upper',"setMuscleFocusPreset('upper')")
+        +pill(same(focusList,g.lower),'Lower',"setMuscleFocusPreset('lower')")+'</div>'
+      +'<div style="display:flex;flex-wrap:wrap;gap:6px">'+allMuscles.map(m=>pill(focusSet.has(m),escHtml(m),"toggleMuscleFocus('"+m+"')",MUSCLE_COLORS[m]||'var(--text3)')).join('')+'</div>'
+      +'<div style="display:flex;justify-content:flex-end;margin-top:10px"><button type="button" class="btn btn-ghost btn-sm" onclick="toggleMuscleFocusEditor()">Done</button></div>'
+      +'</div>'
+    :'';
+  const restingLine=resting.length
+    ?'<div onclick="toggleMuscleFocusEditor()" style="margin-top:8px;padding:8px 10px;border-radius:8px;background:var(--bg3);font-size:11.5px;line-height:1.45;color:var(--text3);cursor:pointer">Not training: '+resting.map(r=>escHtml(r.muscle)).join(' \u00b7 ')+'</div>'
+    :'';
+  const risky=rows.filter(r=>r.atRisk);
+  const banner=risky.length
+    ?'<div id="mc-risk" style="margin-top:12px;padding:10px 12px;border-radius:10px;background:rgba(255,140,0,0.12);border:1px solid rgba(255,140,0,0.45)">'
+      +'<div style="font-size:12px;font-weight:700;color:var(--orange)">\u26A0 Streaks at risk this week</div>'
+      +'<div class="small text2" style="margin:4px 0 8px;line-height:1.5">'+risky.map(r=>escHtml(r.muscle)+' \uD83D\uDD25'+r.streakDone+' needs '+r.need+' more set'+(r.need===1?'':'s')+' to reach MEV').join(' \u00b7 ')+'</div>'
+      +'<div style="display:flex;flex-wrap:wrap;gap:8px"><button type="button" class="btn btn-sm" style="border:1px solid var(--orange);color:var(--orange);background:transparent" onclick="protectStreaks()">Protect streaks</button>'
+      +'<button type="button" class="btn btn-ghost btn-sm" onclick="openMuscleOverallDetail()">Away this week?</button></div></div>'
+    :'';
+  const leftRows=rows.filter(r=>r.weeks[NUM-1].left>0);
+  const totalLeft=leftRows.reduce((a,r)=>a+r.weeks[NUM-1].left,0);
+  const action=leftRows.length
+    ?'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px">'
+      +'<div class="small text2" style="min-width:0;line-height:1.4"><b style="color:var(--text)">'+totalLeft+' set'+(totalLeft===1?'':'s')+'</b> left across '+leftRows.length+' muscle'+(leftRows.length===1?'':'s')+' this week</div>'
+      +'<button type="button" class="btn btn-primary btn-sm" style="flex-shrink:0" onclick="trainWhatsLeft()">Train what\u2019s left</button></div>'
+    :'<div class="small" style="margin-top:12px;color:'+GOLD+'">\u2605 Every muscle you\u2019re training has hit its target this week</div>';
   const swatch=(c,t)=>'<span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap"><span style="width:10px;height:10px;border-radius:3px;flex-shrink:0;background:'+c+'"></span>'+t+'</span>';
   const keyStyle='display:flex;flex-wrap:wrap;gap:5px 12px;font-size:10.5px;line-height:1.3;color:var(--text2)';
-  const key='<div style="'+keyStyle+';margin-top:12px">'
+  const hitMark='<span style="color:'+GOLD+'">'+(compact?'\u25CF':'\u2605')+'</span>';
+  const offMark=compact?'<span style="display:inline-block;width:10px;height:3px;background:rgba(255,255,255,0.65);vertical-align:middle"></span>':ICON.holiday+' '+ICON.ill+' '+ICON.deload;
+  const key='<div style="'+keyStyle+';margin-top:14px">'
     +swatch(ZC.none,'No sets')+swatch(ZC.under,'Under MEV')+swatch(ZC.mev,'MEV+')+swatch(ZC.mav,'MAV+')+swatch(ZC.mrv,'MRV+')+'</div>'
-    +'<div style="'+keyStyle+';margin-top:5px"><span style="white-space:nowrap"><span style="color:'+GOLD+'">\u2605</span> Hit that week\u2019s target</span>'
-    +'<span style="white-space:nowrap">\uD83D\uDD25 Weeks in a row at MEV or above</span></div>';
+    +'<div style="'+keyStyle+';margin-top:5px"><span style="white-space:nowrap">'+hitMark+' Hit that week\u2019s target</span>'
+    +(compact?'':'<span style="white-space:nowrap">\u2212N sets still needed this week</span>')
+    +'<span style="white-space:nowrap">\uD83D\uDD25 Weeks in a row at MEV or above</span></div>'
+    +'<div style="'+keyStyle+';margin-top:5px"><span style="white-space:nowrap">'+offMark+' Week marked off (holiday, ill, deload) \u2014 never breaks a streak</span></div>';
   el.innerHTML='<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:12px">'
-    +'<div><div class="bold" style="font-size:14px">Muscle Consistency</div><div class="small text2">Weekly sets per muscle</div></div>'
+    +'<div><div class="bold" style="font-size:14px">Muscle Consistency</div>'
+    +'<button type="button" onclick="toggleMuscleFocusEditor()" aria-expanded="'+(muscleFocusEditing?'true':'false')+'" style="background:none;border:none;padding:6px 0;margin:-2px 0 -6px;font-size:12px;color:var(--text2);cursor:pointer;text-align:left">Focus: <span style="color:var(--text);font-weight:600;border-bottom:1px dashed var(--text3)">'+focusName+'</span> '+(muscleFocusEditing?'\u25B4':'\u25BE')+'</button></div>'
     +'<div class="small text2" style="text-align:right;white-space:nowrap"><b style="color:var(--text)">'+onTarget+'/'+rows.length+'</b> on target<br>this week</div>'
     +'</div>'
-    +labelRow+rowsHtml+key
-    +'<div class="small text3" style="font-size:10.5px;line-height:1.45;margin-top:10px">Tap a muscle for the week-by-week numbers.'
+    +editor+labelRow+overallRow+rowsHtml+restingLine+banner+action+key
+    +'<div class="small text3" style="font-size:10.5px;line-height:1.45;margin-top:10px">Tap a muscle for the week-by-week numbers. Tap Overall to mark weeks off.'
     +(anyEstimated?' Weeks before a target was recorded are checked against the muscle\u2019s minimum (MEV), marked ~.':'')+'</div>';
 }
 function renderActiveMesoHero(){
@@ -12609,7 +12835,7 @@ function openAutoSessionModal(mesoIdx){
     if(m&&m.phase==='deload'&&m.measurementsPending){startMesoMeasurements(mesoIdx);return;}
   }
   autoSessionMesoIdx=mesoIdx;
-  autoCustomSel={};autoCustomCtx=null; // Pick-muscles starts fresh every time the sheet is entered — a selection is never carried over between sessions
+  autoCustomSel={};autoCustomCtx=null;autoCustomFromLeft=false; // Pick-muscles starts fresh every time the sheet is entered — a selection is never carried over between sessions
   const input=document.getElementById('auto-session-minutes');if(input)input.value='';
   const setsInput=document.getElementById('auto-session-sets');if(setsInput)setsInput.value='';
   const est=document.getElementById('auto-session-default-estimate');
@@ -12968,7 +13194,8 @@ function renderAutoCustomPane(){
   catch(e){console.error('pick-muscles context failed:',e);chipsEl.innerHTML='';listEl.innerHTML='<div class="small text3" style="padding:12px 0">Couldn\u2019t load your muscles \u2014 switch back to Auto.</div>';renderAutoCustomSummary();return;}
   const sel=autoCustomSel,selKeys=Object.keys(sel);
   const groupOn=arr=>{const usable=arr.filter(m=>ctx[m]&&ctx[m].usable>0);return usable.length>0&&selKeys.length===usable.length&&usable.every(m=>sel[m]!=null);};
-  chipsEl.innerHTML='<div class="acs-chips">'
+  chipsEl.innerHTML=(autoCustomFromLeft?'<div class="small text3" style="margin-bottom:10px;line-height:1.45">'+(autoCustomFromLeft==='streaks'?'Pre-filled with the sets each streak still needs to reach MEV':'Pre-filled with what\u2019s left this week')+' \u2014 each muscle capped at its per-session max.</div>':'')
+    +'<div class="acs-chips">'
     +'<button type="button" class="acs-chip'+(groupOn(g.upper)?' on':'')+'" onclick="autoCustomPreset(\'upper\')">Upper</button>'
     +'<button type="button" class="acs-chip'+(groupOn(g.lower)?' on':'')+'" onclick="autoCustomPreset(\'lower\')">Lower</button>'
     +'<button type="button" class="acs-chip clear" onclick="autoCustomClear()"'+(selKeys.length?'':' disabled')+'>Clear</button></div>';
@@ -13041,6 +13268,7 @@ function autoCustomStep(muscle,delta){
 }
 // Upper / Lower: tick exactly that group (replacing whatever was ticked) at today's suggested sets; tapping the lit chip again clears.
 function autoCustomPreset(which){
+  autoCustomFromLeft=false;
   const g=getAutoCustomGroups(),ctx=getAutoCustomContext();
   const group=(which==='lower'?g.lower:g.upper).filter(m=>ctx[m]&&ctx[m].usable>0);
   const keys=Object.keys(autoCustomSel);
@@ -13049,7 +13277,7 @@ function autoCustomPreset(which){
   if(!alreadyThis)group.forEach(m=>{autoCustomSel[m]=ctx[m].suggest;});
   renderAutoCustomPane();
 }
-function autoCustomClear(){autoCustomSel={};renderAutoCustomPane();}
+function autoCustomClear(){autoCustomSel={};autoCustomFromLeft=false;renderAutoCustomPane();}
 function setAutoSessionMode(mode){
   autoSessionMode=mode==='custom'?'custom':'auto';
   const isCustom=autoSessionMode==='custom';
