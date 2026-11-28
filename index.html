@@ -470,6 +470,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
   <div class="scroll pb" id="home-scroll" style="display:flex;flex-direction:column;">
     <div id="paused-workout-banner"></div>
     <div id="google-sync-banner"></div>
+    <div id="mev-alert-banner"></div>
     <div class="home-sec" id="home-sec-meso" data-home-key="meso">
       <div id="active-meso-hero"></div>
     </div>
@@ -683,6 +684,33 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
         <button class="btn btn-ghost btn-full" onclick="requestTimerNotifyPermission()">Enable Notification Alerts</button>
         <div class="small text3" id="notify-permission-status" style="margin-top:8px"></div>
       </div>
+      <div class="section-label">Volume Alerts</div>
+      <div style="padding:0 16px 14px">
+        <div class="small text2" style="margin-bottom:10px;line-height:1.6">Warns you on Home when a muscle you're training looks set to finish the week (Monday 04:30 GMT to Monday 04:30 GMT) below its MEV — judged from the sets you've done so far plus that muscle's usual weekly pace. "Training" means your focus muscles (Home → Muscle Consistency); with none chosen, every muscle you've trained in the last 5 weeks. Paused for weeks marked holiday, ill or deload, and during a deload rotation.</div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="mev-alerts-toggle" onchange="setMevAlertsEnabled(this.checked)" style="width:16px;height:16px;accent-color:var(--accent)"/>
+          <span class="small text2">Show MEV warnings on Home</span>
+        </label>
+        <div class="small text3" id="mev-alerts-status" style="margin:8px 0 0"></div>
+      </div>
+      <div class="section-label">Phone Reminders (ntfy)</div>
+      <div style="padding:0 16px 14px">
+        <div class="small text2" style="margin-bottom:10px;line-height:1.6">Free phone reminders that arrive even when FORGE is closed, sent on days you haven't logged a session while a muscle is heading below MEV (the same check as the Home warning). Setup: install the ntfy app (Google Play or F-Droid), tap + and subscribe to the topic below on the default ntfy.sh server. FORGE queues each reminder with ntfy itself whenever you open it or log a workout, and replaces or cancels it as your sets change. ntfy only accepts reminders up to 3 days ahead, so after a longer gap away from FORGE you'll only get what was already queued. The topic name works like a password, so keep it private.</div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="ntfy-enabled" onchange="setNtfyEnabled(this.checked)" style="width:16px;height:16px;accent-color:var(--accent)"/>
+          <span class="small text2">Send reminders through ntfy</span>
+        </label>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <input type="text" id="ntfy-topic" placeholder="topic name" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" onchange="setNtfyTopic(this.value)" style="flex:1;min-width:0"/>
+          <button class="btn btn-ghost" onclick="generateNtfyTopic()" style="flex-shrink:0">New</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:10px">
+          <span class="small text2" style="flex-shrink:0">Remind me at</span>
+          <input type="time" id="ntfy-time" onchange="setNtfyTime(this.value)" style="flex:1;min-width:0"/>
+        </div>
+        <div class="small text3" id="ntfy-status" style="margin:8px 0 10px"></div>
+        <button class="btn btn-ghost btn-full" onclick="sendNtfyTest()">Send a test reminder</button>
+      </div>
       <div class="section-label">Display</div>
       <div style="padding:0 16px 14px">
         <div class="input-label">Accent Color</div>
@@ -769,7 +797,7 @@ body.light-mode{--bg:#F0F2F5;--bg2:#FFFFFF;--bg3:#E8EAF0;--bg4:#D8DCE8;--text:#0
       </div>
     </div>
 
-    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-11-26.1</div>
+    <div style="padding:20px 16px 20px" class="small text3" id="build-stamp">FORGE build 2026-11-27.1</div>
   </div>
   <div class="bottom-nav" id="nav-settings"></div>
 </div>
@@ -1852,6 +1880,14 @@ const AUTO_CUSTOM_MIN_SUGGEST=2;          // floor for the pre-filled sets: a mu
 // (Home's render chain runs at boot and reaches renderMuscleConsistencyChart).
 const MUSCLE_CONSISTENCY_WEEKS=5; // the same 5 weeks Home's Weekly Consistency chart shows (getWeekBuckets(5))
 let muscleConsistencyOpen=null;   // which muscle's week-by-week detail is expanded on the Home card (null = none); never persisted
+// MEV ALERTS + NTFY REMINDERS (2026-11-27) — declared this early for the same boot-chain reason as the consts above.
+const MEV_ALERT_MIN_PACE_WEEKS=2;      // completed weeks of a muscle's OWN history before its usual pace is trusted (an explicit focus muscle needs just 1)
+const NTFY_SERVER='https://ntfy.sh';   // the free public server; the ntfy app subscribes to the same one
+const NTFY_MAX_AHEAD_MS=70*36e5;       // ntfy refuses scheduled delivery more than 3 days (72h) out — stay safely inside it
+const NTFY_MIN_LEAD_MS=2*6e4;          // never schedule a reminder less than 2 minutes away (ntfy's own floor is 10 seconds)
+const NTFY_DEFAULT_TIME='18:00';
+const MEV_PAUSE_TEXT={holiday:'this week is marked as a holiday',ill:'this week is marked as ill','deload-week':'this week is marked as a deload','deload-cycle':'your active mesocycle is in its deload rotation'};
+let ntfySyncTimer=null,ntfyInSync=false,ntfyResync=false;
 // 2026-11-24: colour key + corner star + MEV streak on the card. The hues are the Review gauge's zone hues (LM_ZONE_COLORS), opaque.
 const MUSCLE_STREAK_LOOKBACK_WEEKS=104; // how far back the MEV streak is allowed to count (the grid itself shows 5 weeks)
 const MUSCLE_ZONE_COLORS={none:'var(--bg3)',under:'#ff8c00',mev:'#47c8ff',mav:'#2ed573',mrv:'#ff4757'};
@@ -2208,6 +2244,7 @@ function save(){
   try{
     localStorage.setItem('forge_v4',JSON.stringify(state));
     if(saveIsFailing)hideSaveErrorBanner();
+    try{queueNtfySync();}catch(_e){}
   }catch(e){
     console.error('FORGE save failed:',e);
     showSaveErrorBanner();
@@ -4147,6 +4184,8 @@ try{
   document.getElementById('prog-inc-chevron').textContent=expanded?'▾':'▸';
   document.getElementById('accent-color-input').value=state.accentColor||'#D97757';
   updateNotifyPermissionStatus();
+  syncNtfySettingsUI();
+  updateNtfyStatusLine();
 }catch(e){console.error('Boot settings-init tail failed:',e);}
 function saveProgressionIncrement(kind,val){
   const v=parseFloat(val);
@@ -4896,6 +4935,344 @@ function renderMuscleConsistencyChart(){
     +'<div class="small text3" style="font-size:10.5px;line-height:1.45;margin-top:10px">Tap a muscle for the week-by-week numbers. Tap Overall to mark weeks off.'
     +(anyEstimated?' Weeks before a target was recorded are checked against the muscle\u2019s minimum (MEV), marked ~.':'')+'</div>';
 }
+// ── MEV ALERTS (2026-11-24 request: "notify me when it thinks I won't be achieving at least MEV for the muscles I am actively training")
+// + PHONE REMINDERS THROUGH NTFY (2026-11-27: "a reminder on a day when I haven't trained, not a day when I have") ──
+// WHEN: judged per app week (Monday 04:30 GMT -> next Monday 04:30 GMT) — the same weeks and set tallies as the Muscle Consistency card
+//   (getMuscleConsistency: done sets + secondary-muscle credit), whose pass mark already falls back to MEV.
+// WHICH MUSCLES ("actively training"): your FOCUS muscles (getMuscleFocusList — the Home card's "which muscles you're training right now"
+//   picker). With no focus chosen that list is every tracked muscle, and then only those with credited sets inside the card's 5-week
+//   window are watched, so a muscle you've dropped never nags; a muscle you've explicitly put in focus is always watched. Fully-resting
+//   muscles (every exercise injured) are skipped. Weeks marked holiday/ill/deload (state.weekExcuses) pause everything for that week and
+//   are left out of the pace sample, as is any week before the muscle's first-ever set.
+// WHAT COUNTS AS "WON'T ACHIEVE": a muscle still under MEV is flagged when EITHER (a) its usual pace won't close the gap in the time left —
+//   projected = sets so far + (median of its last 4 completed weeks) x fraction of the week still to come, capped at what the remaining
+//   days could physically add — or (b) even a session on every remaining day at the per-session cap (getMuscleExposureCap) couldn't get
+//   it there ("out of reach": shown on Home, never reminded — nothing left to act on).
+// PURE: reads history/landmarks/focus/excuses only. Deliberately never calls getAutoRoutineActiveMuscles / getAutoRoutineMuscleTargetNow /
+//   getMuscleExposureInfo — those stamp tenure/aim records, and a passive render or background sync must not start a muscle's ramp.
+// atMs lets the reminder planner ask "how would this look at 6pm tomorrow if nothing more is logged?": no history exists after now, so a
+//   later instant is the same series with the clock moved on (and, past Monday 04:30, one empty week appended). `rows` lets the planner
+//   pass one getMuscleConsistency result to several instants instead of re-walking the history for each.
+function mevMedian(arr){
+  const a=arr.slice().sort((x,y)=>x-y),n=a.length;
+  return n%2?a[(n-1)/2]:(a[n/2-1]+a[n/2])/2;
+}
+function isMevAlertsEnabled(){return state.mevAlertsEnabled!==false;}
+function getMevRiskReport(atMs,rows){
+  const WK=7*864e5,now=Date.now(),at=atMs==null?now:atMs;
+  const out={items:[],paused:null,checked:0,at,weekStart:getAppWeekStartMs(at),daysLeft:0};
+  out.daysLeft=Math.max(0,(out.weekStart+WK-at)/864e5);
+  const excuse=getMuscleWeekExcuse(out.weekStart);
+  if(excuse){out.paused=excuse==='deload'?'deload-week':excuse;return out;}
+  const meso=(state.mesocycles||[]).find(m=>m&&m.id===state.activeMesoId);
+  if(meso&&meso.phase==='deload'){out.paused='deload-cycle';return out;} // a deload rotation can deliberately trim sets — a shortfall there is the plan
+  const remainingFrac=Math.max(0,Math.min(1,out.daysLeft/7));
+  const slots=getAppWeekDaysLeft(at)+1; // days that can still hold a session, today included
+  const nowWeek=getAppWeekStartMs(now);
+  const shift=Math.max(0,Math.round((out.weekStart-nowWeek)/WK)); // 0 = this app week, 1 = the next one
+  const g=getAutoCustomGroups(),all=g.upper.concat(g.lower,g.other);
+  const focus=getMuscleFocusList(),explicit=focus.length<all.length,focusSet=new Set(focus);
+  rows=rows||getMuscleConsistency(MUSCLE_CONSISTENCY_WEEKS);
+  rows.forEach(r=>{
+    if(!focusSet.has(r.muscle))return;
+    const mev=r.lm.mev;
+    if(!(mev>0))return;
+    if(isAutoRoutineMuscleFullyResting(r.muscle))return;
+    const L=r.series.length;                    // series runs oldest..current week; a later instant just appends empty weeks
+    const cur=L-1+shift;
+    const val=i=>(i>=0&&i<L)?r.series[i]:0;
+    const weekStartOf=i=>nowWeek+(i-(L-1))*WK;
+    const done=val(cur);
+    let tracked=false;
+    for(let i=cur-(MUSCLE_CONSISTENCY_WEEKS-1);i<=cur;i++){if(val(i)>0){tracked=true;break;}}
+    if(!explicit&&!tracked)return;
+    out.checked++;
+    if(done>=mev)return;                        // already there this week
+    const sample=[];let started=false;
+    for(let i=cur-4;i<cur;i++){                 // the last 4 completed weeks
+      const v=val(i);
+      if(!started){if(v>0)started=true;else continue;} // weeks before its first-ever set aren't zeros, they're before it began
+      if(getMuscleWeekExcuse(weekStartOf(i)))continue;
+      sample.push(v);
+    }
+    const pace=sample.length>=(explicit?1:MEV_ALERT_MIN_PACE_WEEKS)?mevMedian(sample):(explicit?0:null);
+    const reach=slots*getMuscleExposureCap(r.muscle); // the most it could still add: a session on every remaining day, each at the per-session cap
+    const unreachable=done+reach<mev-1e-9;
+    const projected=pace==null?null:Math.round((done+Math.min(pace*remainingFrac,reach))*10)/10;
+    if(!(unreachable||(projected!=null&&projected<mev-1e-9)))return;
+    out.items.push({muscle:r.muscle,done,mev,need:Math.max(1,Math.ceil(mev-done-1e-9)),pace,projected,unreachable,slots,
+      streak:shift===0?(r.streakDone||0):0});
+  });
+  out.items.sort((a,b)=>(b.mev-(b.projected!=null?b.projected:b.done))-(a.mev-(a.projected!=null?a.projected:a.done)));
+  return out;
+}
+function mevFmt(n){const r=Math.round(n*10)/10;return Number.isInteger(r)?String(r):r.toFixed(1);}
+function mevTimeLeftLabel(days){
+  if(days>=1.5)return 'about '+Math.round(days)+' days left';
+  if(days>=1)return 'about a day left';
+  return 'about '+Math.max(1,Math.round(days*24))+'h left';
+}
+function mevItemDetail(it){
+  const streak=it.streak>=MUSCLE_STREAK_WARN_MIN?' \u00b7 '+it.streak+'-week MEV streak at stake':'';
+  if(it.unreachable)return 'can\u2019t reach MEV this week now \u2014 needs '+it.need+' more with '+it.slots+(it.slots===1?' day':' days')+' left'+streak;
+  return 'on course for ~'+mevFmt(it.projected)+' \u00b7 needs '+it.need+' more'+streak;
+}
+function updateMevAlertsStatusLine(report){
+  const el=document.getElementById('mev-alerts-status');
+  if(!el)return;
+  if(!isMevAlertsEnabled()){el.textContent='Off.';return;}
+  report=report||getMevRiskReport();
+  if(report.paused){el.textContent='Paused \u2014 '+MEV_PAUSE_TEXT[report.paused]+'.';return;}
+  const n=report.items.length;
+  el.textContent='Watching '+report.checked+' muscle'+(report.checked===1?'':'s')+' \u2014 '
+    +(n?n+' heading below MEV this week: '+report.items.map(i=>i.muscle).join(', ')+'.':'none heading below MEV right now.');
+}
+function renderMevAlertBanner(){
+  const el=document.getElementById('mev-alert-banner');
+  const report=getMevRiskReport();
+  updateMevAlertsStatusLine(report);
+  if(!el)return;
+  if(!isMevAlertsEnabled()||report.paused||!report.items.length||state.mevAlertHiddenDay===getAppDayIndex()){el.innerHTML='';return;}
+  const rows=report.items.map(it=>{
+    const col=it.unreachable?'var(--red)':'var(--orange)';
+    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--border)">'
+      +'<div style="min-width:0"><div style="font-weight:600;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:'+(MUSCLE_COLORS[it.muscle]||'var(--text3)')+'"></span>'+escHtml(it.muscle)+'</div>'
+      +'<div class="small text2" style="margin-top:2px">'+mevItemDetail(it)+'</div></div>'
+      +'<div style="text-align:right;flex-shrink:0"><div style="font-weight:700;color:'+col+'">'+mevFmt(it.done)+' / '+mevFmt(it.mev)+'</div><div class="small text3" style="font-size:10.5px">sets \u00b7 MEV</div></div></div>';
+  }).join('');
+  el.innerHTML='<div style="margin:12px 16px 4px;padding:14px;background:var(--bg2);border:1px solid var(--orange);border-radius:var(--radius)">'
+    +'<div style="font-weight:600;color:var(--orange)">\ud83d\udcc9 Heading below MEV this week</div>'
+    +'<div class="small text2" style="margin:3px 0 8px">'+mevTimeLeftLabel(report.daysLeft)+' \u00b7 judged from your usual weekly sets</div>'
+    +rows
+    +'<div style="display:flex;gap:8px;margin-top:10px"><button class="btn btn-primary flex-1" style="flex:1.7" onclick="trainWhatsLeft()">\ud83c\udfaf Train what\u2019s left</button>'
+    +'<button class="btn btn-ghost flex-1" onclick="hideMevAlertToday()">Hide today</button></div></div>';
+}
+function hideMevAlertToday(){
+  state.mevAlertHiddenDay=getAppDayIndex(); // same 04:30 GMT day rule as everything else — it comes back tomorrow if still true
+  save();
+  try{renderMevAlertBanner();}catch(e){console.error('MEV banner refresh failed:',e);}
+}
+function setMevAlertsEnabled(on){
+  state.mevAlertsEnabled=!!on;
+  save();
+  try{renderMevAlertBanner();}catch(e){console.error('MEV banner refresh failed:',e);}
+}
+
+// ── PHONE REMINDERS THROUGH NTFY (2026-11-27) ──
+// A web page can't wake a phone, so the reminder is handed to ntfy's server ahead of time and the ntfy Android app delivers it — which is
+// why it works when FORGE is closed, on a day you haven't opened it. ntfy's own scheduled-delivery feature does the waiting:
+//   POST  {server}/{topic}/{sequence-id}?delay=<unix seconds>&title=..&tags=..  (body = message)  queues it; posting the SAME sequence id
+//         again before it fires replaces it (documented: the original scheduled message is deleted and swapped for the new one);
+//   GET   {server}/{topic}/{sequence-id}/delete   cancels a queued one (documented alternative to DELETE). 3 days is the furthest ahead ntfy accepts.
+// Everything rides in the URL with a plain-text body, so these are "simple" cross-origin requests — no CORS preflight to depend on.
+// THE PLAN: for each of the next few days (within ntfy's 3-day reach) at the chosen clock time, ask getMevRiskReport "if nothing more is logged,
+// is a muscle short at that moment?". If yes, one reminder for that day, keyed by its date (forge-mev-YYYYMMDD), so a later sync can replace or
+// cancel exactly that day's. Today is skipped once a workout is logged (or in progress) today — you asked for reminders on days you HAVEN'T
+// trained; later days are assumed untrained, and logging a session re-plans everything, so a reminder that training made pointless is cancelled.
+// Syncs only talk to ntfy when the plan changed (state.ntfyPlan remembers what's queued), and run on a short delay after any save(), on open,
+// on return to the app, and on a 10-minute tick while it stays open — never mid-keystroke, never in a loop.
+function ntfyTopicOk(t){return typeof t==='string'&&/^[A-Za-z0-9_-]{1,64}$/.test(t);}
+function isNtfyReady(){return !!state.ntfyEnabled&&ntfyTopicOk(state.ntfyTopic);}
+function makeNtfyTopic(){ // the topic IS the password on a public server, so it's long and random
+  const a=new Uint8Array(16);
+  try{crypto.getRandomValues(a);}catch(e){for(let i=0;i<a.length;i++)a[i]=Math.floor(Math.random()*256);}
+  return 'forge-'+Array.from(a,b=>'abcdefghijklmnopqrstuvwxyz0123456789'[b%36]).join('');
+}
+function ntfyReminderClock(){
+  const m=/^(\d{1,2}):(\d{2})$/.exec(state.ntfyTime||'');
+  return m?{h:Math.min(23,+m[1]),mi:Math.min(59,+m[2])}:{h:18,mi:0};
+}
+function ntfyDateKey(d){return d.getFullYear()+('0'+(d.getMonth()+1)).slice(-2)+('0'+d.getDate()).slice(-2);}
+function ntfyWhenLabel(ms){return new Date(ms).toLocaleString([],{weekday:'short',hour:'2-digit',minute:'2-digit'});}
+function ntfyClickUrl(){try{return /^https:/.test(location.protocol)?location.href.split('#')[0].split('?')[0]:'';}catch(e){return '';}}
+function ntfyTrainedInAppDay(now){
+  if(activeWorkout)return true; // mid-session counts as training today
+  const idx=getAppDayIndex(now);
+  try{ // a paused workout started today counts too (read-only: getSavedDraft would delete a bad draft as a side effect)
+    const raw=localStorage.getItem('forge_active_draft');
+    if(raw){const d=JSON.parse(raw);const st=d&&d.activeWorkout&&d.activeWorkout.startTime;if(st&&getAppDayIndex(st)===idx)return true;}
+  }catch(e){}
+  return (state.history||[]).some(w=>w&&w.date&&getAppDayIndex(new Date(w.date).getTime())===idx);
+}
+function ntfyReminderText(items,daysLeft){ // title stays plain ASCII (it travels in the URL); the body is UTF-8
+  const n=items.length;
+  const lines=items.slice(0,4).map(i=>i.muscle+' '+mevFmt(i.done)+'/'+mevFmt(i.mev)+' \u00b7 needs '+i.need+' more set'+(i.need===1?'':'s')
+    +(i.streak>=MUSCLE_STREAK_WARN_MIN?' \u00b7 '+i.streak+'-week streak at stake':''));
+  if(n>4)lines.push('+'+(n-4)+' more');
+  const left=mevTimeLeftLabel(daysLeft);
+  lines.push(left.charAt(0).toUpperCase()+left.slice(1)+' this week.');
+  return{title:'FORGE: '+n+' muscle'+(n===1?'':'s')+' heading below MEV',body:lines.join('\n')};
+}
+function buildNtfyPlan(now){
+  const plan={},clock=ntfyReminderClock(),todayIdx=getAppDayIndex(now);
+  const trainedToday=ntfyTrainedInAppDay(now);
+  const rows=getMuscleConsistency(MUSCLE_CONSISTENCY_WEEKS);
+  for(let k=0;k<=3;k++){
+    const d=new Date(now);
+    d.setHours(clock.h,clock.mi,0,0);
+    d.setDate(d.getDate()+k); // local calendar maths, so a clock change (GMT <-> BST) can't shift the reminder off its time
+    const at=d.getTime();
+    if(at<now+NTFY_MIN_LEAD_MS)continue;
+    if(at>now+NTFY_MAX_AHEAD_MS)break;
+    if(trainedToday&&getAppDayIndex(at)===todayIdx)continue;
+    const rep=getMevRiskReport(at,rows);
+    const items=rep.items.filter(i=>!i.unreachable);
+    if(rep.paused||!items.length)continue;
+    const txt=ntfyReminderText(items,rep.daysLeft);
+    plan['forge-mev-'+ntfyDateKey(d)]={at,title:txt.title,body:txt.body,sig:at+'|'+txt.title+'|'+txt.body};
+  }
+  return plan;
+}
+function ntfyUrl(topic,seq,suffix,params){
+  let u=NTFY_SERVER+'/'+encodeURIComponent(topic);
+  if(seq)u+='/'+encodeURIComponent(seq);
+  if(suffix)u+='/'+suffix;
+  if(params){const qs=new URLSearchParams(params).toString();if(qs)u+='?'+qs;}
+  return u;
+}
+// One request to ntfy -> {ok, status?, error?, opaque?}. A TypeError from fetch means offline OR the browser refused to show us ntfy's reply
+// (CORS) even though the request went out, so it's retried once with no-cors: that can't read a reply, but a fetch that resolves proves the
+// request reached the network. (Publishing the same sequence id twice just replaces itself, and cancelling twice is harmless.)
+async function ntfyFetch(url,opts){
+  const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),15000);
+  try{
+    let res;
+    try{res=await fetch(url,Object.assign({signal:ctl.signal},opts));}
+    catch(e){
+      if(e&&e.name==='AbortError')return{ok:false,error:'timed out'};
+      try{await fetch(url,Object.assign({signal:ctl.signal,mode:'no-cors'},opts));return{ok:true,opaque:true};}
+      catch(e2){return{ok:false,error:'offline'};}
+    }
+    if(res.ok)return{ok:true};
+    let msg='';try{const j=await res.json();msg=(j&&j.error)||'';}catch(_e){}
+    return{ok:false,status:res.status,error:msg||('HTTP '+res.status)};
+  }finally{clearTimeout(timer);}
+}
+function ntfyPublishReminder(seq,p){
+  const params={delay:String(Math.round(p.at/1000)),title:p.title,tags:'muscle'};
+  const click=ntfyClickUrl();if(click)params.click=click;
+  return ntfyFetch(ntfyUrl(state.ntfyTopic,seq,null,params),{method:'POST',body:p.body});
+}
+function ntfyCancelReminder(seq,topic){
+  return ntfyFetch(ntfyUrl(topic,seq,'delete'),{method:'GET',cache:'no-store'});
+}
+async function cancelAllNtfy(topic){ // best effort; anything that can't be cancelled stays on the books so a later sync retries it
+  const old=state.ntfyPlan||{},now=Date.now(),keep={};
+  for(const seq of Object.keys(old)){
+    if(!(old[seq].at>now))continue;
+    if(!ntfyTopicOk(topic)){keep[seq]=old[seq];continue;}
+    const r=await ntfyCancelReminder(seq,topic);
+    if(!(r.ok||r.status===404))keep[seq]=old[seq];
+  }
+  state.ntfyPlan=keep;
+  save();
+}
+async function syncNtfyReminders(){
+  if(ntfyInSync){ntfyResync=true;return;} // something changed while a sync was running: go round again afterwards
+  if(!isNtfyReady()){updateNtfyStatusLine();return;}
+  ntfyInSync=true;
+  const topic=state.ntfyTopic;
+  try{
+    const now=Date.now(),plan=buildNtfyPlan(now),old=state.ntfyPlan||{},next={};
+    let failed=null;
+    for(const seq of Object.keys(old)){ // queued before, not wanted any more: cancel
+      if(plan[seq])continue;
+      if(!(old[seq].at>now))continue; // already fired or expired — nothing to cancel, just forget it
+      const r=await ntfyCancelReminder(seq,topic);
+      if(!(r.ok||r.status===404)){next[seq]=old[seq];failed=r;}
+    }
+    for(const seq of Object.keys(plan)){ // new or changed: (re)publish — same sequence id replaces the queued one
+      const p=plan[seq],o=old[seq];
+      if(o&&o.sig===p.sig&&o.at>now){next[seq]=o;continue;}
+      const r=await ntfyPublishReminder(seq,p);
+      if(r.ok)next[seq]={at:p.at,sig:p.sig};
+      else{if(o&&o.at>now)next[seq]=o;failed=r;}
+    }
+    state.ntfyPlan=next;
+    state.ntfyLastSync={at:now,ok:!failed,text:failed?failed.error:''};
+    save();
+  }catch(e){
+    console.error('ntfy sync failed:',e);
+    state.ntfyLastSync={at:Date.now(),ok:false,text:'unexpected error'};
+  }finally{
+    ntfyInSync=false;
+    try{updateNtfyStatusLine();}catch(_e){}
+    if(ntfyResync){ntfyResync=false;queueNtfySync(4000);} // a few seconds' gap, so a quick change can't race the replace it follows
+  }
+}
+function queueNtfySync(delayMs){
+  if(ntfySyncTimer||ntfyInSync||!isNtfyReady())return;
+  ntfySyncTimer=setTimeout(()=>{ntfySyncTimer=null;syncNtfyReminders();},delayMs==null?10000:delayMs);
+}
+function updateNtfyStatusLine(){
+  const el=document.getElementById('ntfy-status');
+  if(!el)return;
+  const queued=Object.values(state.ntfyPlan||{}).filter(p=>p&&p.at>Date.now()).sort((a,b)=>a.at-b.at);
+  if(!state.ntfyEnabled){
+    el.textContent=queued.length?'Off \u2014 but '+queued.length+' queued reminder'+(queued.length===1?'':'s')+' couldn\u2019t be cancelled (offline?) and may still arrive.':'Off.';
+    return;
+  }
+  if(!ntfyTopicOk(state.ntfyTopic)){el.textContent='Enter a topic name (letters, numbers, - and _ only).';return;}
+  const ls=state.ntfyLastSync;
+  let t=queued.length?'Queued with ntfy: '+queued.map(p=>ntfyWhenLabel(p.at)).join(', ')+'.'
+    :(ls?'Nothing queued \u2014 no muscle is projected short on a day you haven\u2019t trained.':'Not synced yet.');
+  if(ls&&!ls.ok)t+=' Last sync failed ('+ls.text+') \u2014 it retries next time you open FORGE or log a workout.';
+  el.textContent=t;
+}
+function syncNtfySettingsUI(){
+  const e=document.getElementById('ntfy-enabled'),t=document.getElementById('ntfy-topic'),h=document.getElementById('ntfy-time'),m=document.getElementById('mev-alerts-toggle');
+  if(e)e.checked=!!state.ntfyEnabled;
+  if(t)t.value=state.ntfyTopic||'';
+  if(h)h.value=state.ntfyTime||NTFY_DEFAULT_TIME;
+  if(m)m.checked=isMevAlertsEnabled();
+}
+async function setNtfyEnabled(on){
+  on=!!on;
+  state.ntfyEnabled=on;
+  if(on&&!ntfyTopicOk(state.ntfyTopic))state.ntfyTopic=makeNtfyTopic();
+  save();
+  syncNtfySettingsUI();
+  if(on)await syncNtfyReminders();
+  else await cancelAllNtfy(state.ntfyTopic);
+  updateNtfyStatusLine();
+}
+async function setNtfyTopic(v){
+  v=(v||'').trim();
+  const el=document.getElementById('ntfy-topic');
+  if(!ntfyTopicOk(v)){
+    const st=document.getElementById('ntfy-status');
+    if(st)st.textContent='Topic names can only use letters, numbers, - and _ (up to 64 characters).';
+    if(el)el.value=state.ntfyTopic||'';
+    return;
+  }
+  const old=state.ntfyTopic;
+  if(v===old)return;
+  if(state.ntfyEnabled)await cancelAllNtfy(old); // whatever is queued under the old topic must not fire
+  state.ntfyTopic=v;
+  state.ntfyPlan={};
+  save();
+  if(state.ntfyEnabled)await syncNtfyReminders();
+  updateNtfyStatusLine();
+}
+async function generateNtfyTopic(){
+  const t=makeNtfyTopic(),el=document.getElementById('ntfy-topic');
+  if(el)el.value=t;
+  await setNtfyTopic(t);
+}
+async function setNtfyTime(v){
+  if(!/^\d{1,2}:\d{2}$/.test(v||''))return;
+  state.ntfyTime=v;
+  save();
+  if(state.ntfyEnabled)await syncNtfyReminders(); // same dates, new clock time: each queued reminder is replaced in place
+  updateNtfyStatusLine();
+}
+async function sendNtfyTest(){
+  const el=document.getElementById('ntfy-status'),say=t=>{if(el)el.textContent=t;};
+  if(!isNtfyReady()){say(state.ntfyEnabled?'Enter a valid topic name first.':'Switch reminders on first.');return;}
+  say('Sending\u2026');
+  const r=await ntfyFetch(ntfyUrl(state.ntfyTopic,null,null,{title:'FORGE: test reminder',tags:'muscle'}),{method:'POST',body:'If this reached your phone, MEV reminders will too.'});
+  say(r.ok?(r.opaque?'Sent, but the browser wouldn\u2019t show ntfy\u2019s reply \u2014 check your phone.':'Sent \u2014 it should arrive in the ntfy app within a few seconds.'):'Couldn\u2019t send: '+r.error+'.');
+}
 function renderActiveMesoHero(){
   const el=document.getElementById('active-meso-hero');
   if(!el)return;
@@ -5081,6 +5458,7 @@ function renderHomeScreen(){
   renderActiveMesoHero();
   renderWeeklyConsistencyChart();
   try{renderMuscleConsistencyChart();}catch(e){console.error('muscle consistency render failed:',e);}
+  try{renderMevAlertBanner();}catch(e){console.error('MEV alert banner render failed:',e);}
 }
 function renderRoutinesList(){
   renderHomeScreen();
@@ -18634,6 +19012,22 @@ function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').
 [renderRoutinesList,renderExerciseDB,renderHistory,renderReview].forEach(fn=>{
   try{fn();}catch(e){console.error(fn.name+' failed during startup:',e);}
 });
+// MEV ALERTS + NTFY wiring (2026-11-27): coming back to the app refreshes the Home warning and re-checks the reminder plan (time has moved
+// on, so a new day may have entered ntfy's 3-day reach); a 10-minute tick does the same while the app stays open; a fresh open re-checks once
+// the first render has settled. All try/catch-isolated like every other startup piece.
+(function initMevAndNtfy(){
+  try{
+    document.addEventListener('visibilitychange',()=>{
+      try{if(!document.hidden){renderMevAlertBanner();queueNtfySync(3000);}}
+      catch(e){console.error('MEV visibility refresh failed:',e);}
+    });
+    setInterval(()=>{
+      try{if(!document.hidden)renderMevAlertBanner();queueNtfySync(1000);}
+      catch(e){console.error('MEV interval refresh failed:',e);}
+    },10*60*1000);
+    queueNtfySync(4000);
+  }catch(e){console.error('initMevAndNtfy failed:',e);}
+})();
 </script>
 </body>
 </html>
